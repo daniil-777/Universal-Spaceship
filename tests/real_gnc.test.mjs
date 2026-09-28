@@ -107,6 +107,37 @@ test('review focus: a failed lateral primary ends safe — a failed DEPART jet b
   }
 });
 
+test('review focus: a final start with a failed lateral primary breaks out at H2 (the flight rule), never tries to dock', () => {
+  // start=final begins at H2 inside the KOS: natural seed 4867 (a drawn P8) and seed 4 with a forced P7 flew a degraded
+  // FINAL and touched outside IDSS; the flight rule (no docking without torque-balanced lateral translation) holds here too
+  const runs = [{ seed: 4867, run: drawRun(4867, { start: 'final' }) }, { seed: 4, run: { ...drawRun(4, { start: 'final' }), failed: [JET_INDEX.P7] } }];
+  assert.deepEqual(runs[0].run.failed, [JET_INDEX.P8], 'seed 4867 draws a failed P8');
+  for (const o of runs) {
+    const sim = createRealSim(o), tag = `seed ${o.seed} (failed jet ${o.run.failed})`;
+    sim.run();
+    assert.equal(sim.rep.result, 'breakout', `${tag}: ${sim.rep.result} ${sim.rep.reason}`);
+    const abort = sim.events.find((e) => e.kind === 'abort'), bo = sim.events.find((e) => e.kind === 'BREAKOUT');
+    assert.ok(abort && abort.verified && /NO-GO: a lateral translation jet has failed/.test(abort.why) && bo && bo.truth.ok, `${tag}: ${JSON.stringify(abort)}`);
+    const phases = sim.events.filter((e) => e.kind === 'phase').map((e) => e.phase);
+    const phaseAtAbort = sim.events.slice(0, sim.events.indexOf(abort)).filter((e) => e.kind === 'phase').map((e) => e.phase).at(-1) ?? o.run.phase;
+    assert.ok(sim.rep.contact === null && !phases.includes(PH.FINAL) && phaseAtAbort === PH.H2, `${tag}: no capture attempt (abort in ${phaseAtAbort}, phases [${phases}])`);
+  }
+});
+
+test('review focus: an H1 NO-GO breakout with a failed +Y primary flies posigrade on the healthy +X set', () => {
+  // far seed 3689 draws a failed P2: the first-passing v+ (0.02, 0.10, 0) flew a lopsided 52 s +Y burn, and its truth
+  // drift re-entered the KOS under the worst drag (rAfter 199.5 m); a posigrade v+ keeps a wide margin
+  const sim = createRealSim({ seed: 3689, start: 'far' });
+  assert.deepEqual(sim.R.failed, [JET_INDEX.P2], 'seed 3689 draws a failed P2');
+  sim.run();
+  assert.equal(sim.rep.result, 'breakout', `${sim.rep.result} ${sim.rep.reason}`);
+  const abort = sim.events.find((e) => e.kind === 'abort'), bo = sim.events.find((e) => e.kind === 'BREAKOUT');
+  const phaseAtAbort = sim.events.slice(0, sim.events.indexOf(abort)).filter((e) => e.kind === 'phase').map((e) => e.phase).at(-1);
+  assert.ok(abort && abort.verified && /NO-GO: a lateral translation jet has failed/.test(abort.why) && phaseAtAbort === PH.H1, `abort in ${phaseAtAbort}: ${JSON.stringify(abort)}`);
+  assert.ok(bo && bo.truth.ok && bo.truth.rAfter >= 220, `truth ${JSON.stringify(bo && bo.truth)}`);
+  assert.ok(bo.screened[0] > 0 && Math.abs(bo.screened[1]) < 0.01, `posigrade: screened ${bo.screened}`);
+});
+
 test('review focus: the same seed flies the same mission (restart, MC reproducibility), step by step or in one run', () => {
   const a = createRealSim({ seed: 9, start: 'final' }), b = createRealSim({ seed: 9, start: 'final' });
   a.run(); while (!b.rep.done) b.step();

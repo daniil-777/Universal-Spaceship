@@ -106,8 +106,15 @@ export function createHud(root, on) {
           row('rates', c.rate.toFixed(3) + ' deg/s', c.rate <= IDSS.rate / DEG);
           row('misalignment', (c.mis * 100).toFixed(1) + ' cm', c.mis <= IDSS.mis);
           row('angle', c.ang.toFixed(2) + ' deg', c.ang <= IDSS.ang / DEG);
-        } else el('p', '', card, sim.rep.reason || 'The breakout left the keep-out sphere on a passively safe drift.');
-        el('p', '', card, `${(sim.t / 60).toFixed(1)} min · dv ${sim.rep.dv.toFixed(2)} m/s · ${(MASS0 - sim.mass).toFixed(1)} kg`);
+        } else if (res === 'breakout') {
+          // why: the last abort's reason. The sim ends a run as a breakout only after the truth drift has passed the
+          // breakout criterion, so the second line holds for every breakout, from any phase
+          const ab = sim.events.findLast((e) => e.kind === 'abort');
+          el('p', '', card, `Abort: ${ab ? ab.why : 'unknown'}.`);
+          el('p', '', card, 'The breakout burn put the ship on a passively safe drift (the breakout criterion, checked over 24 h for every drag within the bound).');
+        } else el('p', '', card, sim.rep.reason);
+        // the seed reproduces the run: ?scenario=real&start=...&seed=N
+        el('p', '', card, `seed ${sim.rep.run.seed} · ${(sim.t / 60).toFixed(1)} min · dv ${sim.rep.dv.toFixed(2)} m/s · ${(MASS0 - sim.mass).toFixed(1)} kg`);
       }, [['New run', () => { closeCard(); on.restart(); }], ['Back to the game', () => on.back()]], true);
     },
     closeCard,

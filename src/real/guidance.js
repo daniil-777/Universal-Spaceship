@@ -3,7 +3,7 @@
 // -> contact (judged by the sim). BREAKOUT pre-empts any phase; from H1 acquisition to the 3 m commit point a Rule-P
 // breakout must exist (Rule A), checked every 10 s. Output: the velocity command for the filter and the control.
 import { DEG, H1_POINT, H2_RHO, GO, KOS_R, FINAL_SPEED, RULE_P_TRANSFER, BREAKOUT_V, SHIP_PORT, LATERAL_SETS, JET_INDEX, portRel, inCone } from './consts.js';
-import { planTransfer, planMcc, planBreakout, ruleP } from './passive.js';
+import { planTransfer, planMcc, planBreakout, ruleP, BREAKOUT_GRID, POSIGRADE_GRID } from './passive.js';
 import { propagate } from './cw.js';
 import { THETA_FINAL, BURN_TOL, BURN_TOL_V } from './control.js';
 import { attError, omegaRel } from './rigid.js';
@@ -24,6 +24,11 @@ const QREF = [0, 0, 0, 1];
 // DEPART flies lopsided for minutes (155-276 s) and misses Rule P. A lost P3 is replaced by the aft P9/P11 pair
 // (DEPART 5-17 s, Rule P kept), so it flies the transfer like any other failed lateral jet.
 const DEPART_CRITICAL = Object.freeze([JET_INDEX.P1]);
+// the same principle for the breakout from H1 (the NO-GO with a failed lateral jet): the plan's first-passing v+
+// (0.02, 0.10, 0) flies lopsided for ~50 s with P2 or P4 failed, its radial lag slows the posigrade drift, and the worst
+// drag can bring the ship back into the KOS. A posigrade v+ puts no load on a Y set (with P2 or P4 failed it burns
+// 1-4 s on the +X set instead of ~50 s); the plan's grid stays behind it as the fallback
+const HEALTHY_BREAKOUT_GRID = Object.freeze([...POSIGRADE_GRID, ...BREAKOUT_GRID]);
 
 // failed: the jets FDIR has declared failed-off. Flight rule: no KOS entry without torque-balanced lateral translation.
 export function createGuidance({ phase = PH.TRANSFER, t0 = 0, events = [], failed = [] } = {}) {
@@ -49,8 +54,10 @@ export function createGuidance({ phase = PH.TRANSFER, t0 = 0, events = [], faile
   const inside = (x) => CORRIDOR_PHASES.includes(st.phase) || r(x) <= KOS_R;
   function breakout(t, why, nav) {
     // the at-once far breakout (from TRANSFER) flies the widest-margin v+ (planBreakout's widest); H1 and later fly the
-    // first one that passes: at H1 the grid's rAfter saturates at the current range, so a wider v+ only lengthens a lopsided burn
-    const plan = planBreakout(nav.x, { inside: inside(nav.x), widest: !inside(nav.x) && st.phase === PH.TRANSFER });
+    // first one that passes: at H1 the grid's rAfter saturates at the current range, so a wider v+ only lengthens a lopsided burn.
+    // With a failed lateral jet, a breakout outside the KOS after TRANSFER tries the posigrade v+ first
+    const into = inside(nav.x), far = st.phase === PH.TRANSFER;
+    const plan = planBreakout(nav.x, { inside: into, widest: !into && far, grid: !lateralOk && !into && !far ? HEALTHY_BREAKOUT_GRID : BREAKOUT_GRID });
     events.push({ t, kind: 'abort', why, verified: !!plan });
     setPhase(PH.BREAKOUT, t, why);
     startBurn('BREAKOUT', plan ? plan.v : BREAKOUT_V, t, nav.x);
@@ -133,6 +140,9 @@ export function createGuidance({ phase = PH.TRANSFER, t0 = 0, events = [], faile
         return cmd;
       }
       case PH.H2: {
+        // the flight rule holds at H2 as at H1: a start at H2 (start=final) is already inside the KOS, so a failed lateral
+        // jet breaks out before the hold instead of flying a degraded FINAL
+        if (!lateralOk) { breakout(t, 'NO-GO: a lateral translation jet has failed', nav); return update(t, nav); }
         cmd.vDes = [-box(axial - H2_RHO, GUID.boxH2), box(p[1], GUID.boxH2) - vr[1], box(p[2], GUID.boxH2) - vr[2]];
         if (t - st.tPhase < GUID.h2Hold) return cmd;
         if (goOk(nav, [axial - H2_RHO, p[1], p[2]], GUID.boxH2)) { st.noGoSince = null; setPhase(PH.FINAL, t, 'GO'); return update(t, nav); }
