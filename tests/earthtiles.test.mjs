@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { lonLatToTile, tileToLonLat, tileSizeKm, SOURCES, EOX_YEAR, sourceForLevel, tileUrl, HEIGHT_SOURCE, heightLevel, decodeTerrarium, levelFloat, pickInnerLevel, ringLevels, ringWindow, heightWindow, windowTiles, RING_TILES, HEIGHT_TILES, MAX_LAT } from '../src/earthtiles.js';
+import { lonLatToTile, tileToLonLat, tileSizeKm, SOURCES, EOX_YEAR, sourceForLevel, tileUrl, HEIGHT_SOURCE, heightLevel, decodeTerrarium, levelFloat, pickInnerLevel, ringLevels, ringWindow, heightWindow, windowTiles, RING_TILES, HEIGHT_TILES, MAX_LAT, R_KM, createLocalFrame, globeAxes, sunLocal, cameraPose, panTarget, clipPlanes } from '../src/earthtiles.js';
 
 const close = (a, b, eps, msg = '') => assert.ok(Math.abs(a - b) <= eps, `${msg} ${a} vs ${b}`);
 
@@ -54,6 +54,55 @@ test('height windows: 4 × 4 Terrarium tiles one level up cover the ring (more t
     close(h.x0 + h.off[0] * HEIGHT_TILES, w.x0 * s, 1e-9, 'ring start x'); close(h.y0 + h.off[1] * HEIGHT_TILES, w.y0 * s, 1e-9, 'ring start y');
     close(h.scale * HEIGHT_TILES, RING_TILES * s, 1e-12, 'ring width');
     assert.ok(w.x0 * s >= h.x0 && (w.x0 + RING_TILES) * s <= h.x0 + HEIGHT_TILES + 1e-9 && w.y0 * s >= h.y0 && (w.y0 + RING_TILES) * s <= h.y0 + HEIGHT_TILES + 1e-9, `covered at L${L}`);
+  }
+});
+
+test('local frame: the target is the origin, 1 km east drops 0.0785 m, north is −z, up is +y, height goes straight up', () => {
+  const f = createLocalFrame(45.976, 7.658), o = f.toLocal(45.976, 7.658, 0); o.forEach((c) => close(c, 0, 1e-9));
+  const kmDeg = 1 / (R_KM * Math.PI / 180);
+  const e = f.toLocal(45.976, 7.658 + kmDeg / Math.cos(45.976 * Math.PI / 180), 0); close(e[0], 1, 1e-4, 'east'); close(e[1], -1 / (2 * R_KM), 1e-7, 'drop'); close(e[2], 0, 2e-4);
+  const n = f.toLocal(45.976 + kmDeg, 7.658, 0); close(n[2], -1, 1e-4, 'north = −z'); close(n[0], 0, 1e-6);
+  const u = f.upAt(45.976, 7.658); close(u[0], 0, 1e-12); close(u[1], 1, 1e-12); close(u[2], 0, 1e-12);
+  close(f.toLocal(45.976, 7.658, 4.478)[1], 4.478, 1e-9, 'the Matterhorn’s height');
+});
+
+test('the textured globe turned into the local frame: a rotation that puts the target straight up', () => {
+  const f = createLocalFrame(-33.9, 151.2), [ax, ay, az] = globeAxes(f), lat = -33.9 * Math.PI / 180, lon = 151.2 * Math.PI / 180;
+  const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+  for (const a of [ax, ay, az]) close(Math.hypot(...a), 1, 1e-12);
+  close(dot(ax, ay), 0, 1e-12); close(dot(ax, az), 0, 1e-12); close(dot(ay, az), 0, 1e-12);
+  const p = [Math.cos(lat) * Math.cos(lon), Math.sin(lat), -Math.cos(lat) * Math.sin(lon)];
+  const w = [0, 1, 2].map((k) => ax[k] * p[0] + ay[k] * p[1] + az[k] * p[2]); close(w[0], 0, 1e-12); close(w[1], 1, 1e-12); close(w[2], 0, 1e-12);
+  const det = ax[0] * (ay[1] * az[2] - ay[2] * az[1]) - ax[1] * (ay[0] * az[2] - ay[2] * az[0]) + ax[2] * (ay[0] * az[1] - ay[1] * az[0]);
+  close(det, 1, 1e-12, 'a rotation, not a mirror');
+});
+
+test('the Sun: overhead near the subsolar point at the June solstice noon UTC, straight below on the other side', () => {
+  const t = Date.UTC(2026, 5, 21, 12), a = sunLocal(t, createLocalFrame(23.44, 0)), b = sunLocal(t, createLocalFrame(-23.44, 180));
+  assert.ok(a[1] > 0.995, 'up ' + a[1]); assert.ok(b[1] < -0.995, 'down ' + b[1]); close(Math.hypot(...a), 1, 1e-12);
+});
+
+test('camera pose: straight down with north up; heading 90° puts east up; tilted it backs away south and stays level-headed', () => {
+  const f = createLocalFrame(45.976, 7.658), v = { lat: 45.976, lon: 7.658, rangeKm: 50, tilt: 0, heading: 0, groundKm: 1 };
+  let p = cameraPose(f, v); close(p.pos[0], 0, 1e-9); close(p.pos[1], 51, 1e-9); close(p.pos[2], 0, 1e-9); close(p.up[0], 0, 1e-9); close(p.up[2], -1, 1e-9); close(p.look[1], 1, 1e-9);
+  p = cameraPose(f, { ...v, heading: Math.PI / 2 }); close(p.up[0], 1, 1e-9); close(p.up[2], 0, 1e-9);
+  p = cameraPose(f, { ...v, tilt: Math.PI / 3 }); close(p.pos[1], 26, 1e-9); close(p.pos[2], 50 * Math.sin(Math.PI / 3), 1e-9, 'south of the target');
+  assert.ok(p.camLat < v.lat); close(p.camLon, v.lon, 1e-9); close(p.camAltKm, 26, 1e-9); close(Math.hypot(...p.up), 1, 1e-12);
+});
+
+test('panning moves the target along the ground in the view’s axes; latitude clamps at the Mercator limit, longitude wraps', () => {
+  const kmPerDeg = R_KM * Math.PI / 180;
+  let v = panTarget({ lat: 0, lon: 0, heading: 0 }, 0, kmPerDeg); close(v.lat, 1, 1e-12); close(v.lon, 0, 1e-12);
+  v = panTarget({ lat: 0, lon: 0, heading: Math.PI / 2 }, 0, kmPerDeg); close(v.lat, 0, 1e-12); close(v.lon, 1, 1e-12);
+  v = panTarget({ lat: 0, lon: 0, heading: 0 }, kmPerDeg, 0); close(v.lon, 1, 1e-12);
+  v = panTarget({ lat: 85, lon: 0, heading: 0 }, 0, 500); close(v.lat, MAX_LAT, 1e-12);
+  v = panTarget({ lat: 0, lon: 179.5, heading: 0 }, kmPerDeg, 0); close(v.lon, -179.5, 1e-9);
+});
+
+test('clip planes: near follows the clearance, far reaches past the horizon, the depth range stays usable', () => {
+  for (const alt of [0.3, 8, 420, 20000]) {
+    const c = clipPlanes(alt, alt), horizon = Math.sqrt(alt * (2 * R_KM + alt));
+    assert.ok(c.far > horizon, `far at ${alt} km`); assert.ok(c.near >= 0.02 && c.near <= 50); assert.ok(c.far / c.near < 1e5, `depth range at ${alt} km`);
   }
 });
 
