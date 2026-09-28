@@ -13,8 +13,9 @@ import { createTileLoader } from './earthloader.js';
 const T = 256, GRID = 128, SHOW_AT = 0.9, HIDE_AT = 0.5, UPLOADS_PER_FRAME = 6;
 
 const VERT = /* glsl */`uniform sampler2D tHeight; uniform vec2 uHOff; uniform float uHScale, uHSize, uHeightK, uStepKm;
-  attribute vec3 aUp; varying vec2 vUv; varying vec3 vW, vN, vUp;
-  float hAt(vec2 t) { vec3 c = floor(texture2D(tHeight, t).rgb * 255.0 + 0.5); return max(c.r * 256.0 + c.g + c.b / 256.0 - 32768.0, 0.0); }
+  attribute vec3 aUp; varying vec2 vUv; varying vec3 vW, vN, vUp; varying float vSea;
+  float hRaw(vec2 t) { vec3 c = floor(texture2D(tHeight, t).rgb * 255.0 + 0.5); return c.r * 256.0 + c.g + c.b / 256.0 - 32768.0; }
+  float hAt(vec2 t) { return max(hRaw(t), 0.0); }
   float hBil(vec2 uv) {                                   // Terrarium RGB must not be filtered by the hardware: 4 nearest taps
     vec2 p = (uHOff + uv * uHScale) * uHSize - 0.5, f = fract(p), b = (floor(p) + 0.5) / uHSize; float d = 1.0 / uHSize;
     return mix(mix(hAt(b), hAt(b + vec2(d, 0.0)), f.x), mix(hAt(b + vec2(0.0, d)), hAt(b + vec2(d)), f.x), f.y); }
@@ -22,6 +23,8 @@ const VERT = /* glsl */`uniform sampler2D tHeight; uniform vec2 uHOff; uniform f
     vUv = uv; float k = 0.001 * uHeightK, du = ${(1 / GRID).toFixed(7)};
     float h = hBil(uv) * k, hx = hBil(uv + vec2(du, 0.0)) * k, hy = hBil(uv + vec2(0.0, du)) * k;
     vUp = normalize(aUp); vN = normalize(vUp + vec3(-(hx - h), 0.0, -(hy - h)) / uStepKm);   // uv.y runs south = +z
+    float raw = hRaw((floor((uHOff + uv * uHScale) * uHSize) + 0.5) / uHSize);
+    vSea = raw < -1.0 && raw > -12000.0 ? 1.0 : 0.0;          // below sea level (an empty atlas slot decodes to -32768: unknown, not sea)
     vec4 w = modelMatrix * vec4(position + vUp * h, 1.0); vW = w.xyz; gl_Position = projectionMatrix * viewMatrix * w; }`;
 
 // A coarser ring leaves a hole where the next finer ring is fully in (its interior, not its fade band): each ring's relief
@@ -29,13 +32,15 @@ const VERT = /* glsl */`uniform sampler2D tHeight; uniform vec2 uHOff; uniform f
 // ring's real ones and hide them from the depth test. Haze grows with the air crossed (the path below uAirTop km), not
 // with the distance, so a view straight down from orbit stays clear while a low view's horizon fades.
 const FRAG = /* glsl */`uniform sampler2D tColor, tMask, tInner; uniform vec2 uCOff, uVRange, uInnerMin, uInnerCOff; uniform vec3 uSun, uHazeCol;
-  uniform float uVis, uHazeK, uHazeL, uInnerOn, uInnerScale, uAirTop;
-  varying vec2 vUv; varying vec3 vW, vN, vUp;
+  uniform float uVis, uHazeK, uHazeL, uInnerOn, uInnerScale, uAirTop; uniform vec3 uSeaCol;
+  varying vec2 vUv; varying vec3 vW, vN, vUp; varying float vSea;
   void main() {
     vec3 col = texture2D(tColor, uCOff + vUv).rgb; float m = texture2D(tMask, uCOff + vUv).r;
     vec2 iu = (vUv - uInnerMin) * uInnerScale; float inner = texture2D(tInner, uInnerCOff + iu).r;
     if (vUv.y < uVRange.x || vUv.y > uVRange.y || m < 0.5) discard;          // beyond ±85° or a tile not (yet) in
     if (uInnerOn > 0.5 && min(iu.x, iu.y) > 0.1 && max(iu.x, iu.y) < 0.9 && inner > 0.5) discard;
+    float lum = dot(col, vec3(0.2126, 0.7152, 0.0722));
+    col = mix(col, uSeaCol, vSea * (1.0 - smoothstep(0.004, 0.03, lum)));   // Sentinel-2 cloudless draws the open sea near-black
     float sunUp = dot(vUp, uSun), day = smoothstep(-0.08, 0.12, sunUp);
     float relief = clamp(mix(1.0, dot(vN, uSun) / max(sunUp, 0.15), 0.8), 0.35, 1.6);   // slopes relative to flat ground: the photo keeps its own light
     col *= mix(0.03, 1.0, day) * mix(1.0, relief, day);
@@ -71,7 +76,7 @@ export function createEarthRings(scene, renderer, { loader = createTileLoader() 
     const mask = new THREE.DataTexture(new Uint8Array(RING_TILES * RING_TILES), RING_TILES, RING_TILES, THREE.RedFormat);
     mask.wrapS = mask.wrapT = THREE.RepeatWrapping; mask.minFilter = mask.magFilter = THREE.NearestFilter; mask.needsUpdate = true;
     const mat = new THREE.ShaderMaterial({ vertexShader: VERT, fragmentShader: FRAG, transparent: true, depthWrite: true, polygonOffset: true,
-      uniforms: { tColor: { value: color }, tHeight: { value: height }, tMask: { value: mask }, tInner: { value: mask }, uInnerMin: { value: new THREE.Vector2() }, uInnerCOff: { value: new THREE.Vector2() }, uInnerOn: { value: 0 }, uInnerScale: { value: 2 }, uAirTop: { value: 8 },
+      uniforms: { tColor: { value: color }, tHeight: { value: height }, tMask: { value: mask }, tInner: { value: mask }, uInnerMin: { value: new THREE.Vector2() }, uInnerCOff: { value: new THREE.Vector2() }, uInnerOn: { value: 0 }, uInnerScale: { value: 2 }, uAirTop: { value: 8 }, uSeaCol: { value: new THREE.Color(0.012, 0.035, 0.1) },
         uCOff: { value: new THREE.Vector2() }, uHOff: { value: new THREE.Vector2() },
         uHScale: { value: 1 }, uHSize: { value: HEIGHT_TILES * T }, uHeightK: { value: 0 }, uStepKm: { value: 1 }, uVRange: { value: new THREE.Vector2(0, 1) }, uVis: { value: 0 },
         uSun: { value: new THREE.Vector3(0, 1, 0) }, uHazeCol: { value: new THREE.Color(0.62, 0.74, 0.9) }, uHazeK: { value: 0 }, uHazeL: { value: 60 } } });
