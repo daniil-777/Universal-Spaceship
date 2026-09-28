@@ -335,7 +335,7 @@ export function createSpace(scene, { seed = 1, texturePath = 'textures/' } = {})
   };
 
   return {
-    sunDir, get sunDirWorld() { return sunDirWorld; }, get airSunDirWorld() { return airSunWorld.copy(SUN0).applyQuaternion(root.quaternion); }, get sunLit() { return sunLitNow; }, lights: { sun: sunLight, fill }, root, ready: earth.ready,   // airSunDirWorld: the air's own classic sun, whatever the orbit's Sun does; sunLit: 0 in the Earth's shadow
+    sunDir, get sunDirWorld() { return sunDirWorld; }, get airSunDirWorld() { return airSunWorld.copy(SUN0).applyQuaternion(root.quaternion); }, get sunLit() { return sunLitNow; }, lights: { sun: sunLight, fill }, root, ready: earth.ready, earthTextures: earth.loaded,   // airSunDirWorld: the air's own classic sun, whatever the orbit's Sun does; sunLit: 0 in the Earth's shadow
     setYaw(target) { yawTarget = target; dirty = true; },
     setAltitude(a) {                                                  // 0 = orbit, 1 = low pass (the Earth comes ~27 % closer, its limb rises, airliners appear)
       altTarget = Math.max(0, Math.min(1, a));

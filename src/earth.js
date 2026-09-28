@@ -92,7 +92,7 @@ const ATMO_FS = /* glsl */`uniform vec3 uC, uL, uSunCol; uniform float uGain, uM
     gl_FragColor = vec4(ins + dither(), 1.0 - dot(Tv, vec3(0.3333))); }`;                      // rgb added, background × (1 − alpha)
 
 /** @param {{ texturePath: string, R: number, position: THREE.Vector3, axis: THREE.Vector3, sunDir: THREE.Vector3, sunCol: THREE.Color, spin?: number, spin0?: number }} o */
-export function createEarth({ texturePath, R, position, axis, sunDir, sunCol, spin = 0.004, spin0 = 0 }) {
+export function createEarth({ texturePath, R, position, axis, sunDir, sunCol, spin = 0.004, spin0 = 0, textures: shared = null }) {
   const H = R * 0.007;                                                                          // scale height (visual: ~0.7 % of R)
   const beta = new THREE.Vector3(0.04, 0.10, 0.25).divideScalar(H);                             // Rayleigh extinction per unit (vertical optical depth 0.04/0.10/0.25)
   const beta0 = beta.clone(), mie0 = 0.5 / (2 * Math.sqrt(Math.PI * R * H / 2)); let scale = 1;               // setScale() rescales the air's world-space lengths
@@ -116,23 +116,24 @@ export function createEarth({ texturePath, R, position, axis, sunDir, sunCol, sp
   const group = new THREE.Group(); group.position.copy(position); group.add(tilted, atmo);
 
   // Textures: any that fails is replaced by a neutral 1×1 fallback; the textured look needs the day and the packed map.
+  // A second globe (the Earth zoom view) passes the first one's `loaded` promise: it shares those textures, never owns them.
   const loader = new THREE.TextureLoader(), textures = []; let disposed = false;
   const load = (name, srgb) => new Promise((res) => loader.load(texturePath + name,
     (t) => { t.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace; t.anisotropy = 8; t.wrapS = THREE.RepeatWrapping; res(t); }, undefined,
     () => { console.warn(`space: texture ${name} failed to load`); res(null); }));
-  const flat = (r, g, b) => { const t = new THREE.DataTexture(new Uint8Array([r, g, b, 255]), 1, 1); t.needsUpdate = true; return t; };
-  const ready = Promise.all([load('earth_day_2048.jpg', true), load('earth_night_2048.jpg', true), load('earth_bump_roughness_clouds_2048.jpg'),
-    load('earth_normal_2048.jpg'), load('earth_specular_2048.jpg')]).then(([day, night, pack, normal, spec]) => {
-    if (disposed) { [day, night, pack, normal, spec].forEach((t) => t && t.dispose()); return; }
-    if (!day || !pack) { textures.push(...[day, night, pack, normal, spec].filter(Boolean)); return; }
-    night = night || flat(0, 0, 0); normal = normal || flat(128, 128, 255); spec = spec || flat(0, 0, 0);
-    textures.push(day, night, pack, normal, spec);
-    const u = groundMat.uniforms; u.tDay.value = day; u.tNight.value = night; u.tPack.value = pack; u.tNormal.value = normal; u.tSpec.value = spec;
+  const flat = (r, g, b) => { const t = new THREE.DataTexture(new Uint8Array([r, g, b, 255]), 1, 1); t.needsUpdate = true; textures.push(t); return t; };
+  const loaded = shared || Promise.all([load('earth_day_2048.jpg', true), load('earth_night_2048.jpg', true), load('earth_bump_roughness_clouds_2048.jpg'),
+    load('earth_normal_2048.jpg'), load('earth_specular_2048.jpg')]).then(([day, night, pack, normal, spec]) => ({ day, night, pack, normal, spec }));
+  const ready = loaded.then(({ day, night, pack, normal, spec }) => {
+    if (!shared) textures.push(...[day, night, pack, normal, spec].filter(Boolean));
+    if (disposed) { textures.forEach((t) => t.dispose()); return; }
+    if (!day || !pack) return;
+    const u = groundMat.uniforms; u.tDay.value = day; u.tNight.value = night || flat(0, 0, 0); u.tPack.value = pack; u.tNormal.value = normal || flat(128, 128, 255); u.tSpec.value = spec || flat(0, 0, 0);
     u.uHasTex.value = 1; cloudMat.uniforms.tPack.value = pack; cloudMat.uniforms.uHasTex.value = 1;
   });
 
   return {
-    group, ready, R, centre: atmoMat.uniforms.uC.value,
+    group, ready, loaded, R, centre: atmoMat.uniforms.uC.value,
     update(dt) {
       ground.rotation.y += dt * spin; clouds.rotation.y += dt * spin * 1.12;
       groundMat.uniforms.uCloudShift.value = (ground.rotation.y - clouds.rotation.y) / (2 * Math.PI);   // cloud deck → ground UV offset
