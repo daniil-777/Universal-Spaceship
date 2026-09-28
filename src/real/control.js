@@ -40,7 +40,9 @@ export function createControl({ jets = createJets(), inertia = INERTIA } = {}) {
       const fOne = Math.abs(jets.F[set[0] * 3 + ax]), mib = MIB_REQ.P, pulse = (k) => (k * fOne * mib) / mass;
       let use = set, on = 0;
       if (ax === 0 && adv <= 2.2 * pulse(1)) { use = [set[0]]; on = adv > 0.5 * pulse(1) ? mib : 0; }
-      else if (ax !== 0 && adv <= 0.5 * pulse(set.length)) {
+      // lateral (Y, Z) fine trims compare against the healthy pair's pulse, not the current set size, so a
+      // pair degraded by a failed jet still routes a fine residual to the vernier instead of a lone primary
+      else if (ax !== 0 && adv <= 0.5 * pulse(2)) {
         const v = VERNIER_TRANS[2 * (ax - 1) + (dv > 0 ? 0 : 1)], fv = Math.abs(jets.F[v * 3 + ax]);
         use = [v]; on = Math.min(CYCLE, (adv * mass) / fv); if (on < MIB_REQ.V) on = adv > (0.5 * fv * MIB_REQ.V) / mass ? MIB_REQ.V : 0;
       } else on = Math.max(mib, Math.min(CYCLE, (adv * mass) / (fOne * use.length)));

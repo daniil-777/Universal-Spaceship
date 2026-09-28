@@ -1,8 +1,8 @@
 // Real spacecraft S1: attitude and translation control (spec sections 6 and 10).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { N, DEG, T_ORB, MASS0 } from '../src/real/consts.js';
-import { createControl, MODES, BURN_TOL } from '../src/real/control.js';
+import { N, DEG, T_ORB, MASS0, JET_INDEX } from '../src/real/consts.js';
+import { createControl, MODES, BURN_TOL, BURN_TOL_V } from '../src/real/control.js';
 import { createJets } from '../src/real/jets.js';
 import { rigidStep, attError, omegaRel } from '../src/real/rigid.js';
 import { qFromAxisAngle, qInvRotate, qRotate, qMul, mulberry32 } from '../src/mathx.js';
@@ -59,6 +59,17 @@ test('burn trims reach the target velocity within 1.2 mm/s per axis', () => {
     for (let s = 0; s < 10; s++) { jets.active(on, s * 0.01, F, T); qRotate(q, F, a); for (let i = 0; i < 3; i++) x[3 + i] += (a[i] / MASS0) * 0.01; rigidStep(q, w, 0.01, { torque: T }); }
   }
   for (let i = 0; i < 3; i++) assert.ok(Math.abs(x[3 + i] - vDes[i]) <= BURN_TOL, `axis ${i}: ${x[3 + i]}`);
+});
+
+test('failed-jet lateral trim: a P-mode burn with P2 failed converges a 1.1 mm/s Y residual to <= BURN_TOL_V within 30 s', () => {
+  const jets = createJets({ failed: [JET_INDEX.P2] }), ctrl = createControl({ jets }), q = Float64Array.from([0, 0, 0, 1]), w = lvlhRate(q);
+  const x = new Float64Array(6), F = new Float64Array(3), T = new Float64Array(3), a = new Float64Array(3), vDes = [0, 0, 0];
+  x[4] = -0.0011;
+  for (let k = 0; k < 300; k++) {
+    const on = jets.schedule(ctrl.update(x, q, w, MASS0, { vDes, burn: true, mode: 'P' }));
+    for (let s = 0; s < 10; s++) { jets.active(on, s * 0.01, F, T); qRotate(q, F, a); for (let i = 0; i < 3; i++) x[3 + i] += (a[i] / MASS0) * 0.01; rigidStep(q, w, 0.01, { torque: T }); }
+  }
+  assert.ok(Math.abs(x[4] - vDes[1]) <= BURN_TOL_V, `Y residual: ${x[4]}`);
 });
 
 test('nav: truth passes through; noisy lidar at rho = 20 m tracks a coasting ship to < 3 cm and < 1 mm/s RMS', () => {
