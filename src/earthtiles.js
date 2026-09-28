@@ -42,15 +42,18 @@ export function levelFloat(rangeKm, latDeg, fovYDeg, viewportPx) {
   const kmPerScreenPx = rangeKm * 2 * Math.tan(fovYDeg * DEG / 2) / viewportPx;
   return Math.log2(KM_PER_PX0 * Math.cos(clampLat(latDeg) * DEG) / kmPerScreenPx);
 }
-// Rings sit on EVEN levels (the inner one at or finer than the ideal level): a change of level then keeps three of the
-// four rings. ±0.3 of hysteresis stops the inner ring flickering between two levels.
+// The inner ring sits at or finer than the ideal level (±0.3 of hysteresis stops it flickering between two levels). The
+// rings step ONE level (each only 2× coarser than the next, so the screen's edges stay nearly as sharp as its centre and
+// keep the same imagery source), and a fifth ring two levels further out reaches the horizon of a tilted view. A change
+// of level keeps three of the five rings.
+export const RING_COUNT = 5;
 export function pickInnerLevel(zf, current = null) {
-  let L = current ?? 2 * Math.ceil(zf / 2);
-  while (zf > L + 0.3 && L < MAX_LEVEL) L += 2;
-  while (zf < L - 2.3 && L > MIN_LEVEL) L -= 2;
+  let L = current ?? Math.ceil(zf);
+  while (zf > L + 0.3 && L < MAX_LEVEL) L += 1;
+  while (zf < L - 1.3 && L > MIN_LEVEL) L -= 1;
   return Math.max(MIN_LEVEL, Math.min(MAX_LEVEL, L));
 }
-export const ringLevels = (L0) => [L0, L0 - 2, L0 - 4, L0 - 6].filter((L) => L >= 2);
+export const ringLevels = (L0) => [L0, L0 - 1, L0 - 2, L0 - 3, L0 - 5].filter((L) => L >= 2);
 
 // 8 × 8 tiles around the point; the origin sits on even tile indices so the 4 × 4 height tiles one level up line up.
 export function ringWindow(lonDeg, latDeg, level) {

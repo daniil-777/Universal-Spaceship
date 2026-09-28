@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { lonLatToTile, tileToLonLat, tileSizeKm, SOURCES, EOX_YEAR, sourceForLevel, tileUrl, HEIGHT_SOURCE, heightLevel, decodeTerrarium, levelFloat, pickInnerLevel, ringLevels, ringWindow, heightWindow, windowTiles, RING_TILES, HEIGHT_TILES, MAX_LAT, R_KM, createLocalFrame, globeAxes, sunLocal, cameraPose, panTarget, clipPlanes } from '../src/earthtiles.js';
+import { lonLatToTile, tileToLonLat, tileSizeKm, SOURCES, EOX_YEAR, sourceForLevel, tileUrl, HEIGHT_SOURCE, heightLevel, decodeTerrarium, levelFloat, pickInnerLevel, ringLevels, ringWindow, heightWindow, windowTiles, RING_TILES, RING_COUNT, HEIGHT_TILES, MAX_LAT, R_KM, createLocalFrame, globeAxes, sunLocal, cameraPose, panTarget, clipPlanes } from '../src/earthtiles.js';
 
 const close = (a, b, eps, msg = '') => assert.ok(Math.abs(a - b) <= eps, `${msg} ${a} vs ${b}`);
 
@@ -30,13 +30,14 @@ test('Terrarium heights: metres from RGB; the sea floor is sea level; heights on
   assert.equal(heightLevel(18), 13); assert.equal(heightLevel(10), 9); assert.equal(heightLevel(0), 0);
 });
 
-test('level of detail: the screen pixel footprint picks the level; rings sit on even levels with hysteresis', () => {
+test('level of detail: the screen pixel footprint picks the level; the inner ring is at or finer than it, with hysteresis; rings step one level', () => {
   close(levelFloat(420, 0, 45, 900), 8.661, 0.005, 'ISS altitude at the equator'); close(levelFloat(420, 60, 45, 900), 7.661, 0.005, 'a level coarser at 60°');
   assert.ok(levelFloat(1, 45, 45, 900) > levelFloat(10, 45, 45, 900));
-  assert.equal(pickInnerLevel(15.4), 16); assert.equal(pickInnerLevel(16.2, 16), 16); assert.equal(pickInnerLevel(16.4, 16), 18);
-  assert.equal(pickInnerLevel(13.8, 16), 16); assert.equal(pickInnerLevel(13.6, 16), 14);
+  assert.equal(pickInnerLevel(15.4), 16); assert.equal(pickInnerLevel(16.2, 16), 16); assert.equal(pickInnerLevel(16.4, 16), 17);
+  assert.equal(pickInnerLevel(14.8, 16), 16); assert.equal(pickInnerLevel(14.6, 16), 15);
   assert.equal(pickInnerLevel(30), 18); assert.equal(pickInnerLevel(-5), 4); assert.equal(pickInnerLevel(30, 16), 18);
-  assert.deepEqual(ringLevels(16), [16, 14, 12, 10]); assert.deepEqual(ringLevels(6), [6, 4, 2]); assert.deepEqual(ringLevels(4), [4, 2]);
+  assert.equal(RING_COUNT, 5);
+  assert.deepEqual(ringLevels(16), [16, 15, 14, 13, 11]); assert.deepEqual(ringLevels(5), [5, 4, 3, 2]); assert.deepEqual(ringLevels(4), [4, 3, 2]);
 });
 
 test('ring windows: 8 × 8 tiles on even indices around the point, 64 distinct toroidal slots, inner tiles first, poles and the antimeridian', () => {
@@ -49,7 +50,7 @@ test('ring windows: 8 × 8 tiles on even indices around the point, 64 distinct t
 });
 
 test('height windows: 4 × 4 Terrarium tiles one level up cover the ring (more than cover it where heights stop at 13)', () => {
-  for (const [lon, lat] of [[7.658, 45.976], [-74, 40.7], [139.7, 35.7], [-150, -60]]) for (let L = 4; L <= 18; L += 2) {
+  for (const [lon, lat] of [[7.658, 45.976], [-74, 40.7], [139.7, 35.7], [-150, -60]]) for (let L = 2; L <= 18; L += 1) {
     const w = ringWindow(lon, lat, L), h = heightWindow(w), s = 2 ** (h.level - L);
     close(h.x0 + h.off[0] * HEIGHT_TILES, w.x0 * s, 1e-9, 'ring start x'); close(h.y0 + h.off[1] * HEIGHT_TILES, w.y0 * s, 1e-9, 'ring start y');
     close(h.scale * HEIGHT_TILES, RING_TILES * s, 1e-12, 'ring width');
@@ -106,7 +107,7 @@ test('clip planes: near follows the clearance, far reaches past the horizon, the
   }
 });
 
-test('four rings fit the 110 MB GPU budget', () => {
+test('the rings fit a 140 MB GPU budget', () => {
   const colour = (RING_TILES * 256) ** 2 * 4 * 4 / 3, height = (HEIGHT_TILES * 256) ** 2 * 4, geometry = (129 * 129 * 8 + 128 * 128 * 6) * 4;
-  assert.ok(4 * (colour + height + geometry) <= 110 * 2 ** 20, `${(4 * (colour + height + geometry) / 2 ** 20).toFixed(1)} MB`);
+  assert.ok(RING_COUNT * (colour + height + geometry) <= 140 * 2 ** 20, `${(RING_COUNT * (colour + height + geometry) / 2 ** 20).toFixed(1)} MB`);
 });
