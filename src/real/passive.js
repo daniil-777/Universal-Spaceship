@@ -99,11 +99,18 @@ export function planMcc(x, tLeft) {
 export const BREAKOUT_GRID = Object.freeze([
   BREAKOUT_V, [0.02, 0.15, 0], [0.04, 0.10, 0], [0.04, 0.15, 0], [0.0, 0.15, 0], [0.02, 0.20, 0], [0.06, 0.2, 0], [0.1, 0.2, 0],
 ]);
-export function planBreakout(x, { b = DRAG_B, inside = true } = {}) {
+// widest: take the passing v+ with the largest 24 h minimum range (rAfter) instead of the first one. Outside the KOS a
+// finite burn's radial offset dY drifts along-track at 6n dY, so a first-passing plan with a few metres of margin is
+// not passively safe once flown
+export function planBreakout(x, { b = DRAG_B, inside = true, widest = false } = {}) {
+  let best = null;
   for (const v of BREAKOUT_GRID) {
     const xp = Float64Array.from([x[0], x[1], x[2], v[0], v[1], v[2]]);
     const chk = breakoutOk(xp, { b, inside });
-    if (chk.ok) return { v: Array.from(v), dv: Math.hypot(v[0] - x[3], v[1] - x[4], v[2] - x[5]), ...chk };
+    if (!chk.ok) continue;
+    const c = { v: Array.from(v), dv: Math.hypot(v[0] - x[3], v[1] - x[4], v[2] - x[5]), ...chk };
+    if (!widest) return c;
+    if (!best || c.rAfter > best.rAfter) best = c;
   }
-  return null;
+  return best;
 }

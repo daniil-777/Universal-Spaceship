@@ -2,7 +2,7 @@
 // (X, Y box-kept while Z swings to 0, then the Zd null) -> H1 (>= 300 s, GO) -> CORRIDOR -> H2 (60 s, GO) -> FINAL
 // -> contact (judged by the sim). BREAKOUT pre-empts any phase; from H1 acquisition to the 3 m commit point a Rule-P
 // breakout must exist (Rule A), checked every 10 s. Output: the velocity command for the filter and the control.
-import { DEG, H1_POINT, H2_RHO, GO, KOS_R, FINAL_SPEED, RULE_P_TRANSFER, BREAKOUT_V, SHIP_PORT, LATERAL_SETS, TRANS_SETS, portRel, inCone } from './consts.js';
+import { DEG, H1_POINT, H2_RHO, GO, KOS_R, FINAL_SPEED, RULE_P_TRANSFER, BREAKOUT_V, SHIP_PORT, LATERAL_SETS, JET_INDEX, portRel, inCone } from './consts.js';
 import { planTransfer, planMcc, planBreakout, ruleP } from './passive.js';
 import { propagate } from './cw.js';
 import { THETA_FINAL, BURN_TOL, BURN_TOL_V } from './control.js';
@@ -19,13 +19,16 @@ export const COAST_DB = 1 * DEG;
 export const GUID = Object.freeze({ h1Hold: 300, h2Hold: 60, noGoMax: 1800, boEvery: 10, commit: 3, burnMax: 900, boxH1: 3, boxH2: 0.5 });
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 const QREF = [0, 0, 0, 1];
+// the far-start DEPART is a radial -Y burn (planned radial dv -0.30 to -0.92 m/s over the whole T search, never +Y).
+// P1 is the only -Y primary at the nose: without it just the 107 N vernier V1 balances the aft -Y thrust, so the
+// DEPART flies lopsided for minutes (155-276 s) and misses Rule P. A lost P3 is replaced by the aft P9/P11 pair
+// (DEPART 5-17 s, Rule P kept), so it flies the transfer like any other failed lateral jet.
+const DEPART_CRITICAL = Object.freeze([JET_INDEX.P1]);
 
 // failed: the jets FDIR has declared failed-off. Flight rule: no KOS entry without torque-balanced lateral translation.
 export function createGuidance({ phase = PH.TRANSFER, t0 = 0, events = [], failed = [] } = {}) {
   const lateralOk = !LATERAL_SETS.some((set) => set.some((i) => failed.includes(i)));
-  // the DEPART of a far-start transfer is a radial -Y burn (TRANS_SETS[3], P1 and P3): its planned radial dv is
-  // -0.30 to -0.92 m/s over the whole T search, never +Y
-  const departOk = !TRANS_SETS[3].some((i) => failed.includes(i));
+  const departOk = !DEPART_CRITICAL.some((i) => failed.includes(i));
   const st = { phase, tPhase: t0, burn: null, plan: null, tDep: null, mcc: [false, false], boAvail: true, boT: -Infinity, committed: false, noGoSince: null, lastZ: null };
   const p = new Float64Array(3), e = new Float64Array(3), we = new Float64Array(3), vr = new Float64Array(3);
   const setPhase = (ph, t, why = '') => { st.phase = ph; st.tPhase = t; events.push({ t, kind: 'phase', phase: ph, why }); };
@@ -45,7 +48,9 @@ export function createGuidance({ phase = PH.TRANSFER, t0 = 0, events = [], faile
   }
   const inside = (x) => CORRIDOR_PHASES.includes(st.phase) || r(x) <= KOS_R;
   function breakout(t, why, nav) {
-    const plan = planBreakout(nav.x, { inside: inside(nav.x) });
+    // the at-once far breakout (from TRANSFER) flies the widest-margin v+ (planBreakout's widest); H1 and later fly the
+    // first one that passes: at H1 the grid's rAfter saturates at the current range, so a wider v+ only lengthens a lopsided burn
+    const plan = planBreakout(nav.x, { inside: inside(nav.x), widest: !inside(nav.x) && st.phase === PH.TRANSFER });
     events.push({ t, kind: 'abort', why, verified: !!plan });
     setPhase(PH.BREAKOUT, t, why);
     startBurn('BREAKOUT', plan ? plan.v : BREAKOUT_V, t, nav.x);
@@ -83,7 +88,7 @@ export function createGuidance({ phase = PH.TRANSFER, t0 = 0, events = [], faile
     switch (st.phase) {
       case PH.TRANSFER: {
         if (st.tDep === null) {
-          // flight rule (deviation 11) at the start: a failed jet of the DEPART set would fly the departure lopsided
+          // flight rule (deviation 11) at the start: a failed DEPART_CRITICAL jet would fly the departure lopsided
           // for minutes and miss Rule P, so that run breaks out before the transfer; any other failed lateral jet
           // flies the transfer and breaks out at H1 (NO-GO there)
           if (!departOk) { breakout(t, 'NO-GO: a lateral translation jet has failed', nav); return update(t, nav); }

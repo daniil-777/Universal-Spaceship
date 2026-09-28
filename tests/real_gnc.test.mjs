@@ -85,10 +85,13 @@ test('review focus: a failed translation-critical primary (P1-P8) ends safe, nev
 });
 
 test('review focus: a failed lateral primary ends safe — a failed DEPART jet breaks out at once, others break out at H1', () => {
-  // six forced P1 far starts whose degraded -Y departures broke Rule P or ran out of propellant: break out at t = 0;
-  // seed 64 (drawn with a failed P7) and a forced P2 (seed 20, whose far-start breakout was not passively safe): fly to H1
+  // forced P1 far starts: the six whose degraded -Y departures broke Rule P or ran out of propellant, and seed 181, whose
+  // first-passing far breakout kept only a few metres of margin: break out at t = 0 on the widest-margin v+;
+  // seed 64 (drawn with a failed P7), a forced P2 (seed 20, whose far-start breakout was not passively safe) and a
+  // forced P3 (seed 127: the aft P9/P11 pair replaces it, so its DEPART is healthy): fly to H1
   const runs = [4, 7, 13, 20, 24, 25].map((s) => ({ seed: s, atOnce: true, run: { ...drawRun(s, { start: 'far' }), failed: [JET_INDEX.P1] } }));
   runs.push({ seed: 64, atOnce: false, run: drawRun(64, { start: 'far' }) }, { seed: 20, atOnce: false, run: { ...drawRun(20, { start: 'far' }), failed: [JET_INDEX.P2] } });
+  runs.push({ seed: 181, atOnce: true, run: { ...drawRun(181, { start: 'far' }), failed: [JET_INDEX.P1] } }, { seed: 127, atOnce: false, run: { ...drawRun(127, { start: 'far' }), failed: [JET_INDEX.P3] } });
   assert.deepEqual(runs[6].run.failed, [JET_INDEX.P7], 'seed 64 draws a failed P7');
   for (const o of runs) {
     const sim = createRealSim(o), tag = `seed ${o.seed} (failed jet ${o.run.failed})`;
