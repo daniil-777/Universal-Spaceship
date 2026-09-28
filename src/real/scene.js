@@ -50,7 +50,7 @@ export function createRealScene(canvas, { seed = 1 } = {}) {
 
   let view = 'chase', tReal = 0, warp = 1;
   const eye = new THREE.Vector3(), look = new THREE.Vector3(), sp = new THREE.Vector3(), q = new THREE.Quaternion(), portW = new THREE.Vector3();
-  const stationPort = new THREE.Vector3(...STATION_PORT);
+  const stationPort = new THREE.Vector3(...STATION_PORT), los = new THREE.Vector3(), losUp = new THREE.Vector3();
   function placeCamera(sim) {
     sp.set(sim.x[0], sim.x[1], sim.x[2]);
     q.set(sim.q[0], sim.q[1], sim.q[2], sim.q[3]);
@@ -59,8 +59,12 @@ export function createRealScene(canvas, { seed = 1 } = {}) {
     if (view === 'port') { eye.copy(stationPort).add(new THREE.Vector3(-3, 2.2, 1.5)); look.copy(portW); }
     else if (view === 'wide') { eye.set(sp.x * 0.5, Math.max(400, r * 0.6), Math.max(600, r * 0.9)); look.set(sp.x * 0.5, 0, 0); }
     else {
-      eye.set(-58, 18, 24).applyQuaternion(q).add(sp);
-      if (r < 320) look.copy(sp).lerp(stationPort, 0.5); else look.copy(sp).addScaledVector(sp.clone().negate().normalize(), 80);
+      // the game's chase framing (eye (-13, 3.6, 0), look (9, -1.5, 0) in ship units) x 9, laid along the line of sight
+      // to the station port: the ship sits just below the centre, clear of the HUD panels, the station ahead of it
+      los.copy(stationPort).sub(sp).normalize();
+      losUp.set(0, 1, 0).addScaledVector(los, -los.y).normalize();
+      eye.copy(sp).addScaledVector(los, -117).addScaledVector(losUp, 32.4);
+      look.copy(sp).addScaledVector(los, 81).addScaledVector(losUp, -13.5);
     }
     camera.position.copy(eye);
     camera.up.set(0, 1, 0);
