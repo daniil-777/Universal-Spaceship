@@ -1,6 +1,8 @@
 // Camera rig: Side (fixed side view whose visible width equals the wrap period, gentle parallax), Chase (damped
 // follow in the ship's frame, banks with the ship) and Orbit (OrbitControls around the ship). All three shift with
-// the ship when it wraps across the x seam so the jump is never visible.
+// the ship when it wraps across the x seam so the jump is never visible. Moon: a telescope on the ship aimed at the Moon
+// where the ephemeris puts it — true size and phase through a long lens (the app points rig.moon at the Moon's mesh, or at
+// the Earth's globe in lunar orbit).
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { ENV } from './env.js';
@@ -10,28 +12,34 @@ export function createCameraRig(camera, canvas) {
   controls.enabled = false; controls.enableDamping = true; controls.dampingFactor = 0.08; controls.minDistance = 5; controls.maxDistance = 160; controls.enablePan = false;
   const pos = new THREE.Vector3(), look = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0), tP = new THREE.Vector3(), tL = new THREE.Vector3(), tU = new THREE.Vector3(), delta = new THREE.Vector3(), gP = new THREE.Vector3(), gL = new THREE.Vector3();
   const EL = 12 * Math.PI / 180, WORLD_UP = new THREE.Vector3(0, 1, 0);
-  let mode = 'side', lastX = 0, init = true;
+  let mode = 'side', lastX = 0, init = true, shakeT = 0;
   const damp = (cur, target, rate, dt) => cur.lerp(target, 1 - Math.exp(-rate * dt));
   const rig = {
     pitchExtra: 0,                                        // 0..1, set by the app during low passes
     groundLock: 0,                                        // 0..1: atmospheric flight — a world-level following camera that keeps the ground in view whatever the ship's attitude
     terrain: null,                                        // (x, z) → ground height; keeps the chase camera out of the mountains
     ceiling: null,                                        // (x, z) → a tunnel roof's underside (Infinity in the open); keeps the camera inside the bore
+    shake: 0,                                             // 0..0.12: turbulence buffets the chase camera (atmosphere only)
     tunnel: 0,                                            // 0..1 while the tunnel guide flies a bore: a low, level view that frames the cave mouth
+    moon: null,                                           // the Moon's mesh, for the Moon view (hidden in the air: the view falls back to the chase)
     get mode() { return mode; },
     controls,
     setMode(m) { mode = m; controls.enabled = m === 'orbit'; init = true; },
     sideDistance(aspect) { return Math.min(150, (ENV.xHalf + 2.5) / (Math.tan(camera.fov * Math.PI / 360) * aspect)); },
     update(dt, ship, aspect) {                              // ship: { p, q, f, u } as three.js objects (render-space, wrapped x)
+      const rootX = camera.position.x;                      // the backdrop follows the camera in x after this update (space.js): aim where the target will be
       if (Math.abs(ship.p.x - lastX) > ENV.xHalf) { const dx = ship.p.x - lastX; pos.x += dx; look.x += dx; camera.position.x += dx; controls.target.x += dx; }
       lastX = ship.p.x;
-      if (mode === 'side') {
+      if (mode === 'moon' && rig.moon && rig.moon.visible) {
+        tP.copy(ship.p).addScaledVector(ship.u, 2.5); rig.moon.getWorldPosition(tL); tL.x += tP.x - rootX;   // from just above the ship: the Moon is 2600 units out, so the parallax is nil
+        camera.position.copy(tP); camera.up.copy(WORLD_UP); camera.lookAt(tL); init = true;
+      } else if (mode === 'side') {
         const d = rig.sideDistance(aspect);
         tL.set(0, 0.14 * ship.p.y, 0.1 * ship.p.z); tP.set(0, d * Math.sin(EL) + 0.14 * ship.p.y, d * Math.cos(EL) + 0.06 * ship.p.z); tU.set(0, 1, 0);
         if (init) { pos.copy(tP); look.copy(tL); up.copy(tU); init = false; }
         damp(pos, tP, 3, dt); damp(look, tL, 3, dt); damp(up, tU, 3, dt);
         camera.position.copy(pos); camera.up.copy(up).normalize(); camera.lookAt(look);
-      } else if (mode === 'chase') {
+      } else if (mode === 'chase' || mode === 'moon') {
         tP.set(-13, 3.6, 0).applyQuaternion(ship.q).add(ship.p); tL.copy(ship.f).multiplyScalar(9).add(ship.p).addScaledVector(ship.u, -1.5 - 1.2 * rig.pitchExtra); tU.copy(ship.u).lerp(WORLD_UP, 0.65).normalize();   // a touch nose-down; the camera follows only a third of the ship's bank so the horizon stays readable
         if (rig.groundLock > 0) {                             // world-aligned chase: behind and above, looking ahead and down at the landscape
           const g = rig.groundLock, tn = rig.tunnel; gP.set(ship.p.x - 13 + 2 * tn, ship.p.y + 5 - 3.6 * tn, ship.p.z); gL.set(ship.p.x + 10 + 14 * tn, ship.p.y - 6.2 + 6.6 * tn, ship.p.z);
@@ -47,6 +55,7 @@ export function createCameraRig(camera, canvas) {
         if (init) { pos.copy(tP); look.copy(tL); up.copy(tU); init = false; }
         damp(pos, tP, 5, dt); damp(look, tL, 7, dt); damp(up, tU, 4, dt);
         camera.position.copy(pos); camera.up.copy(up).normalize(); camera.lookAt(look);
+        if (rig.shake > 0.001) { shakeT += dt; const a = rig.shake; camera.position.x += a * (Math.sin(shakeT * 23.1) + 0.6 * Math.sin(shakeT * 41.3)); camera.position.y += a * (Math.sin(shakeT * 29.7 + 1.3) + 0.6 * Math.sin(shakeT * 53.9)); }
       } else {
         if (init) { camera.up.set(0, 1, 0); camera.position.copy(ship.p).add(delta.set(-13, 6, 19)); controls.target.copy(ship.p); init = false; }
         else { delta.copy(ship.p).sub(controls.target); controls.target.copy(ship.p); camera.position.add(delta); }

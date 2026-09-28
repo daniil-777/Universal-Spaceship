@@ -9,40 +9,17 @@
 // Satellites (kind = 2): slow small bodies that appear during low passes over the Earth; same treatment.
 // Airliners (kind = 3): the hazards of atmospheric flight — level flight, head-on, crossing or overtaken.
 // Mountains (optional): a procedural height field under the corridor; the beams see it, touching it is a crash.
-import { mulberry32, randn, wrapX, clamp, qIdentity, qRotate, qInvRotate, qIntegrate, qRandom, qAxes, qFromAxisAngle, qMul, randomUnit } from './mathx.js';
+import { mulberry32, randn, wrapX, clamp, qIdentity, qRotate, qInvRotate, qIntegrate, qRandom, qAxes, qFromAxisAngle, qMul, qNormalize, randomUnit } from './mathx.js';
 import { createHeightField } from './heightfield.js';
+import { sense } from './sensors.js';
+import { edgeGuard, tunnelGuide } from './guards.js';
 import { createCityField, createLongField, hasLongGrid } from './cityfield.js';
 
-const DEG = Math.PI / 180;
-export const ENV = Object.freeze({
-  dt: 1 / 15, substeps: 4,                           // one policy decision per 1/15 s, physics at 60 Hz
-  xHalf: 60, yHalf: 22, zHalf: 18,
-  ship: { radius: 1.2, cruise: 14, maxSpeed: 22, thrust: 18, assist: 1.5, rateMax: [2.0, 1.2, 1.6], rateTau: 0.15, wallClamp: -1, actuatorTau: 0.1 },   // rateMax = [roll, yaw, pitch] rad/s commanded by the policy, tracked with a 0.15 s time constant; the ship is held 1 unit inside the walls
-  belt: { nMin: 10, nMax: 40, rMin: 1.0, rMaxBase: 3.0, rMaxLevel: 2.0, alpha: 2.3, driftMin: 2, driftMax: 7, shear: 0.06,
-    ouTheta: 0.4, ouSigma: 1.2, spinMin: 0.1, spinMax: 0.9, restitution: 0.8, nShapes: 12 },
-  comets: { nMax: 4, speedMin: 10, speedMax: 20, rMin: 1.0, rMax: 1.8 },
-  satellites: { speedMin: 1.0, speedMax: 3.5, rMin: 1.3, rMax: 1.7 },   // space stations (kind 2): the hazard sphere encloses the whole station
-  planes: { speedMin: 5, speedMax: 9, r: 1.6 },
-  birds: { speedMin: 2.5, speedMax: 5.5, rMin: 1.3, rMax: 2.0, turnTheta: 1.2, turnSigma: 0.9 },   // flocks (kind 4): slow wandering bodies; a bird strike is a crash
-  mountains: { amplitude: 40, y0: -26, marchStep: 1.5, ceiling: 12 },   // summits reach y = +14: they cross the flight band, and thin air caps the ship at the ceiling
-  rays: { nAz: 11, nEl: 5, azSpan: 150 * DEG, elSpan: 80 * DEG, range: 50, cone: 8 * DEG },   // each ray is a narrow cone so nothing slips between rays
-  nearestK: 6, maxSteps: 900,                      // the K asteroids with the shortest time-to-contact
-  reward: { progress: 0.10, heading: 0.02, level: 0.02, rate: 0.04, jerk: 0.05, effort: 0.003, speed: 0.05, proximity: 0.05, dSafe: 6,
-    wall: 0.10, wallMargin: 6, collision: 20 },
-});
-export const ACT_DIM = 4;                               // [pitch, yaw, roll, throttle], raw Gaussian samples; the env applies tanh
-export const N_RAYS = ENV.rays.nAz * ENV.rays.nEl;
-export const OBS_DIM = N_RAYS + ENV.nearestK * 7 + 18;  // 91
-
-// Ray directions in the body frame (forward +x, up +y, right +z), elevation-major order.
-export const RAY_DIRS_BODY = (() => {
-  const { nAz, nEl, azSpan, elSpan } = ENV.rays, out = new Float64Array(nAz * nEl * 3);
-  for (let e = 0; e < nEl; e++) for (let a = 0; a < nAz; a++) {
-    const el = -elSpan / 2 + (nEl > 1 ? e * elSpan / (nEl - 1) : 0), az = -azSpan / 2 + (nAz > 1 ? a * azSpan / (nAz - 1) : 0), i = (e * nAz + a) * 3;
-    out[i] = Math.cos(el) * Math.cos(az); out[i + 1] = Math.sin(el); out[i + 2] = Math.cos(el) * Math.sin(az);
-  }
-  return out;
-})();
+import { ENV, ACT_DIM, N_RAYS, OBS_DIM, OBS_BASE, N_AIR, RAY_DIRS_BODY } from './envconst.js';
+export { ENV, ACT_DIM, N_RAYS, OBS_DIM, OBS_BASE, N_AIR, RAY_DIRS_BODY };
+import { stepAir, newAirState, trimAttitude, autoThrottle, rateToStick, AERO } from './aero.js';
+import { Dryden } from './turbulence.js';
+import { createWeather } from './weather.js';
 
 const _rel = new Float64Array(3), _tmp = new Float64Array(3), _f = new Float64Array(3), _u = new Float64Array(3), _r = new Float64Array(3), _q = new Float64Array(4);
 
@@ -68,11 +45,17 @@ export class SpaceEnv {
     this.guideOn = opts.tunnelGuide ?? true; this.guide = 0; this.guideCmd = new Float64Array(4);   // the tunnel guide (off when a person flies)
     this.rayEdge = new Uint8Array(N_RAYS);              // 1 where a beam's nearest hit is a corridor edge
     this.rayDirWorld = new Float64Array(N_RAYS * 3);
+    this.radar = new Float32Array(N_RAYS); this.radarPhase = 0; this.radarSky = null;   // the weather radar's last sweep per beam (src/sensors.js)
     this.ship = { p: new Float64Array(3), v: new Float64Array(3), q: qIdentity(), w: new Float64Array(3), f: new Float64Array(3), u: new Float64Array(3), r: new Float64Array(3) };
     this.prevA = new Float32Array(ACT_DIM);                // previous raw (tanh'd) action, for the jerk penalty
     this.cmd = new Float32Array(ACT_DIM);                  // low-pass filtered command actually applied (what the observation reports)
     this.asteroids = [];
     this.nearest = [];                                  // indices of the K nearest asteroids after the last step
+    this.atmosphere = opts.atmosphere ?? this.world !== 'space';   // the air (lift, drag, gravity, wind, clouds): never in space — the belt, Earth orbit and the low passes keep the rate model
+    this.weatherSeverity = opts.weather ?? 0; this.weatherWind = 1; this.weatherCover = 1; this.weatherTurb = 1; this.weather = null; this.air = newAirState();
+    this.dryden = new Dryden(mulberry32(seed ^ 0x5bd1e995)); this.rngAir = mulberry32(seed ^ 0x27d4eb2f);   // own streams: space never draws from them
+    this.rngSky = mulberry32(seed ^ 0x165667b1); this.skySeed = 1;   // one sky per episode (and, in training, its severity): drawn once per reset, whatever else the air drew
+    this.autoThrottle = false; this.speedTarget = AERO.cruise; this.crashCause = '';
     this.reset();
   }
 
@@ -94,7 +77,23 @@ export class SpaceEnv {
   setMeshy(on, set = null) {                          // the Meshy pillar clusters (baked grid); set 'avatar': the long Avatar valley, once its grid is registered
     this.hf = !on ? null : set && hasLongGrid(set) ? createLongField(set, ENV.mountains.y0) : createHeightField({ amplitude: ENV.mountains.amplitude, y0: ENV.mountains.y0, style: 'meshy' }); this.world = on ? 'meshy' : 'space'; }
   setCity(city, seed = 1) { this.hf = city ? createCityField({ city, seed, y0: ENV.mountains.y0 }) : null; this.world = city || 'space'; }   // skyline flight: the city's towers replace the range
+  setAtmosphere(on) { this.atmosphere = on; this.air.lagOn = false; if (!on) this.weather = null; else if (!this.weather) this.buildWeather(); }   // into the air mid-flight: the sky is there at once
+  setWeather(severity, { wind = this.weatherWind, cover = this.weatherCover, turb = this.weatherTurb } = {}) { this.weatherSeverity = severity; this.weatherWind = wind; this.weatherCover = cover; this.weatherTurb = turb; if (this.atmosphere) this.buildWeather(this.weather); }   // live from the Playbox: the same sky goes on
+  buildWeather(carry = null) {
+    this.weather = createWeather({ seed: this.skySeed, carry, orographic: this.world === 'mountains' || this.world === 'pillars' || this.world === 'meshy', severity: this.weatherSeverity, wind: this.weatherWind, cover: this.weatherCover, turb: this.weatherTurb, period: this.hf && this.hf.PERIOD ? this.hf.PERIOD : 2 * ENV.xHalf,
+      hf: this.hf, ceiling: ENV.mountains.ceiling, floor: this.hf ? ENV.mountains.y0 : -ENV.yHalf, zHalf: ENV.zHalf });
+  }
   slideLap() { const hf = this.hf; if (hf && hf.lap) { const n = hf.segments, k = (((this.lapBase + this.laps) % n) + n) % n; hf.lap.shift = k * 2 * ENV.xHalf; } }   // a long city: each wrap moves the corridor on to the next 120 units of the map
+  slideAlong(top, ly, lz) {                            // in the air an edge is slid along: the velocity loses its part into the edge but keeps its speed, and the ship turns with it (α and β unchanged — no instant stall)
+    const s = this.ship, v = s.v, sp = Math.hypot(v[0], v[1], v[2]), ox = v[0] / (sp || 1), oy = v[1] / (sp || 1), oz = v[2] / (sp || 1);
+    if (s.p[1] > top) { s.p[1] = top; if (v[1] > 0) v[1] = 0; } else if (s.p[1] < -ly) { s.p[1] = -ly; if (v[1] < 0) v[1] = 0; }
+    if (s.p[2] > lz) { s.p[2] = lz; if (v[2] > 0) v[2] = 0; } else if (s.p[2] < -lz) { s.p[2] = -lz; if (v[2] < 0) v[2] = 0; }
+    const nl = Math.hypot(v[0], v[1], v[2]); if (sp < 1e-6 || nl < 1e-3 * sp) return;
+    for (let i = 0; i < 3; i++) v[i] *= sp / nl;
+    const nx = v[0] / sp, ny = v[1] / sp, nz = v[2] / sp, ax = oy * nz - oz * ny, ay = oz * nx - ox * nz, az = ox * ny - oy * nx, sn = Math.hypot(ax, ay, az);
+    if (sn < 1e-9) return;
+    qMul(qFromAxisAngle(ax / sn, ay / sn, az / sn, Math.atan2(sn, ox * nx + oy * ny + oz * nz), _q), s.q, s.q); qNormalize(s.q); qAxes(s.q, s.f, s.u, s.r);
+  }
   groundClearance() { const s = this.ship; return this.hf ? s.p[1] - this.hf.height(s.p[0], s.p[2]) - ENV.ship.radius : Infinity; }
   setPlanes(n) {
     this.planesCount = n;
@@ -164,7 +163,12 @@ export class SpaceEnv {
     qAxes(s.q, s.f, s.u, s.r);
     for (let i = 0; i < 3; i++) { s.v[i] = ENV.ship.cruise * s.f[i]; s.w[i] = 0; }
     this.prevA.fill(0); this.cmd.fill(0);
-    this.steps = 0; this.t = 0; this.laps = 0; this.done = false; this.collided = false; this.episodeReturn = 0;
+    this.air = newAirState(); this.dryden.reset(); this.crashCause = '';
+    if (this.atmosphere) {                              // the air: level flight at cruise on the drawn heading (the normal law holds whatever path it starts on), then trimmed
+      qFromAxisAngle(0, 1, 0, Math.atan2(-s.f[2], s.f[0]), s.q); qAxes(s.q, s.f, s.u, s.r); for (let i = 0; i < 3; i++) s.v[i] = ENV.ship.cruise * s.f[i];
+      this.skySeed = Math.floor(this.rngSky() * 2 ** 31); this.buildWeather(); trimAttitude(this);
+    } else this.weather = null;   // a fresh sky every episode; the nose starts at the 1-g angle of attack
+    this.steps = 0; this.t = 0; this.laps = 0; this.done = false; this.collided = false; this.episodeReturn = 0; this.radarPhase = 0; this.radarSky = null;
     this.spawnAsteroids();
     this.sense();
     return this.obs;
@@ -219,84 +223,40 @@ export class SpaceEnv {
     }
   }
 
-  // Edge guard: the corridor has edges — side walls everywhere, and in space a ceiling and a floor — that the beams see
-  // (sense()). When the ship would reach one within 1.7 s, the fly-by-wire blends in a turn away from it (a rotation of
-  // the nose toward the corridor, banking into the turn at a side wall), from nothing at 1.7 s to full authority at 0.6 s
-  // or within a unit of the edge; the pilot keeps full control everywhere else, and whenever its beams see terrain or
-  // traffic within ~15 units (it is busy dodging) the guard yields.
-  // Returns the blend 0..1 (also this.guard, for the flight board) and leaves the commands in this.guardCmd.
-  edgeGuard() {
-    const s = this.ship, S = ENV.ship, lz = ENV.zHalf + S.wallClamp, top = (this.hf ? ENV.mountains.ceiling : ENV.yHalf) + S.wallClamp, bottom = -(ENV.yHalf + S.wallClamp);
-    let best = 0, nx = 0, ny = 0, nz = 0;
-    const edge = (dist, closing, ex, ey, ez) => {        // dist to the edge, speed toward it, the inward normal
-      if (closing <= 0.05) return;
-      const t = Math.max(0, dist) / closing, b = Math.max(Math.min(1, (1.7 - t) / 1.1), Math.min(1, (1.0 - dist) / 1.0));   // the velocity trails the nose by ~0.7 s: start early
-      if (b > best) { best = b; nx = ex; ny = ey; nz = ez; }
-    };
-    edge(lz - s.p[2], s.v[2], 0, 0, -1); edge(lz + s.p[2], -s.v[2], 0, 0, 1);
-    if (!this.hf) { edge(top - s.p[1], s.v[1], 0, -1, 0); edge(s.p[1] - bottom, -s.v[1], 0, 1, 0); }   // over terrain the thin-air ceiling is no edge to steer from: climbing to it over a ridge is fair
-    if (best > 0) {                                      // the pilot is dodging something close (terrain, a rock, a plane): the guard steps back — a scrape along an edge is the lesser evil
-      let threat = Infinity; for (let i = 0; i < N_RAYS; i++) if (!this.rayEdge[i] && this.rayHit[i] < threat) threat = this.rayHit[i];
-      best *= Math.min(1, Math.max(0, (threat - 5) / 10));
-    }
-    this.guard = best; if (best <= 0) return 0;
-    const f = s.f; let ax = f[1] * nz - f[2] * ny, ay = f[2] * nx - f[0] * nz, az = f[0] * ny - f[1] * nx, l = Math.hypot(ax, ay, az);   // turn the nose toward the corridor: about f × n
-    if (l < 0.15) {                                    // nose straight at the edge: yaw (side wall) or pitch (ceiling, floor) away, whichever way is shorter
-      const A = ny === 0 ? s.u : s.r, sg = ny === 0 ? (-(s.r[0] * nx + s.r[1] * ny + s.r[2] * nz) >= 0 ? 1 : -1) : ((s.u[0] * nx + s.u[1] * ny + s.u[2] * nz) >= 0 ? 1 : -1);
-      ax = A[0] * sg; ay = A[1] * sg; az = A[2] * sg; l = 1;
-    }
-    const W = 1.5 / l, e = this.guardCmd; _rel[0] = ax * W; _rel[1] = ay * W; _rel[2] = az * W; qInvRotate(s.q, _rel, _tmp);   // body rates (roll, yaw, pitch)
-    let roll = _tmp[0] / S.rateMax[0];
-    if (ny === 0) roll += -1.6 * (Math.sign(ay) * 0.55 - s.r[1]);   // at a side wall bank into the turn (the right wing rises for a left turn)
-    e[0] = clamp(_tmp[2] / S.rateMax[2], -1, 1); e[1] = clamp(_tmp[1] / S.rateMax[1], -1, 1); e[2] = clamp(roll, -1, 1);
-    return best;
-  }
-
-  // Tunnel guide: a long world's tunnel rocks close the lane except for their bore, and the pilots never learned to thread
-  // one — so from 80 units before an entrance the fly-by-wire takes over (fully from 35 units, through the bore and a
-  // little past the exit): it pursues a point on the bore's centre line ahead of the ship, keeps the wings level and the
-  // speed at cruise. Returns the blend 0..1 (also this.guide) and leaves the commands in this.guideCmd.
-  tunnelGuide() {
-    const hf = this.hf; this.guide = 0; if (!hf || !hf.tunnels || !hf.tunnels.length) return 0;
-    const s = this.ship, S = ENV.ship, shift = hf.lap ? hf.lap.shift : 0, P = hf.PERIOD; let best = 0, T = null, X0 = 0;
-    for (const t of hf.tunnels) {
-      let x0 = t.x0 - shift, x1 = t.x1 - shift; const k = Math.round((s.p[0] - (x0 + x1) / 2) / P); x0 += k * P; x1 += k * P;
-      const ahead = x0 - s.p[0], b = s.p[0] >= x0 - 1 && s.p[0] <= x1 + 8 ? 1 : ahead > 0 && ahead < 80 ? Math.min(1, (80 - ahead) / 45) : 0;
-      if (b > best) { best = b; T = t; X0 = x0; }
-    }
-    if (!T) return 0;
-    const ahead = X0 - s.p[0], L = ahead > 0 ? Math.max(10, Math.min(30, ahead * 0.6)) : 12;   // look further ahead while far out: a gentle line-up, then a tight hold
-    let dx = L, dy = hf.y0 + T.y - s.p[1], dz = T.z - s.p[2]; const l = Math.hypot(dx, dy, dz); dx /= l; dy /= l; dz /= l;
-    const f = s.f, ax = f[1] * dz - f[2] * dy, ay = f[2] * dx - f[0] * dz, az = f[0] * dy - f[1] * dx;   // turn the nose toward the aim point: about f × d
-    _rel[0] = ax * 3; _rel[1] = ay * 3; _rel[2] = az * 3; qInvRotate(s.q, _rel, _tmp);
-    const e = this.guideCmd; e[0] = clamp(_tmp[2] / S.rateMax[2], -1, 1); e[1] = clamp(_tmp[1] / S.rateMax[1], -1, 1);
-    e[2] = clamp(_tmp[0] / S.rateMax[0] + 1.5 * s.r[1], -1, 1); e[3] = 0;   // wings level (positive roll lowers the right wing), cruise speed
-    this.guide = best; return best;
-  }
+  edgeGuard() { return edgeGuard(this); }
+  tunnelGuide() { return tunnelGuide(this); }
 
   step(action) {
     const s = this.ship, S = ENV.ship, R = ENV.reward, h = ENV.dt / ENV.substeps, rng = this.rng;
     let a0 = Math.tanh(action[0]), a1 = Math.tanh(action[1]), a2 = Math.tanh(action[2]), a3 = Math.tanh(action[3]);
-    const tg = this.guideOn ? this.tunnelGuide() : 0; if (tg > 0) { const e = this.guideCmd; a0 += (e[0] - a0) * tg; a1 += (e[1] - a1) * tg; a2 += (e[2] - a2) * tg; a3 += (e[3] - a3) * tg; }   // lined up with a tunnel's bore and through it
-    const g = this.guardOn && tg < 0.5 ? this.edgeGuard() : 0; if (g > 0) { const e = this.guardCmd; a0 += (e[0] - a0) * g; a1 += (e[1] - a1) * g; a2 += (e[2] - a2) * g; }   // near a corridor edge the fly-by-wire turns away
+    const w0 = s.w[0], w1 = s.w[1], w2 = s.w[2];                // body rates before this decision (the air's smoothness term)
+    const air = this.atmosphere, tg = this.guideOn ? this.tunnelGuide() : 0; if (tg > 0) { const e = this.guideCmd, e0 = air ? rateToStick(this, e[0]) : e[0], e3 = air ? 2 * autoThrottle(this, 0) - 1 : e[3]; a0 += (e0 - a0) * tg; a1 += (e[1] - a1) * tg; a2 += (e[2] - a2) * tg; a3 += (e3 - a3) * tg; }   // in the air: a load-factor stick and an auto-throttle   // lined up with a tunnel's bore and through it
+    const g = this.guardOn && tg < 0.5 ? this.edgeGuard() : 0; if (g > 0) { const e = this.guardCmd, e0 = air ? rateToStick(this, e[0]) : e[0]; a0 += (e0 - a0) * g; a1 += (e[1] - a1) * g; a2 += (e[2] - a2) * g; }   // near a corridor edge the fly-by-wire turns away
     const c = this.cmd, kAct = 1 - Math.exp(-h / S.actuatorTau);
     let progress = 0, collided = false;
     const kRate = h / S.rateTau;
     for (let k = 0; k < ENV.substeps; k++) {
       c[0] += (a0 - c[0]) * kAct; c[1] += (a1 - c[1]) * kAct; c[2] += (a2 - c[2]) * kAct; c[3] += (a3 - c[3]) * kAct;   // actuator lag
-      const thrust = S.thrust * c[3];
-      s.w[0] += kRate * (c[2] * S.rateMax[0] - s.w[0]); s.w[1] += kRate * (c[1] * S.rateMax[1] - s.w[1]); s.w[2] += kRate * (c[0] * S.rateMax[2] - s.w[2]);   // rate controller; body rates: x = roll, y = yaw, z = pitch
-      qIntegrate(s.q, s.w, h);
-      qAxes(s.q, s.f, s.u, s.r);
-      for (let i = 0; i < 3; i++) s.v[i] += h * (s.f[i] * thrust + S.assist * (S.cruise * s.f[i] - s.v[i]));
-      const sp = Math.hypot(s.v[0], s.v[1], s.v[2]);
-      if (sp > S.maxSpeed) for (let i = 0; i < 3; i++) s.v[i] *= S.maxSpeed / sp;
+      if (air) stepAir(this, h, k);               // the air: forces, fly-by-wire, wind and gusts (src/aero.js)
+      else {
+        const thrust = S.thrust * c[3];
+        s.w[0] += kRate * (c[2] * S.rateMax[0] - s.w[0]); s.w[1] += kRate * (c[1] * S.rateMax[1] - s.w[1]); s.w[2] += kRate * (c[0] * S.rateMax[2] - s.w[2]);   // rate controller; body rates: x = roll, y = yaw, z = pitch
+        qIntegrate(s.q, s.w, h);
+        qAxes(s.q, s.f, s.u, s.r);
+        for (let i = 0; i < 3; i++) s.v[i] += h * (s.f[i] * thrust + S.assist * (S.cruise * s.f[i] - s.v[i]));
+        const sp = Math.hypot(s.v[0], s.v[1], s.v[2]);
+        if (sp > S.maxSpeed) for (let i = 0; i < 3; i++) s.v[i] *= S.maxSpeed / sp;
+      }
       s.p[0] += h * s.v[0]; s.p[1] += h * s.v[1]; s.p[2] += h * s.v[2];
       progress += h * s.v[0];
       if (s.p[0] >= ENV.xHalf) { s.p[0] -= 2 * ENV.xHalf; this.laps++; this.slideLap(); } else if (s.p[0] < -ENV.xHalf) { s.p[0] += 2 * ENV.xHalf; this.laps--; this.slideLap(); }
       const ly = ENV.yHalf + S.wallClamp, lz = ENV.zHalf + S.wallClamp, top = this.hf ? ENV.mountains.ceiling + S.wallClamp : ly;
-      if (s.p[1] > top) { s.p[1] = top; if (s.v[1] > 0) s.v[1] = 0; } else if (s.p[1] < -ly) { s.p[1] = -ly; if (s.v[1] < 0) s.v[1] = 0; }
-      if (s.p[2] > lz) { s.p[2] = lz; if (s.v[2] > 0) s.v[2] = 0; } else if (s.p[2] < -lz) { s.p[2] = -lz; if (s.v[2] < 0) s.v[2] = 0; }
+      if (air) { if (s.p[1] > top || s.p[1] < -ly || s.p[2] > lz || s.p[2] < -lz) this.slideAlong(top, ly, lz); }
+      else {
+        if (s.p[1] > top) { s.p[1] = top; if (s.v[1] > 0) s.v[1] = 0; } else if (s.p[1] < -ly) { s.p[1] = -ly; if (s.v[1] < 0) s.v[1] = 0; }
+        if (s.p[2] > lz) { s.p[2] = lz; if (s.v[2] > 0) s.v[2] = 0; } else if (s.p[2] < -lz) { s.p[2] = -lz; if (s.v[2] < 0) s.v[2] = 0; }
+      }
+      if (air && this.weather) this.weather.advance(h);
       this.stepAsteroids(h, rng);
       for (const a of this.asteroids) {                 // collision with the ship, checked every physics substep
         const dx = wrapX(a.p[0] - s.p[0], ENV.xHalf), dy = a.p[1] - s.p[1], dz = a.p[2] - s.p[2];
@@ -307,6 +267,7 @@ export class SpaceEnv {
         if (y - r < hf.height(x, z) || y - e < Math.max(hf.height(x + e, z), hf.height(x - e, z), hf.height(x, z + e), hf.height(x, z - e))) collided = true;
         else if (hf.ceiling && (y + r > hf.ceiling(x, z) || y + e > Math.min(hf.ceiling(x + e, z), hf.ceiling(x - e, z), hf.ceiling(x, z + e), hf.ceiling(x, z - e)))) collided = true;   // a tunnel's roof
       }
+      if (!collided && air && this.air.overstressed) { collided = true; this.crashCause = 'overstress'; }   // a gust at speed broke the airframe
       if (collided) break;
     }
     this.collideAsteroids();
@@ -319,7 +280,10 @@ export class SpaceEnv {
     const p = this.prevA;
     reward -= R.jerk * ((a0 - p[0]) ** 2 + (a1 - p[1]) ** 2 + (a2 - p[2]) ** 2 + (a3 - p[3]) ** 2);
     reward -= R.effort * (a0 * a0 + a1 * a1 + a2 * a2 + 0.5 * a3 * a3);
-    reward -= R.speed * Math.max(0, (Math.hypot(s.v[0], s.v[1], s.v[2]) - S.cruise) / (S.maxSpeed - S.cruise));   // speed limit: boosting costs reward
+    if (!air) reward -= R.speed * Math.max(0, (Math.hypot(s.v[0], s.v[1], s.v[2]) - S.cruise) / (S.maxSpeed - S.cruise));
+    else { const Ra = R.air, ai = this.air, dev2 = ai.dev2 / ENV.substeps; ai.dev2 = 0;
+      reward -= Ra.stall * (ai.stalled ? ENV.dt : 0) + Ra.comfort * dev2 + Ra.rough * ai.sigmaFelt * ai.sigmaFelt + Ra.power * ai.throttle + Ra.overspeed * Math.max(0, ai.V - AERO.vne) / 2;
+      reward -= Ra.jerk * ((a0 - p[0]) ** 2 + (a1 - p[1]) ** 2 + (a2 - p[2]) ** 2 + (a3 - p[3]) ** 2) + Ra.angAcc * ((s.w[0] - w0) ** 2 + (s.w[1] - w1) ** 2 + (s.w[2] - w2) ** 2) / (ENV.dt * ENV.dt); }   // smooth flying: gentle commands, no rate kicks   // speed limit: boosting costs reward
     let prox = 0;
     for (const i of this.nearest) { const d = this.surfaceDist(this.asteroids[i]); if (d < R.dSafe) { const e = 1 - d / R.dSafe; prox += e * e; } }
     if (this.hf) { const g = this.groundClearance(); if (g < R.dSafe) { const e = 1 - Math.max(0, g) / R.dSafe; prox += e * e; } }
@@ -415,75 +379,6 @@ export class SpaceEnv {
     return Math.sqrt(dx * dx + dy * dy + dz * dz) - a.r - ENV.ship.radius;
   }
 
-  sense() {                                             // ray sensors + nearest asteroids + own state -> this.obs (body frame)
-    const s = this.ship, o = this.obs, range = ENV.rays.range, list = this.asteroids, K = ENV.nearestK;
-    for (let i = 0; i < N_RAYS; i++) {                  // world directions of the body-frame rays
-      _tmp[0] = RAY_DIRS_BODY[i * 3]; _tmp[1] = RAY_DIRS_BODY[i * 3 + 1]; _tmp[2] = RAY_DIRS_BODY[i * 3 + 2];
-      qRotate(s.q, _tmp, _rel); this.rayDirWorld[i * 3] = _rel[0]; this.rayDirWorld[i * 3 + 1] = _rel[1]; this.rayDirWorld[i * 3 + 2] = _rel[2];
-      this.rayHit[i] = range; this.rayEdge[i] = 0;
-    }
-    const dist = new Float64Array(list.length), ttc = new Float64Array(list.length), cone = ENV.rays.cone, cosEdgeMin = Math.cos(cone + Math.PI / 2);
-    this.rayVal.fill(0);
-    for (let j = 0; j < list.length; j++) {
-      const a = list[j], dx = wrapX(a.p[0] - s.p[0], ENV.xHalf), dy = a.p[1] - s.p[1], dz = a.p[2] - s.p[2];
-      const c2 = dx * dx + dy * dy + dz * dz, cd = Math.sqrt(c2);
-      dist[j] = cd - a.r - ENV.ship.radius;
-      const closing = -((a.v[0] - s.v[0]) * dx + (a.v[1] - s.v[1]) * dy + (a.v[2] - s.v[2]) * dz) / Math.max(1e-6, cd);   // approach speed along the line of sight
-      ttc[j] = closing > 0 ? Math.max(0, dist[j]) / Math.max(1, closing) : Math.max(0, dist[j]) + 20;                   // receding rocks rank last
-      if (cd - a.r > range) continue;                   // beyond sensor range
-      if (dx * s.f[0] + dy * s.f[1] + dz * s.f[2] < -a.r) continue;   // entirely behind the ship
-      // soft beams: a rock contributes in proportion to how much of it lies inside the cone (continuous in angle), so the
-      // observation — and therefore the policy's output — changes smoothly as rocks drift across beam boundaries
-      const alpha = Math.asin(Math.min(1, a.r / cd)), surf = Math.max(0, cd - a.r), edge = cone + alpha;
-      for (let i = 0; i < N_RAYS; i++) {
-        const d = this.rayDirWorld, cosT = (dx * d[i * 3] + dy * d[i * 3 + 1] + dz * d[i * 3 + 2]) / cd;
-        if (cosT < cosEdgeMin) continue;
-        const theta = Math.acos(Math.min(1, cosT)); if (theta >= edge) continue;
-        const w = Math.min(1, (edge - theta) / cone), v = w * (1 - surf / range);          // 0 = clear … 1 = touching
-        if (v > this.rayVal[i]) { this.rayVal[i] = v; this.rayHit[i] = Math.min(this.rayHit[i], surf); }
-      }
-    }
-    if (this.hf) {                                     // terrain: march each beam that can reach the ground
-      const hf = this.hf, step = ENV.mountains.marchStep, above = s.p[1] - ENV.ship.radius;
-      for (let i = 0; i < N_RAYS; i++) {
-        const dx = this.rayDirWorld[i * 3], dy = this.rayDirWorld[i * 3 + 1], dz = this.rayDirWorld[i * 3 + 2];
-        if (dy >= 0 && above > hf.peak) continue;                                                // a level or climbing beam above the highest peak sees no ground
-        for (let t = step; t < range; t += step) {
-          const px = s.p[0] + dx * t, py = s.p[1] + dy * t, pz = s.p[2] + dz * t;
-          if (py < hf.height(px, pz) || (hf.ceiling && py > hf.ceiling(px, pz))) { const v = 1 - (t - step * 0.5) / range; if (v > this.rayVal[i]) this.rayVal[i] = v; if (t < this.rayHit[i]) this.rayHit[i] = t; break; }   // ground, rock, or a tunnel's roof
-        }
-      }
-    }
-    {                                                  // the corridor's edges are surfaces the beams see — the side walls, the ceiling (thin air over the mountains and cities), in space the floor — in
-                                                       // their hit distances (the sensor display, the edge guard); the policy's beam values stay terrain and hazards (it knows the edges from its position inputs)
-      const top = this.hf ? ENV.mountains.ceiling : ENV.yHalf, zw = ENV.zHalf, yw = ENV.yHalf;
-      for (let i = 0; i < N_RAYS; i++) {
-        const dy = this.rayDirWorld[i * 3 + 1], dz = this.rayDirWorld[i * 3 + 2]; let t = range;
-        if (dz > 1e-4) t = Math.min(t, (zw - s.p[2]) / dz); else if (dz < -1e-4) t = Math.min(t, (-zw - s.p[2]) / dz);
-        if (dy > 1e-4) t = Math.min(t, (top - s.p[1]) / dy); else if (!this.hf && dy < -1e-4) t = Math.min(t, (-yw - s.p[1]) / dy);
-        if (t < range) { t = Math.max(0, t - ENV.ship.radius); if (t < this.rayHit[i]) { this.rayHit[i] = t; this.rayEdge[i] = 1; } }
-      }
-    }
-    for (let i = 0; i < N_RAYS; i++) o[i] = this.rayVal[i];
-    // the K most urgent asteroids by time-to-contact
-    const idx = Array.from(list.keys()).sort((x, y) => ttc[x] - ttc[y]).slice(0, K);
-    this.nearest = idx;
-    let k = N_RAYS;
-    for (let n = 0; n < K; n++) {
-      if (n < idx.length) {
-        const a = list[idx[n]];
-        _rel[0] = wrapX(a.p[0] - s.p[0], ENV.xHalf); _rel[1] = a.p[1] - s.p[1]; _rel[2] = a.p[2] - s.p[2];
-        qInvRotate(s.q, _rel, _tmp); o[k++] = _tmp[0] / range; o[k++] = _tmp[1] / range; o[k++] = _tmp[2] / range;
-        _rel[0] = a.v[0] - s.v[0]; _rel[1] = a.v[1] - s.v[1]; _rel[2] = a.v[2] - s.v[2];
-        qInvRotate(s.q, _rel, _tmp); o[k++] = _tmp[0] / 20; o[k++] = _tmp[1] / 20; o[k++] = _tmp[2] / 20;
-        o[k++] = a.r / 5;
-      } else { o[k++] = 1; o[k++] = 0; o[k++] = 0; o[k++] = 0; o[k++] = 0; o[k++] = 0; o[k++] = 0; }   // "nothing, far ahead"
-    }
-    qInvRotate(s.q, s.v, _tmp); o[k++] = _tmp[0] / ENV.ship.maxSpeed; o[k++] = _tmp[1] / ENV.ship.maxSpeed; o[k++] = _tmp[2] / ENV.ship.maxSpeed;
-    o[k++] = s.w[0] / 2; o[k++] = s.w[1] / 2; o[k++] = s.w[2] / 2;
-    o[k++] = s.f[0]; o[k++] = s.f[1]; o[k++] = s.f[2]; o[k++] = s.u[0]; o[k++] = s.u[1]; o[k++] = s.u[2];
-    o[k++] = s.p[1] / ENV.yHalf; o[k++] = s.p[2] / ENV.zHalf;
-    o[k++] = this.cmd[0]; o[k++] = this.cmd[1]; o[k++] = this.cmd[2]; o[k++] = this.cmd[3];
-    return o;
-  }
+  sense() { return sense(this); }
+
 }

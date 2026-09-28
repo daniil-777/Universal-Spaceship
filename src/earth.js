@@ -92,9 +92,10 @@ const ATMO_FS = /* glsl */`uniform vec3 uC, uL, uSunCol; uniform float uGain, uM
     gl_FragColor = vec4(ins + dither(), 1.0 - dot(Tv, vec3(0.3333))); }`;                      // rgb added, background × (1 − alpha)
 
 /** @param {{ texturePath: string, R: number, position: THREE.Vector3, axis: THREE.Vector3, sunDir: THREE.Vector3, sunCol: THREE.Color, spin?: number, spin0?: number }} o */
-export function createEarth({ texturePath, R, position, axis, sunDir, sunCol, spin = 0.004, spin0 = 0 }) {
+export function createEarth({ texturePath, R, position, axis, sunDir, sunCol, spin = 0.004, spin0 = 0, textures: shared = null }) {
   const H = R * 0.007;                                                                          // scale height (visual: ~0.7 % of R)
   const beta = new THREE.Vector3(0.04, 0.10, 0.25).divideScalar(H);                             // Rayleigh extinction per unit (vertical optical depth 0.04/0.10/0.25)
+  const beta0 = beta.clone(), mie0 = 0.5 / (2 * Math.sqrt(Math.PI * R * H / 2)); let scale = 1;               // setScale() rescales the air's world-space lengths
   const common = () => ({ uR: { value: R }, uH: { value: H }, uBeta: { value: beta }, uL: { value: sunDir }, uSunCol: { value: sunCol } });
   const groundMat = new THREE.ShaderMaterial({
     uniforms: { ...common(), tDay: { value: null }, tNight: { value: null }, tPack: { value: null }, tNormal: { value: null }, tSpec: { value: null },
@@ -104,7 +105,7 @@ export function createEarth({ texturePath, R, position, axis, sunDir, sunCol, sp
   const cloudMat = new THREE.ShaderMaterial({ uniforms: { ...common(), tPack: { value: null }, uHasTex: { value: 0 }, uAlpha: { value: 1 } },
     vertexShader: VS, fragmentShader: CLOUD_FS, transparent: true, depthWrite: false });
   const atmoMat = new THREE.ShaderMaterial({
-    uniforms: { ...common(), uC: { value: new THREE.Vector3() }, uGain: { value: 0.4 }, uMie: { value: 0.5 / (2 * Math.sqrt(Math.PI * R * H / 2)) } },
+    uniforms: { ...common(), uC: { value: new THREE.Vector3() }, uGain: { value: 0.4 }, uMie: { value: mie0 } },
     vertexShader: ATMO_VS, fragmentShader: ATMO_FS, transparent: true, depthWrite: false,
     blending: THREE.CustomBlending, blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor, blendEquation: THREE.AddEquation });
   const ground = new THREE.Mesh(new THREE.SphereGeometry(R, 256, 160), groundMat); ground.renderOrder = -8;      // 256 segments: the limb chord error is < 0.1 px
@@ -115,23 +116,24 @@ export function createEarth({ texturePath, R, position, axis, sunDir, sunCol, sp
   const group = new THREE.Group(); group.position.copy(position); group.add(tilted, atmo);
 
   // Textures: any that fails is replaced by a neutral 1×1 fallback; the textured look needs the day and the packed map.
+  // A second globe (the Earth zoom view) passes the first one's `loaded` promise: it shares those textures, never owns them.
   const loader = new THREE.TextureLoader(), textures = []; let disposed = false;
   const load = (name, srgb) => new Promise((res) => loader.load(texturePath + name,
     (t) => { t.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace; t.anisotropy = 8; t.wrapS = THREE.RepeatWrapping; res(t); }, undefined,
     () => { console.warn(`space: texture ${name} failed to load`); res(null); }));
-  const flat = (r, g, b) => { const t = new THREE.DataTexture(new Uint8Array([r, g, b, 255]), 1, 1); t.needsUpdate = true; return t; };
-  const ready = Promise.all([load('earth_day_2048.jpg', true), load('earth_night_2048.jpg', true), load('earth_bump_roughness_clouds_2048.jpg'),
-    load('earth_normal_2048.jpg'), load('earth_specular_2048.jpg')]).then(([day, night, pack, normal, spec]) => {
-    if (disposed) { [day, night, pack, normal, spec].forEach((t) => t && t.dispose()); return; }
-    if (!day || !pack) { textures.push(...[day, night, pack, normal, spec].filter(Boolean)); return; }
-    night = night || flat(0, 0, 0); normal = normal || flat(128, 128, 255); spec = spec || flat(0, 0, 0);
-    textures.push(day, night, pack, normal, spec);
-    const u = groundMat.uniforms; u.tDay.value = day; u.tNight.value = night; u.tPack.value = pack; u.tNormal.value = normal; u.tSpec.value = spec;
+  const flat = (r, g, b) => { const t = new THREE.DataTexture(new Uint8Array([r, g, b, 255]), 1, 1); t.needsUpdate = true; textures.push(t); return t; };
+  const loaded = shared || Promise.all([load('earth_day_2048.jpg', true), load('earth_night_2048.jpg', true), load('earth_bump_roughness_clouds_2048.jpg'),
+    load('earth_normal_2048.jpg'), load('earth_specular_2048.jpg')]).then(([day, night, pack, normal, spec]) => ({ day, night, pack, normal, spec }));
+  const ready = loaded.then(({ day, night, pack, normal, spec }) => {
+    if (!shared) textures.push(...[day, night, pack, normal, spec].filter(Boolean));
+    if (disposed) { textures.forEach((t) => t.dispose()); return; }
+    if (!day || !pack) return;
+    const u = groundMat.uniforms; u.tDay.value = day; u.tNight.value = night || flat(0, 0, 0); u.tPack.value = pack; u.tNormal.value = normal || flat(128, 128, 255); u.tSpec.value = spec || flat(0, 0, 0);
     u.uHasTex.value = 1; cloudMat.uniforms.tPack.value = pack; cloudMat.uniforms.uHasTex.value = 1;
   });
 
   return {
-    group, ready, R, centre: atmoMat.uniforms.uC.value,
+    group, ready, loaded, R, centre: atmoMat.uniforms.uC.value,
     update(dt) {
       ground.rotation.y += dt * spin; clouds.rotation.y += dt * spin * 1.12;
       groundMat.uniforms.uCloudShift.value = (ground.rotation.y - clouds.rotation.y) / (2 * Math.PI);   // cloud deck → ground UV offset
@@ -139,6 +141,11 @@ export function createEarth({ texturePath, R, position, axis, sunDir, sunCol, sp
     },
     setMono(mode) { groundMat.uniforms.uNight.value = mode === 2 ? 0 : mode === 1 ? 0.5 : 1; },   // ink: no city-light speckle
     setHaze(h) { groundMat.uniforms.uHaze.value = h; cloudMat.uniforms.uAlpha.value = 1 - h; },   // in the atmosphere the tile imagery carries its own clouds
+    setScale(k) {                                                    // the far Earth of a lunar orbit: the globe k× smaller, its atmosphere's lengths with it
+      if (k === scale) return; scale = k; group.scale.setScalar(k); beta.copy(beta0).divideScalar(k); atmoMat.uniforms.uMie.value = mie0 / k;
+      for (const m of [groundMat, cloudMat, atmoMat]) { m.uniforms.uR.value = R * k; m.uniforms.uH.value = H * k; }
+      for (const m of [cloudMat, atmoMat]) { m.polygonOffset = k < 1; m.polygonOffsetFactor = 0; m.polygonOffsetUnits = -4; }   // far away the shells sit within a depth step of the ground: pull them forward
+    },
     dispose() { disposed = true; [ground, clouds, atmo].forEach((m) => { m.geometry.dispose(); m.material.dispose(); }); textures.forEach((t) => t.dispose()); },
   };
 }

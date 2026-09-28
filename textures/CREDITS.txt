@@ -2,3 +2,13 @@ Earth textures: NASA Blue Marble / Visible Earth imagery as distributed with the
 (https://github.com/mrdoob/three.js/tree/r170/examples/textures/planets), MIT-licensed three.js repository, imagery courtesy NASA.
 Files: earth_day_2048.jpg (day albedo), earth_night_2048.jpg (city lights), earth_bump_roughness_clouds_2048.jpg (R bump, G roughness, B clouds),
 earth_normal_2048.jpg, earth_specular_2048.jpg (ocean mask)
+
+Moon textures: NASA Scientific Visualization Studio, CGI Moon Kit (https://svs.gsfc.nasa.gov/4720) — LRO LROC colour mosaic
+(moon_color_2k.jpg, as distributed) and a normal map derived from the LOLA elevation model (moon_normal_2k.jpg, ldem_16 box-
+downsampled to 2048×1024, relief ×3). Credit: NASA's Scientific Visualization Studio.
+
+Earth zoom (fetched live at runtime, not shipped with the site):
+- Blue Marble Next Generation — NASA Earth Observatory, served by NASA GIBS (public domain)
+- Sentinel-2 cloudless — s2maps.eu by EOX IT Services GmbH (contains modified Copernicus Sentinel data 2025), CC BY-NC-SA 4.0
+- World Imagery — © Esri, Maxar, Earthstar Geographics and the GIS user community (Esri terms of use; the closest levels only)
+- Elevation — AWS Terrain Tiles (Terrarium encoding): SRTM, GMTED2010, ETOPO1 and the other sources in the Tilezen/Joerd attribution list

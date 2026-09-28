@@ -5,6 +5,7 @@
 // for update(), and is attached lazily via setTF(tf) so the demo page can run without loading it.
 import { MLP, orthogonal } from './actor.js';
 import { RunningMeanStd, mulberry32, randn } from './mathx.js';
+import { OBS_DIM } from './envconst.js';
 
 let tf = null;
 export function setTF(t) { tf = t; }
@@ -30,6 +31,17 @@ function bytesToB64(u8) { let s = ''; for (let i = 0; i < u8.length; i += 8192) 
 function b64ToBytes(s) { const bin = atob(s), u8 = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i); return u8; }
 export function f32ToF16B64(arr) { const u16 = new Uint16Array(arr.length); for (let i = 0; i < arr.length; i++) u16[i] = toHalf(arr[i]); return bytesToB64(new Uint8Array(u16.buffer)); }
 export function f16B64ToF32(s) { const u8 = b64ToBytes(s), u16 = new Uint16Array(u8.buffer, 0, u8.length >> 1), out = new Float32Array(u16.length); for (let i = 0; i < u16.length; i++) out[i] = fromHalf(u16[i]); return out; }
+
+// An older policy (fewer inputs) extended to newDim: the new inputs get zero weights and a neutral normaliser (mean 0,
+// var 1), so the network acts exactly as before until training teaches it to use them (the weather spec's warm start).
+export function padPolicyInputs(o, newDim) {
+  if (o.obsDim >= newDim) return o;
+  const dec = o.dtype === 'f16' ? f16B64ToF32 : b64ToF32, enc = o.dtype === 'f16' ? f32ToF16B64 : f32ToB64, add = newDim - o.obsDim;
+  const pad = (L) => { const [, nout] = L.shape, W = dec(L.W), W2 = new Float32Array(newDim * nout); W2.set(W); return { ...L, shape: [newDim, nout], W: enc(W2) }; };   // TF layout [in][out]: new rows at the end
+  const on = o.obsNorm;
+  return { ...o, obsDim: newDim, actor: [pad(o.actor[0]), ...o.actor.slice(1)], critic: [pad(o.critic[0]), ...o.critic.slice(1)],
+    obsNorm: { ...on, mean: [...on.mean, ...new Array(add).fill(0)], var: [...on.var, ...new Array(add).fill(1)] } };
+}
 function toHalf(v) { const f = new Float32Array([v]), b = new Uint32Array(f.buffer)[0], sign = (b >>> 16) & 0x8000, e = ((b >>> 23) & 0xff) - 112, m = b & 0x7fffff; if (e <= 0) return sign; if (e >= 31) return sign | 0x7c00; return sign | (e << 10) | (m >>> 13); }
 function fromHalf(h) { const s = h & 0x8000 ? -1 : 1, e = (h >>> 10) & 0x1f, m = h & 0x3ff; if (e === 0) return s * m * Math.pow(2, -24); if (e === 31) return m ? NaN : s * Infinity; return s * (1 + m / 1024) * Math.pow(2, e - 15); }
 
@@ -198,6 +210,7 @@ export class PPOAgent {
       logStd: Array.from(this.logStd), obsNorm: this.obsNorm.toJSON(), retNorm: this.retNorm.toJSON(), actor: layers(this.actor), critic: layers(this.critic), lr: this.lrAdaptive, meta };
   }
   static fromJSON(o, cfg = {}) {
+    o = padPolicyInputs(o, OBS_DIM);                          // an older policy (fewer inputs) acts unchanged on the new observation
     if (o.format !== 'astro-pilot-policy-v1') throw new Error('unknown policy format');
     const ag = new PPOAgent(o.obsDim, o.actDim, { ...cfg, hidden: o.hidden }), dec = o.dtype === 'f16' ? f16B64ToF32 : b64ToF32;
     o.actor.forEach((L, l) => ag.actor.setLayer(l, dec(L.W), dec(L.b)));

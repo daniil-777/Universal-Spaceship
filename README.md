@@ -44,10 +44,30 @@ Open `index.html` over HTTP (`python3 -m http.server` in this folder) — ES mod
 with contrails cross the surface below, and space stations — Mir-class Soviet stations, procedural down to the docking
 node, the radial modules with their solar arrays, the docked Soyuz, the Sofora girder and the dishes, four draw calls
 for all of them — tumble slowly through the corridor as a third kind of hazard the pilot has to avoid. Then the ship climbs back to orbit. The
-Playbox switch *Low passes* turns the cycle off. Between passes the orbit's ground track keeps changing: the globe turns once every
-6½ minutes and the track swings ±49° in latitude every 170 s, so both Americas, Europe, Russia, Australia and everything
-between pass below the ship in turn (the low-pass jets are re-routed through whatever point is under the ship when a
-pass begins).
+Playbox switch *Low passes* turns the cycle off. Between passes the ship is on a real orbit (`src/orbit.js`, `src/skyorbit.js`): ISS-like, 420 km up and inclined
+51.6°, at 7.66 km/s — 27,600 km/h, one orbit in 92.8 minutes (the board shows it, with the ground speed) — over an Earth
+that turns on its axis at the real rate for the real date and time (UTC): `src/ephem.js` computes sidereal time and the
+Sun and the Moon with Meeus's algorithms, so the terminator, the day side and the city lights are where they are right
+now, and the ground track slides west each orbit as the planet turns beneath it. On the orbit's night side the ship
+flies in the Earth's shadow. The **Moon** hangs in the sky at its true direction, size and phase — NASA's LRO colour
+mosaic with LOLA relief (`textures/moon/`, the Scientific Visualization Studio's CGI Moon Kit), lit by the Lommel–Seeliger
+law of lunar soil (a crisp terminator, the opposition surge at full Moon) with earthshine on its dark side
+(`src/moon.js`). Whenever it is lit enough to see (≥ 15 %), the flight starts with the Moon rising over the Earth's
+limb beside the ship — over the day side while it waxes and through full, before sunrise in the week it wanes (it then
+rises ahead of the Sun) — and it climbs through the frame in about seven minutes, returning once an orbit (`?start=dawn`
+keeps the classic dawn pass, `?start=moon` forces the Moon). Its true size is only 0.52° — about ten pixels — so, like
+Stellarium's *enlarge Moon*, it is drawn 4× larger by default (Playbox *Moon size*, `?moonscale=1` for the true size);
+the *Moon* camera widens by as much, so the telescope's view stays the true one. The *Time warp* slider (1×–300×) runs the whole sky faster. Choosing an atmospheric route re-phases the
+orbit so the descent begins over that place (and the low-pass airliners are re-routed through whatever point is under
+the ship when a pass begins).
+
+**Lunar orbit** (Playbox *Orbit: Moon*, or `?orbit=moon`, height `?moonalt=` 500–60,000 km, default 1,500): the ship
+circles the Moon on a polar orbit (1.23 km/s at 1,500 km, one revolution in 4.6 hours), the Moon filling the lower sky
+at its true size with NASA's 4K colour mosaic and LOLA relief (fetched only in this mode), the Earth a small real-size
+globe at its true direction and phase (`src/lunarsky.js`). The orbit's plane and starting point are chosen for the
+view on the day: the ground ahead in sunlight, the Sun out of the frame, and the Earth in the frame whenever it stands
+well away from the Sun (near full Moon it is a thin crescent beside the Sun, behind the ship). The *Moon* camera turns
+into a 3.2° telescope on the Earth. Picking a route flies back to the Earth.
 
 **Atmospheric flight** (Playbox switch, or `?atmo=1`): the ship descends to about half an airliner's altitude in this
 scene's exaggerated scale and flies a bird's-eye route over **real satellite imagery** streamed as Web-Mercator tiles
@@ -193,10 +213,54 @@ the episode): it wanders with a random-walk heading, keeps above whatever stands
 sides, and the pilot sees it with the same beams and time-to-contact ranking as rocks and airliners. There are no birds
 in orbit.
 
+**Landing at the airport (`?scenario=landing`, or *Land at the airport* in the Playbox).** A separate scenario in real
+units: the ship at full scale — a 36-m delta-wing spaceplane, 72 t, landing gear with oleo legs, ground spoilers and a
+drag chute (`src/landing/vehicle.js`, `flight.js`) — flies a complete instrument approach to Astro Pilot Spaceport's
+4-km runway 26 and lands itself. The airport is laid out to ICAO Annex 14 (`airport.js`): threshold, aiming-point,
+touchdown-zone and centreline paint, edge/centreline/touchdown-zone lights with the end colour coding, an ALSF-2-style
+approach light system with its sequenced flashers, a PAPI whose red and white come from the viewer's actual angle, an
+ILS, taxiways with rapid exits and their signs (distance-remaining boards, exit and hold-position signs), an apron
+with floodlights, terminal, tower and hangars. The weather is a METAR (`wind=23015G25`,
+`turb=light|moderate|severe`) on a boundary-layer wind profile with MIL-F-8785C Dryden turbulence, and a cloud
+deck that follows the visibility (`vis=cavok|haze|fog`: a few clouds high up, a scattered layer at 3000 ft, or an
+overcast at 300 ft that the ship descends through to break out over the approach lights; `clouds=BKN&ceiling=1200`
+sets another), by day, at dusk or at night (`time=`).
+
+The autoland (`autoland.js`) is the way certified CAT III systems fly, tuned by AI: a Dubins path from wherever the ship
+is to where ATC would vector it onto the localizer (long enough to lose the height at ≤ 3.5° — a longer final, or a
+360, only when it must), L1 lateral guidance, localizer and glideslope capture, a TECS energy law on the thrust
+with the path on the pitch, stabilized-approach gates (else a go-around), an exponential flare whose touchdown sink is
+re-solved five times a second so the touchdown lands on the aim point (model-predictive control), a partial de-crab with
+a wing-low bank, retard, derotation, autobrake and chute, and a brake-to-vacate rollout onto a rapid-exit taxiway. Its
+two dozen gains and thresholds were chosen by CMA-ES over Monte Carlo campaigns of thousands of landings in drawn
+weather (headwind −10…25 kt, crosswind ±20 kt, gusts, turbulence) — on 2,400 unseen landings (1,500 from anywhere 16–30 km out, 900 vectored finals) it landed every one, was
+stabilized by 1000 ft in 99.9 %, and touched down 393–564 m past the threshold (median 456 m) at a median sink rate of
+2.3 ft/s — what airline flight-data monitoring finds typical — within 5.4 m of the centreline, at ≤ 3° of bank and ≤ 1.6 g. Cameras: cinematic, chase, a
+cockpit HUD, the tower, the runway side and under the approach; the sound is procedural WebAudio (the engines on their
+spool, the wind, the tyres' squeal and thump by the sink rate, the rollout's rumble) with spoken callouts and the
+tower's clearance and exit calls; each landing ends with a report card. It runs at 60 fps at 1600×900 in every
+weather and light (`samples/landing-approach-farmland.jpg`, `landing-fog-approach-lights-hud.jpg`, `landing-dusk-final.jpg`,
+`landing-night-flare.jpg`, `landing-rollout-chute.jpg`).
+
 The ship always flies west → east through a corridor that is a torus in x: in the Side view it leaves the screen on
 the right and re-enters on the left (drawn twice near the seam so the wrap is seamless); in the Chase view the wrap is
 invisible because everything is drawn relative to the ship. The backdrop swings around with the camera mode so the
 planets sit ahead of the ship in the chase view.
+
+## The Earth zoom
+
+**Zoom in** in the Playbox (or **Z**) opens a telescope view of the real Earth under the ship: drag to pan, wheel or pinch
+to zoom from 20,000 km down to ~300 m above the ground, right-drag (or Ctrl-drag) to tilt and turn, WASD / arrows / + / −
+/ Q / E / R / F from the keyboard, **Z** or **Esc** to come back. The ship keeps flying underneath (the learned pilot takes
+over while you look around) and a blue dot marks where it is. The imagery is open data fetched live, sharper as you go
+down: NASA Blue Marble (≈ 600 m per pixel), Sentinel-2 cloudless by EOX (≈ 10 m), and Esri World Imagery for the closest
+levels (under 1 m in many places); real relief comes from AWS Terrain Tiles (≈ 30 m). It is drawn as five nested rings of
+tiles around the point you look at (`src/earthrings.js`), each ring a curved mesh with one GPU atlas like the terrain
+strips and each one level coarser than the ring inside it; a ring shows once its tiles are in, so a coarser one — or the
+Blue Marble globe with its procedural relief — covers whatever is still loading, and a coarse ring leaves a hole where
+the finer one is in (otherwise its smoothed valleys would hide the sharp ones). With no network the view still works,
+just without the sharper imagery. **Always day** lights the view as if it were midday; otherwise the real Sun of the sky
+clock lights it. Known limitation: very low and steeply tilted over cliffs, the draped photos smear on near-vertical faces.
 
 ## Files
 
@@ -218,6 +282,10 @@ planets sit ahead of the ship in the chase view.
 | `src/board.js`, `src/pipcam.js` | the flight board (attitude indicator, heading tape, readouts) and its onboard camera |
 | `src/eiffel.js` | the procedural Eiffel Towers (six variants, three levels of detail) |
 | `src/ship.js`, `src/shipsurfaces.js` | the spacecraft and its moving control surfaces (elevons, split rudders / speed brake, body flap, vectored plumes, wingtip vapour) |
+| `src/ephem.js`, `src/orbit.js`, `src/skyorbit.js`, `src/moon.js`, `textures/moon/` | the real sky: UTC clock with time warp, sidereal time, Sun and Moon (Meeus), the 420-km orbit with J2 drift, the sky in the ship's frame, the Moon (NASA SVS CGI Moon Kit) |
+| `src/earthtiles.js`, `src/earthrings.js`, `src/earthzoom.js` | the Earth zoom: tile, level and view maths (pure JS, tested); the nested imagery rings with Terrarium relief and their tile loader; the telescope view (scene, controls, HUD) |
+| `src/lunarsky.js` | the lunar orbit's sky (`?orbit=moon`): the polar orbit round the Moon, the Earth, the Sun and the view-composed start |
+| `src/landing/*.js` | the landing scenario (`?scenario=landing`): SI flight model and gear, METAR wind and Dryden turbulence, the ICAO airport as data and in 3D (paint, lights, PAPI, ILS, signs, buildings), cloud decks, the Dubins/L1/TECS autoland with its predictive flare and rollout, Monte Carlo sim, scene, HUD, tower calls and sound |
 | `model/policy.json`, `model/policy_atmo.json` | the pretrained pilots (weights + observation normaliser): the belt pilot, and the atmospheric pilot fetched when atmospheric flight is first switched on |
 | `tests/*.test.mjs` | `node --test tests/*.test.mjs` — physics, sensors, GAE, log-probs, TF/JS mirror equality, export round trip |
 

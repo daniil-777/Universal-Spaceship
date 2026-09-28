@@ -199,7 +199,7 @@ export function createMountains(scene, hf, { sunDir = new THREE.Vector3(0.6, 0.3
   const fineFull = build(2, true), farFull = build(1, false);
   const parts = [half(fineFull, 0, (fineFull.cols - 1) / 2), half(fineFull, (fineFull.cols - 1) / 2, fineFull.cols - 1), half(farFull, 0, (farFull.cols - 1) / 2), half(farFull, (farFull.cols - 1) / 2, farFull.cols - 1)];
   fineFull.geo.dispose(); farFull.geo.dispose();
-  const sh = shadow ? shadow.uniforms : { uHeight: { value: new THREE.DataTexture(new Float32Array([0]), 1, 1, THREE.RedFormat, THREE.FloatType) }, uSunDir: { value: sunDir.clone() }, uY0: { value: y0 }, uShadowsOn: { value: 0 } };
+  const sh = shadow ? shadow.uniforms : { uHeight: { value: new THREE.DataTexture(new Float32Array([0]), 1, 1, THREE.RedFormat, THREE.FloatType) }, uSunDir: { value: sunDir.clone() }, uY0: { value: y0 }, uShadowsOn: { value: 0 }, uCloudTex: { value: null }, uCloudBox: { value: new THREE.Vector4(0, 0, 1, 1) }, uCloudOn: { value: 0 } };
   const mat = new THREE.ShaderMaterial({ vertexShader: VERT, fragmentShader: FRAG, transparent: true, depthWrite: true,
     uniforms: { uSun: { value: sunDir.clone().normalize() }, uHaze: { value: new THREE.Color(0.62, 0.74, 0.9) }, uAmp: { value: amp }, uVis: { value: 0 }, uSnow: { value: 0.60 }, uTime: { value: 0 }, uApexX: { value: 0 }, uStyle: { value: pillars ? 1 : 0 }, ...sh } });
   const SLOTS = [0, 1, 2, -1, -2, 3, 4, 5], U = mat.uniforms;   // slot offsets in half periods from the fine window's start: fine, fine, fine, far behind ×2, far ahead ×3

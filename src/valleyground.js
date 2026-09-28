@@ -6,7 +6,7 @@
 // by the shadow field over the corridor. No texture files: the canopy is procedural (crown clumps fade out with distance).
 import * as THREE from 'three';
 import { valleySampler, riverZ, riverW } from './avatarlayout.js';
-import { SHADOW_GLSL } from './shadowfield.js';
+import { SHADOW_GLSL, SHADOW_KEYS } from './shadowfield.js';
 import { createValleyTrees } from './valleytrees.js';
 import { createValleyFalls } from './valleyfalls.js';
 
@@ -57,7 +57,7 @@ function riverGeometry(c) {                                // the water surface:
 function groundMaterial(U, S) {
   const mat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.95, metalness: 0, envMapIntensity: 0.9, side: THREE.DoubleSide });   // double-sided: the skirts face either way
   mat.onBeforeCompile = (sh) => {
-    sh.uniforms.uApexX = U.uApexX; if (S) for (const k of ['uHeight', 'uSunDir', 'uY0', 'uShadowsOn', 'uPeriod', 'uShift']) sh.uniforms[k] = S[k];
+    sh.uniforms.uApexX = U.uApexX; if (S) for (const k of SHADOW_KEYS) sh.uniforms[k] = S[k];
     sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nuniform float uApexX; attribute float aNear; varying vec2 vMap; varying float vNear, vUp; varying vec3 vFlatW;')
       .replace('#include <project_vertex>', 'vMap = position.xz; vNear = aNear; vUp = normal.y;' + CURVE);
     sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying vec2 vMap; varying float vNear, vUp; varying vec3 vFlatW;' + NOISE + (S ? SHADOW_GLSL : '') + `

@@ -9,6 +9,7 @@ const CHARTS = [
   ['kl', 'Approx. KL', (v) => fmtNum(v, 4)], ['clipFrac', 'Clip fraction', (v) => fmtNum(v, 3)], ['explainedVar', 'Explained variance', (v) => fmtNum(v, 3)],
 ];
 
+const moonKm = (v) => { const x = 500 * 120 ** (v / 100), p = 10 ** (Math.floor(Math.log10(x)) - 1); return Math.round(x / p) * p; }, fmtKm = (km) => km.toLocaleString('en-US') + ' km';   // the lunar orbit's height slider (0–100, two significant digits)
 export function createUI(h) {
   const $ = (id) => document.getElementById(id);
   const ui = { keys: new Set(), curriculum: true, trainSpeed: 'balanced' };
@@ -29,9 +30,13 @@ export function createUI(h) {
   range('astSpeed', 'astSpeedV', (v) => v.toFixed(2) + '×', (v) => h.astSpeed(v));
   range('comets', 'cometsV', (v) => String(v), (v) => h.comets(v));
   range('cometSpeed', 'cometSpeedV', (v) => v.toFixed(2) + '×', (v) => h.cometSpeed(v));
+  range('weather', 'weatherV', (v) => v.toFixed(2), (v) => h.weather(v)); range('warp', 'warpV', (v) => [1, 10, 60, 300][v] + '×', (v) => h.warp && h.warp([1, 10, 60, 300][v])); range('wind', 'windV', (v) => v.toFixed(1) + '×', (v) => h.wind(v)); range('cover', 'coverV', (v) => v.toFixed(1) + '×', (v) => h.cover(v)); range('turb', 'turbV', (v) => v.toFixed(1) + '×', (v) => h.turb(v)); seg($('skySeg'), 'sky', (k) => h.sky(k)); seg($('orbitSeg'), 'orbit', (b) => h.orbit(b));
+  range('moonScale', 'moonScaleV', (v) => (v === 1 ? 'true' : v + '×'), (v) => h.moonScale(v));   // the Earth orbit's Moon: 1× = true size
+  range('moonAlt', 'moonAltV', (v) => fmtKm(moonKm(v)), (v) => h.moonAlt(moonKm(v)));   // log scale: 500 km … 60,000 km
   seg($('camSeg'), 'cam', (c) => h.camera(c));
   seg($('routeSeg'), 'route', (r) => h.route(r));
   const sw = (id, cb) => { const el = $(id); el.addEventListener('change', () => cb(el.checked)); return el; };
+  sw('swAutoThr', (b) => h.autoThr(b));
   sw('swBoard', (b) => h.board(b)); sw('swTrail', (b) => h.trail(b)); sw('swSensors', (b) => h.sensors(b)); sw('swManual', (b) => h.manual(b)); sw('swInvert', (b) => h.invert(b)); sw('swLowPass', (b) => h.lowPass(b)); sw('swAtmo', (b) => h.atmo(b)); sw('swSkyline', (b) => h.skyline(b));
 
   // training
@@ -54,7 +59,7 @@ export function createUI(h) {
     charts[key] = { chart: new LineChart(cv, { format: fmt, tip }), cur, fmt };
   }
   const fleet = new FleetMap($('fleet'), ENV.xHalf, ENV.yHalf);
-  const sensor = new HeatGrid($('sensorGrid'), ENV.rays.nAz, ENV.rays.nEl);
+  const sensor = new HeatGrid($('sensorGrid'), ENV.rays.nAz, ENV.rays.nEl), radar = new HeatGrid($('radarGrid'), ENV.rays.nAz, ENV.rays.nEl, '#ff8a6b');
   const bars = new Bars($('actionBars'), ['pitch', 'yaw', 'roll', 'thrust']);
   ui.drawCharts = () => { if ($('training').classList.contains('hidden')) return; for (const k in charts) charts[k].chart.draw(); fleet.draw(); };
 
@@ -80,7 +85,12 @@ export function createUI(h) {
   const tag = () => { $('pilotTag').textContent = manualTag + ' · ' + phaseTag; };
   ui.setManual = (b) => { $('swManual').checked = b; manualTag = b ? 'manual' : 'autopilot'; tag(); };
   ui.setPhase = (t) => { phaseTag = t; tag(); };
-  ui.setControls = ({ trail, sensors, density, astSpeed, simSpeed, comets, atmo, skyline, board }) => {
+  ui.setControls = ({ trail, sensors, density, astSpeed, simSpeed, comets, atmo, skyline, board, weather, wind, cover, turb, sky, autoThr, orbit, moonAlt, moonScale }) => {
+    if (moonScale != null) { $('moonScale').value = moonScale; $('moonScaleV').textContent = moonScale === 1 ? 'true' : moonScale + '×'; }
+    if (orbit != null) setSeg($('orbitSeg'), 'orbit', orbit); if (moonAlt != null) { $('moonAlt').value = Math.round(100 * Math.log(moonAlt / 500) / Math.log(120)); $('moonAltV').textContent = fmtKm(Math.round(moonAlt)); }
+    if (sky != null) $('skySeg').querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.sky === sky));
+    for (const [k, v] of [['wind', wind], ['cover', cover], ['turb', turb]]) if (v != null) { $(k).value = v; $(k + 'V').textContent = v.toFixed(1) + '×'; }
+    if (weather != null) { $('weather').value = weather; $('weatherV').textContent = weather.toFixed(2); } if (autoThr != null) $('swAutoThr').checked = autoThr;
     if (board != null) $('swBoard').checked = board;
     if (atmo != null) { $('swAtmo').checked = atmo; } if (skyline != null) { $('swSkyline').checked = skyline; }
     if (comets != null) { $('comets').value = comets; $('cometsV').textContent = String(comets); }
@@ -95,6 +105,7 @@ export function createUI(h) {
     $('hudFlight').textContent = Math.round(flight) + ' s'; $('hudCrashes').textContent = String(crashes); $('hudFps').textContent = fmtNum(fps, 0);
   };
   const sensorVals = new Float32Array(N_RAYS);
+  ui.radar = (vals) => { radar.set(vals); radar.draw(); };
   ui.sensors = (rayHit, range) => { for (let i = 0; i < N_RAYS; i++) sensorVals[i] = 1 - rayHit[i] / range; sensor.set(sensorVals); sensor.draw(); };
   ui.actions = (a) => { bars.set(a); bars.draw(); };
   ui.metrics = (m, hist, marks) => {
