@@ -53,7 +53,7 @@ export async function start() {
     if (!paused && !sim.rep.done) { acc += dt * warp; let n = 0; while (acc >= CYCLE && n < 600 && !sim.rep.done) { sim.step(); acc -= CYCLE; n++; } }
     const s1 = performance.now();
     scene.frame(sim, dt, sim.t);
-    hud.update(sim, { warp });
+    hud.update(sim, { warp, sel: warpSel });
     if (sim.rep.done && !reported) { reported = true; hud.report(sim); }
     perf.simMs.push(s1 - s0); perf.frameMs.push(performance.now() - now);
     if (perf.simMs.length > 600) { perf.simMs.shift(); perf.frameMs.shift(); }

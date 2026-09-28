@@ -7,6 +7,8 @@ import { JETS, GLOW_SLOTS, CYCLE } from './consts.js';
 
 export const SCALE = 9;
 const REST = Object.freeze({ throttle: 0, speed: 0, air: 0, pitch: 0, yaw: 0, roll: 0 });
+// visual only: the P13/P14 plumes leave the model's nozzle bells (ship.js glow 0/1 x 9); physics keeps the spec's arms
+const PLUME_AT = Object.freeze({ P13: Object.freeze([-17.46, -0.09, 4.14]), P14: Object.freeze([-17.46, -0.09, -4.14]) });
 
 export function createShipView(scene, { seed = 1 } = {}) {
   const ship = createShip({ seed });
@@ -30,8 +32,8 @@ export function createShipView(scene, { seed = 1 } = {}) {
         level[j] += (want - level[j]) * k;
       }
       GLOW_SLOTS.forEach((j, slot) => {
-        const jet = JETS[j], v = level[j], off = 0.05 + 0.15 * v, k = 2.4 * v;
-        iPos.setXYZ(slot, jet.pos[0] / SCALE + jet.d[0] * off, jet.pos[1] / SCALE + jet.d[1] * off, jet.pos[2] / SCALE + jet.d[2] * off);
+        const jet = JETS[j], p = PLUME_AT[jet.name] || jet.pos, v = level[j], off = 0.05 + 0.15 * v, k = 2.4 * v;
+        iPos.setXYZ(slot, p[0] / SCALE + jet.d[0] * off, p[1] / SCALE + jet.d[1] * off, p[2] / SCALE + jet.d[2] * off);
         iCol.setXYZW(slot, 0.85 * k, 0.93 * k, k, v > 0.003 ? (0.1 + 0.24 * v) * SCALE : 0);
       });
       iPos.needsUpdate = true;

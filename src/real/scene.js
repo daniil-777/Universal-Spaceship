@@ -35,11 +35,20 @@ export function createRealScene(canvas, { seed = 1 } = {}) {
   const sky = findSky(space.root), planets = findPlanets(space.root), planet0 = planets.map((g) => g.position.clone());
   const sun = new THREE.DirectionalLight(0xfff2e0, 2.4), fill = new THREE.HemisphereLight(0x2a3a5a, 0x1c2c48, 0.35);
   scene.add(sun, sun.target, fill);
+  // docking lights, always on (in the Earth's shadow they are all that lights the pair): spot(parent, colour, intensity,
+  // position, target, half-angle, range), decay 0 with a soft range cut-off, so there is no hot spot at the port. Station:
+  // a floodlight on a boom aft of the port lights the station body near the approach, one by the port lights the
+  // approaching ship's nose down the corridor. Ship: a docking light above the nose lights the port it approaches
+  // (ship units: the x9 group).
+  const spot = (parent, col, I, p, t, ang, range) => { const l = new THREE.SpotLight(col, I, range, ang, 0.6, 0); l.position.set(...p); l.target.position.set(...t); parent.add(l, l.target); return l; };
+  spot(scene, 0xfff1e0, 0.9, [-18, 6, 4], [-3, 0, 0], 0.85, 60);
+  spot(scene, 0xfff1e0, 1.0, [-14.2, 2.4, 0], [-60, 0, 0], 0.36, 220);
   const before = new Set(scene.children);
   const sats = createSatellites(scene, { max: 1 });
   sats.update([{ p: [0, 0, 0], q: STATION_Q, r: STATION_R }]);
   const stationMeshes = scene.children.filter((c) => !before.has(c));
   const ship = createShipView(scene, { seed });
+  spot(ship.group, 0xe8f0ff, 1.2, [18 / 9, -0.2 / 9, 0], [40 / 9, -0.99 / 9, 0], 0.3, 150);
   const composer = new EffectComposer(renderer), fg = new RenderPass(scene, camera);
   fg.clear = false;
   fg.clearDepth = true;

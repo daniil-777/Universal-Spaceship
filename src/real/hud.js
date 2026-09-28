@@ -22,6 +22,7 @@ const CSS = `
   .rl-bar button.on { background: rgba(125,200,255,0.28); border-color: #9fd0ff; }
   .rl-inset { left: 16px; bottom: 16px; padding: 6px; } .rl-inset canvas { display: block; width: 240px; height: 240px; } .rl-inset p { margin: 4px 2px 0; font-size: 10px; opacity: 0.7; max-width: 240px; }
   .rl-card { left: 50%; top: 50%; transform: translate(-50%, -50%); padding: 18px 22px; width: min(460px, calc(100vw - 32px)); font: 400 14px/1.45 system-ui, sans-serif; }
+  .rl-card.rl-side { left: auto; top: auto; right: 16px; transform: none; width: min(340px, calc(100vw - 32px)); }
   .rl-card h3 { margin: 0 0 8px; font: 700 18px/1.2 system-ui, sans-serif; } .rl-card td { padding: 2px 10px 2px 0; } .rl-card .ok { color: #7dffae; } .rl-card .no { color: #ff8a7a; }
   @media (max-width: 700px) { .rl-jets { display: none; } .rl-inset canvas { width: 160px; height: 160px; } }`;
 // every value enters the DOM through textContent; only the fixed literal markup of INTRO and READ goes through innerHTML
@@ -42,14 +43,16 @@ export function createHud(root, on) {
   const chipEl = CHIPS.map((c) => el('span', '', chips, c)), jetEl = JETS.map((j) => el('i', '', jets, j.name));
   const btn = (label, fn) => { const b = el('button', '', bar, label); b.addEventListener('click', () => fn(b)); return b; };
   btn('view: chase', (b) => { b.textContent = 'view: ' + on.view(); });
-  btn('warp: auto', (b) => { b.textContent = 'warp: ' + on.warp(); });
+  const warpBtn = btn('warp: auto', (b) => { b.textContent = 'warp: ' + on.warp(); });
   btn('new run', () => on.restart());
   btn('Back to the game', () => on.back());
   let card = null, drift = null, driftT = -1, note = '';
   const closeCard = () => { if (card) { card.remove(); card = null; } };
-  // fill(card) builds the card's content; the button row follows it
-  function showCard(fill, buttons) {
-    closeCard(); card = el('div', 'rl rl-card', root); fill(card);
+  // fill(card) builds the card's content; the button row follows it. side: at the right, just above the button bar, so a
+  // result card leaves the docked pair (the middle of the screen) in view
+  function showCard(fill, buttons, side = false) {
+    closeCard(); card = el('div', side ? 'rl rl-card rl-side' : 'rl rl-card', root); fill(card);
+    if (side) card.style.bottom = `${Math.round(bar.getBoundingClientRect().height) + 26}px`;
     const row = el('div', '', card); row.style.marginTop = '12px';
     for (const [label, fn] of buttons) { const b = el('button', '', row, label); b.style.marginRight = '8px'; b.addEventListener('click', fn); }
   }
@@ -86,6 +89,8 @@ export function createHud(root, on) {
       const vals = { ph, t: (sim.t / 60).toFixed(1), r: r.toFixed(1), rho: rho.toFixed(2), rhoV: rhoFromR(r).toFixed(1), rhoDot: (rhoDot * 100).toFixed(1), dv: sim.rep.dv.toFixed(2), prop: (MASS0 - sim.mass).toFixed(1), warp: info.warp.toFixed(0), mode: sim.ctrl.stats.mode === 'P' ? 'primary' : 'vernier', note };
       for (const k in vals) slot[k].textContent = vals[k];
       slot.noteRow.hidden = !note;
+      // the warp button follows the selection, whether set by a click, the URL or __real.setWarp
+      if (info.sel !== undefined && warpBtn.textContent !== 'warp: ' + info.sel) warpBtn.textContent = 'warp: ' + info.sel;
       JETS.forEach((j, i) => jetEl[i].classList.toggle('on', sim.onTimes[i] > 0));
       drawInset(sim);
     },
@@ -103,7 +108,7 @@ export function createHud(root, on) {
           row('angle', c.ang.toFixed(2) + ' deg', c.ang <= IDSS.ang / DEG);
         } else el('p', '', card, sim.rep.reason || 'The breakout left the keep-out sphere on a passively safe drift.');
         el('p', '', card, `${(sim.t / 60).toFixed(1)} min · dv ${sim.rep.dv.toFixed(2)} m/s · ${(MASS0 - sim.mass).toFixed(1)} kg`);
-      }, [['New run', () => { closeCard(); on.restart(); }], ['Back to the game', () => on.back()]]);
+      }, [['New run', () => { closeCard(); on.restart(); }], ['Back to the game', () => on.back()]], true);
     },
     closeCard,
   };
