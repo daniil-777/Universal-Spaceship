@@ -19,7 +19,7 @@ export async function start() {
   document.head.appendChild(css);
   const qs = new URLSearchParams(location.search);
   const startMode = pick(qs.get('start'), ['far', 'near', 'final'], 'far'), nav = pick(qs.get('nav'), ['noisy', 'truth'], 'noisy'), filter = qs.get('filter') !== '0';
-  let warpSel = pick(qs.get('warp'), WARPS, 'auto'), seed = +qs.get('seed') || Date.now() % 100000;
+  let warpSel = pick(qs.get('warp'), WARPS, 'auto'), seed = qs.has('seed') && Number.isFinite(+qs.get('seed')) ? +qs.get('seed') : Date.now() % 100000;
   const ignored = ['debris', 'inject', 'pilot'].filter((k) => qs.has(k) && qs.get(k) !== '0' && !(k === 'pilot' && qs.get(k) === 'gnc'));
   const make = (s) => createRealSim({ seed: s, start: startMode, nav, filter });
   let sim = make(seed);

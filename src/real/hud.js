@@ -24,14 +24,21 @@ const CSS = `
   .rl-card { left: 50%; top: 50%; transform: translate(-50%, -50%); padding: 18px 22px; width: min(460px, calc(100vw - 32px)); font: 400 14px/1.45 system-ui, sans-serif; }
   .rl-card h3 { margin: 0 0 8px; font: 700 18px/1.2 system-ui, sans-serif; } .rl-card td { padding: 2px 10px 2px 0; } .rl-card .ok { color: #7dffae; } .rl-card .no { color: #ff8a7a; }
   @media (max-width: 700px) { .rl-jets { display: none; } .rl-inset canvas { width: 160px; height: 160px; } }`;
-const el = (tag, cls, parent, html = '') => { const e = document.createElement(tag); if (cls) e.className = cls; e.innerHTML = html; parent.appendChild(e); return e; };
+// every value enters the DOM through textContent; only the fixed literal markup of INTRO and READ goes through innerHTML
+const el = (tag, cls, parent, text = '') => { const e = document.createElement(tag); if (cls) e.className = cls; e.textContent = text; parent.appendChild(e); return e; };
+const INTRO = '<h3>Real spacecraft</h3><p>Real reaction-control jets give a Shuttle-class ship about <b>0.08 m/s&sup2;</b>. Dodging the asteroid belt of the game would need about <b>35 g</b> with 1.5-3.6 s of warning, so real ships do not dodge: they rendezvous. Here a classical guidance, navigation and control autopilot flies a 95 t orbiter from 2 km behind a Mir-class station to a soft dock, as NASA plans it: Clohessy-Wiltshire relative motion with a drag bound, 22 jets with minimum impulse bits, a 600 kg propellant budget, and passive safety after every burn.</p>';
+// the readouts' fixed markup: update() writes each data-k slot's textContent; the note row shows only when a note is set
+const READ = '<b data-k="ph"></b> &middot; t <span data-k="t"></span> min<br>r <span data-k="r"></span> m &middot; rho <span data-k="rho"></span> m (<span data-k="rhoV"></span> on V-bar)<br>rho-dot <span data-k="rhoDot"></span> cm/s<br>dv <span data-k="dv"></span> / <span data-k="dvTotal"></span> m/s &middot; prop <span data-k="prop"></span> kg<br>warp <span data-k="warp"></span>x &middot; <span data-k="mode"></span> attitude<span data-k="noteRow" hidden><br><span data-k="note"></span></span>';
 
 export function createHud(root, on) {
   el('style', '', document.head).textContent = CSS;
   const chips = el('div', 'rl rl-chips', root), read = el('div', 'rl rl-read', root), jets = el('div', 'rl rl-jets', root);
   const inset = el('div', 'rl rl-inset', root), bar = el('div', 'rl rl-bar', root);
+  read.innerHTML = READ;
+  const slot = Object.fromEntries([...read.querySelectorAll('[data-k]')].map((e) => [e.dataset.k, e]));
+  slot.dvTotal.textContent = DV_TOTAL.toFixed(1);
   const cv = el('canvas', '', inset); cv.width = cv.height = 480; const g = cv.getContext('2d');
-  el('p', '', inset, 'LVLH, X along-track, Y up; propagation is real (Clohessy-Wiltshire, drag bound 2e-7 m/s&sup2;)');
+  el('p', '', inset, 'LVLH, X along-track, Y up; propagation is real (Clohessy-Wiltshire, drag bound 2e-7 m/s²)');
   const chipEl = CHIPS.map((c) => el('span', '', chips, c)), jetEl = JETS.map((j) => el('i', '', jets, j.name));
   const btn = (label, fn) => { const b = el('button', '', bar, label); b.addEventListener('click', () => fn(b)); return b; };
   btn('view: chase', (b) => { b.textContent = 'view: ' + on.view(); });
@@ -40,8 +47,9 @@ export function createHud(root, on) {
   btn('Back to the game', () => on.back());
   let card = null, drift = null, driftT = -1, note = '';
   const closeCard = () => { if (card) { card.remove(); card = null; } };
-  function showCard(html, buttons) {
-    closeCard(); card = el('div', 'rl rl-card', root, html);
+  // fill(card) builds the card's content; the button row follows it
+  function showCard(fill, buttons) {
+    closeCard(); card = el('div', 'rl rl-card', root); fill(card);
     const row = el('div', '', card); row.style.marginTop = '12px';
     for (const [label, fn] of buttons) { const b = el('button', '', row, label); b.style.marginRight = '8px'; b.addEventListener('click', fn); }
   }
@@ -68,22 +76,34 @@ export function createHud(root, on) {
   return {
     note(text) { note = text; },
     intro(onStart) {
-      showCard(`<h3>Real spacecraft</h3><p>Real reaction-control jets give a Shuttle-class ship about <b>0.08 m/s&sup2;</b>. Dodging the asteroid belt of the game would need about <b>35 g</b> with 1.5-3.6 s of warning, so real ships do not dodge: they rendezvous. Here a classical guidance, navigation and control autopilot flies a 95 t orbiter from 2 km behind a Mir-class station to a soft dock, as NASA plans it: Clohessy-Wiltshire relative motion with a drag bound, 22 jets with minimum impulse bits, a 600 kg propellant budget, and passive safety after every burn.</p>`,
+      showCard((c) => { c.innerHTML = INTRO; },
         [['Start', () => { closeCard(); onStart(); }], ['Back to the game', () => on.back()]]);
     },
     update(sim, info) {
       const ph = sim.rep.result === 'capture' ? 'CAPTURE' : sim.guid.st.phase;
       chipEl.forEach((c, i) => c.classList.toggle('on', CHIPS[i] === ph || (ph === PH.DEPART && CHIPS[i] === PH.BREAKOUT)));
       const x = sim.x, r = Math.hypot(x[0], x[1], x[2]), p = portRel(x, sim.q), rho = Math.hypot(...p), rhoDot = (p[0] * x[3] + p[1] * x[4] + p[2] * x[5]) / Math.max(rho, 1e-9);
-      read.innerHTML = `<b>${ph}</b> &middot; t ${(sim.t / 60).toFixed(1)} min<br>r ${r.toFixed(1)} m &middot; rho ${rho.toFixed(2)} m (${rhoFromR(r).toFixed(1)} on V-bar)<br>rho-dot ${(rhoDot * 100).toFixed(1)} cm/s<br>dv ${sim.rep.dv.toFixed(2)} / ${DV_TOTAL.toFixed(1)} m/s &middot; prop ${(MASS0 - sim.mass).toFixed(1)} kg<br>warp ${info.warp.toFixed(0)}x &middot; ${sim.ctrl.stats.mode === 'P' ? 'primary' : 'vernier'} attitude${note ? '<br>' + note : ''}`;
+      const vals = { ph, t: (sim.t / 60).toFixed(1), r: r.toFixed(1), rho: rho.toFixed(2), rhoV: rhoFromR(r).toFixed(1), rhoDot: (rhoDot * 100).toFixed(1), dv: sim.rep.dv.toFixed(2), prop: (MASS0 - sim.mass).toFixed(1), warp: info.warp.toFixed(0), mode: sim.ctrl.stats.mode === 'P' ? 'primary' : 'vernier', note };
+      for (const k in vals) slot[k].textContent = vals[k];
+      slot.noteRow.hidden = !note;
       JETS.forEach((j, i) => jetEl[i].classList.toggle('on', sim.onTimes[i] > 0));
       drawInset(sim);
     },
     report(sim) {
-      const c = sim.rep.contact, row = (name, v, ok) => `<tr><td>${name}</td><td>${v}</td><td class="${ok ? 'ok' : 'no'}">${ok ? 'within' : 'outside'}</td></tr>`;
-      const body = c ? `<table>${row('closing', (c.close * 100).toFixed(1) + ' cm/s', c.close >= IDSS.closeMin && c.close <= IDSS.closeMax)}${row('lateral', (c.lat * 100).toFixed(2) + ' cm/s', c.lat <= IDSS.lat)}${row('rates', c.rate.toFixed(3) + ' deg/s', c.rate <= IDSS.rate / DEG)}${row('misalignment', (c.mis * 100).toFixed(1) + ' cm', c.mis <= IDSS.mis)}${row('angle', c.ang.toFixed(2) + ' deg', c.ang <= IDSS.ang / DEG)}</table>` : `<p>${sim.rep.reason || 'The breakout left the keep-out sphere on a passively safe drift.'}</p>`;
-      showCard(`<h3>${sim.rep.result === 'capture' ? 'Soft capture' : sim.rep.result === 'breakout' ? 'Breakout' : 'Failure'}</h3>${body}<p>${(sim.t / 60).toFixed(1)} min &middot; dv ${sim.rep.dv.toFixed(2)} m/s &middot; ${(MASS0 - sim.mass).toFixed(1)} kg</p>`,
-        [['New run', () => { closeCard(); on.restart(); }], ['Back to the game', () => on.back()]]);
+      const c = sim.rep.contact, res = sim.rep.result;
+      showCard((card) => {
+        el('h3', '', card, res === 'capture' ? 'Soft capture' : res === 'breakout' ? 'Breakout' : 'Failure');
+        if (c) {
+          const body = el('tbody', '', el('table', '', card));
+          const row = (name, v, ok) => { const tr = el('tr', '', body); el('td', '', tr, name); el('td', '', tr, v); el('td', ok ? 'ok' : 'no', tr, ok ? 'within' : 'outside'); };
+          row('closing', (c.close * 100).toFixed(1) + ' cm/s', c.close >= IDSS.closeMin && c.close <= IDSS.closeMax);
+          row('lateral', (c.lat * 100).toFixed(2) + ' cm/s', c.lat <= IDSS.lat);
+          row('rates', c.rate.toFixed(3) + ' deg/s', c.rate <= IDSS.rate / DEG);
+          row('misalignment', (c.mis * 100).toFixed(1) + ' cm', c.mis <= IDSS.mis);
+          row('angle', c.ang.toFixed(2) + ' deg', c.ang <= IDSS.ang / DEG);
+        } else el('p', '', card, sim.rep.reason || 'The breakout left the keep-out sphere on a passively safe drift.');
+        el('p', '', card, `${(sim.t / 60).toFixed(1)} min · dv ${sim.rep.dv.toFixed(2)} m/s · ${(MASS0 - sim.mass).toFixed(1)} kg`);
+      }, [['New run', () => { closeCard(); on.restart(); }], ['Back to the game', () => on.back()]]);
     },
     closeCard,
   };
