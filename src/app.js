@@ -34,7 +34,7 @@ import { createTrainClient } from './train-client.js';
 import { createUI } from './ui.js';
 import { createBoard } from './board.js';
 import { createPipCam } from './pipcam.js';
-import { createEdgeFence } from './edgefence.js';
+import { createEdgeFence } from './edgefence.js'; import { attachEarthZoom } from './earthzoom.js';
 import { wrapX } from './mathx.js';
 
 const TFJS = { url: 'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js', sri: 'sha384-vE8hbVJ4lezako5rlvE7bY0BVzWlFhZncPlckrqNwcUQpVtgbENTgZ8TBbnPjZre' };
@@ -50,7 +50,7 @@ const state = { playing: true, simSpeed: num('speed', 1), density: Math.round(nu
   crashTimer: 0, flightTime: 0, laps: 0, fps: 60, training: false, trainSpeed: 'balanced', curriculum: qs.get('curriculum') !== '0',
   lowPasses: qs.get('lowpass') !== '0', lowPass: qs.get('lowpass') === '1', phaseTimer: qs.get('lowpass') === '1' ? 0 : 40, atmo: false, route: ROUTES[qs.get('route')] ? qs.get('route') : 'alps', skyline: qs.get('skyline') === '1' || (qs.get('skyline') !== '0' && !!(ROUTES[qs.get('route')] && ROUTES[qs.get('route')].city)) };   // skyline = fly the route's city among its towers   // orbit ↔ low pass cycle; atmo = atmospheric flight flag
 let agent = null, ui = null, train = null;
-let board = null, pip = null;
+let board = null, pip = null, zoom = null;
 const envMaps = { space: null, day: null, bake: null, isDay: false };   // image-based light: space, or a daylight sky once the descent is half done                                 // the flight board and its onboard camera
 let atmoAgent = null, atmoLoad = null, singlePilot = false;   // the atmospheric pilot (model/policy_atmo.json) flies the atmosphere; one pilot only once the user trains, loads or resets a policy
 const env = new SpaceEnv(Math.round(num('seed', 11)), { level: 1, count: state.density, speedScale: state.astSpeed, comets: state.comets, cometSpeed: state.cometSpeed });
@@ -440,6 +440,7 @@ async function main() {
   pip = createPipCam(renderer); if (qs.has('cam2')) pip.setMode(qs.get('cam2'));
   board = createBoard(document.getElementById('board'), { onCamera: () => pip.cycle() }); board.setCamera(pip.mode);
   board.onRect((r) => pip.setRect(r)); if (qs.get('board') === '0') { board.setVisible(false); ui.setControls({ board: false }); }
+  zoom = attachEarthZoom({ renderer, space, host: { get manual() { return state.manual; }, setManual: (b) => { state.manual = b; ui.setManual(b); }, toast: (m) => ui.toast(m, 3000), credit: () => document.getElementById('credit').textContent, setCredit: (t) => ui.setCredit(t), flightControls: (on) => { rig.controls.enabled = on && rig.mode === 'orbit'; }, entry: () => { const o = space.orbitInfo, r = ROUTES[state.route]; return state.atmo && terrain ? { lat: r.lat, lon: r.lon0 + terrain.far.stats.scroll * 2.8 / (111.32 * Math.cos(r.lat * Math.PI / 180)), altKm: 8 } : { lat: o.lat, lon: o.lon, altKm: o.altKm }; } } });
   ui.loading('loading the policy…');
   await loadPolicy(); ui.policyInfo(policyText()); showPretrainingCurves();
   if (qs.has('mode')) { const named = { color: 0, colour: 0, mono: 1, ink: 2 }[qs.get('mode')]; setMode(named !== undefined ? named : (+qs.get('mode') || 0)); }
@@ -467,8 +468,8 @@ async function main() {
     tickLowPass(dt); updateVisuals(Math.min(1, acc / ENV.dt), dtReal);
     space.update(t, dt, camera);
     clouds.update({ env, atmosphere: space.atmosphere, sunDir: space.sunDirWorld, fog: scene.fog, time: state.flightTime }); cloudShadows.update(env, camera.position.x, space.sunDirWorld, space.atmosphere); droplets.update(dtReal, camera, env, space.atmosphere);
-    if (state.bypass) renderer.render(scene, camera); else composer.render();
-    if (board.visible) { drawBoard(dtReal); }
+    if (zoom.active) zoom.render(dtReal); else if (state.bypass) renderer.render(scene, camera); else composer.render();
+    if (board.visible && !zoom.active) { drawBoard(dtReal); }
     ap.frames++;
     hudTimer += dtReal;
     if (hudTimer >= 0.1) {
@@ -480,7 +481,7 @@ async function main() {
   requestAnimationFrame(frame);
 }
 
-Object.defineProperties(ap, { clouds: { get: () => clouds }, shadow: { get: () => shadow }, board: { get: () => board }, pip: { get: () => pip }, agent: { get: () => agent }, atmoAgent: { get: () => atmoAgent }, pilot: { get: () => activeAgent() }, space: { get: () => space }, mountains: { get: () => mountains }, city: { get: () => city }, chunks: { get: () => chunks }, camera: { get: () => camera }, info: { get: () => renderer.info.render } }); ap.THREE = THREE;   // live getters (Object.assign would copy the values once)
+Object.defineProperties(ap, { zoom: { get: () => zoom }, clouds: { get: () => clouds }, shadow: { get: () => shadow }, board: { get: () => board }, pip: { get: () => pip }, agent: { get: () => agent }, atmoAgent: { get: () => atmoAgent }, pilot: { get: () => activeAgent() }, space: { get: () => space }, mountains: { get: () => mountains }, city: { get: () => city }, chunks: { get: () => chunks }, camera: { get: () => camera }, info: { get: () => renderer.info.render } }); ap.THREE = THREE;   // live getters (Object.assign would copy the values once)
 Object.assign(ap, { env, setMode, setInvert, setCamera: (c) => { setCameraMode(c); ui.setCamera(c); }, setSensors: (b) => { state.sensors = b; ui.setControls({ sensors: b }); },
   setManual: (b) => { state.manual = b; ui.setManual(b); }, setPlaying: (b) => { state.playing = b; ui.setPlaying(b); }, startTraining, stopTraining, resetPolicy, showTraining: (b) => ui.showPanels(!b, b), setLowPass, setAtmo, setRoute, setSkyline, terrainStats: () => (terrain ? terrain.stats : null),
   exportPolicy: (meta) => agent.toJSON({ trainedIn: ((train && train.view.backend) || 'browser') + ' · ' + (navigator.platform || ''), ...(meta || {}) }), loadPolicyJSON,
