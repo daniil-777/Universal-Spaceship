@@ -31,6 +31,7 @@ export function createUI(h) {
   range('comets', 'cometsV', (v) => String(v), (v) => h.comets(v));
   range('cometSpeed', 'cometSpeedV', (v) => v.toFixed(2) + '×', (v) => h.cometSpeed(v));
   range('weather', 'weatherV', (v) => v.toFixed(2), (v) => h.weather(v)); range('warp', 'warpV', (v) => [1, 10, 60, 300][v] + '×', (v) => h.warp && h.warp([1, 10, 60, 300][v])); range('wind', 'windV', (v) => v.toFixed(1) + '×', (v) => h.wind(v)); range('cover', 'coverV', (v) => v.toFixed(1) + '×', (v) => h.cover(v)); range('turb', 'turbV', (v) => v.toFixed(1) + '×', (v) => h.turb(v)); seg($('skySeg'), 'sky', (k) => h.sky(k)); seg($('orbitSeg'), 'orbit', (b) => h.orbit(b));
+  range('moonScale', 'moonScaleV', (v) => (v === 1 ? 'true' : v + '×'), (v) => h.moonScale(v));   // the Earth orbit's Moon: 1× = true size
   range('moonAlt', 'moonAltV', (v) => fmtKm(moonKm(v)), (v) => h.moonAlt(moonKm(v)));   // log scale: 500 km … 60,000 km
   seg($('camSeg'), 'cam', (c) => h.camera(c));
   seg($('routeSeg'), 'route', (r) => h.route(r));
@@ -84,7 +85,8 @@ export function createUI(h) {
   const tag = () => { $('pilotTag').textContent = manualTag + ' · ' + phaseTag; };
   ui.setManual = (b) => { $('swManual').checked = b; manualTag = b ? 'manual' : 'autopilot'; tag(); };
   ui.setPhase = (t) => { phaseTag = t; tag(); };
-  ui.setControls = ({ trail, sensors, density, astSpeed, simSpeed, comets, atmo, skyline, board, weather, wind, cover, turb, sky, autoThr, orbit, moonAlt }) => {
+  ui.setControls = ({ trail, sensors, density, astSpeed, simSpeed, comets, atmo, skyline, board, weather, wind, cover, turb, sky, autoThr, orbit, moonAlt, moonScale }) => {
+    if (moonScale != null) { $('moonScale').value = moonScale; $('moonScaleV').textContent = moonScale === 1 ? 'true' : moonScale + '×'; }
     if (orbit != null) setSeg($('orbitSeg'), 'orbit', orbit); if (moonAlt != null) { $('moonAlt').value = Math.round(100 * Math.log(moonAlt / 500) / Math.log(120)); $('moonAltV').textContent = fmtKm(Math.round(moonAlt)); }
     if (sky != null) $('skySeg').querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.sky === sky));
     for (const [k, v] of [['wind', wind], ['cover', cover], ['turb', turb]]) if (v != null) { $(k).value = v; $(k + 'V').textContent = v.toFixed(1) + '×'; }

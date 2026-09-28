@@ -11,21 +11,23 @@ export function createMoon({ texturePath = 'textures/' } = {}) {
     uniforms: { uColor: { value: load('moon_color_2k.jpg', true) }, uNormal: { value: load('moon_normal_2k.jpg', false) }, uSun: { value: new THREE.Vector3(1, 0, 0) },
       uEarth: { value: new THREE.Vector3(0, -1, 0) }, uShine: { value: 0 }, uGain: { value: 1.3 } },
     vertexShader: /* glsl */`
-      varying vec2 vUv; varying vec3 vN, vE, vNo, vW;
+      varying vec2 vUv; varying vec3 vN, vE, vNo, vW, vAx;
       #include <common>
       #include <logdepthbuf_pars_vertex>
       void main() {
         vUv = uv; vec3 n = normalize(position), e = normalize(cross(vec3(0.0, 1.0, 0.0), n + vec3(0.0, 0.0, 1e-4)));   // east, then north: the equirectangular map's frame
-        mat3 m = mat3(modelMatrix); vN = normalize(m * n); vE = normalize(m * e); vNo = normalize(m * cross(n, e));
+        mat3 m = mat3(modelMatrix); vAx = normalize(m * vec3(0.0, 1.0, 0.0)); vN = normalize(m * n); vE = normalize(m * e); vNo = normalize(m * cross(n, e));
         vec4 wp = modelMatrix * vec4(position, 1.0); vW = wp.xyz; gl_Position = projectionMatrix * viewMatrix * wp;
         #include <logdepthbuf_vertex>
       }`,
     fragmentShader: /* glsl */`
-      uniform sampler2D uColor, uNormal; uniform vec3 uSun, uEarth; uniform float uShine, uGain; varying vec2 vUv; varying vec3 vN, vE, vNo, vW;
+      uniform sampler2D uColor, uNormal; uniform vec3 uSun, uEarth; uniform float uShine, uGain; varying vec2 vUv; varying vec3 vN, vE, vNo, vW, vAx;
       #include <logdepthbuf_pars_fragment>
       void main() {
         #include <logdepthbuf_fragment>
-        vec3 t = texture2D(uNormal, vUv).xyz * 2.0 - 1.0, n = normalize(t.x * vE + t.y * vNo + t.z * vN), v = normalize(cameraPosition - vW);
+        vec3 N = normalize(vN), c = cross(vAx, N); float l = length(c); vec3 E = l > 1e-4 ? c / l : normalize(vE), No = cross(N, E);   // east/north per pixel: no pinwheel at the poles
+        vec3 t = texture2D(uNormal, vUv).xyz * 2.0 - 1.0; t.xy *= smoothstep(0.0, 0.02, l);
+        vec3 n = normalize(t.x * E + t.y * No + t.z * N), v = normalize(cameraPosition - vW);
         vec3 alb = texture2D(uColor, vUv).rgb;
         float mu0 = max(dot(n, uSun), 0.0), mu = max(dot(n, v), 0.02), g = acos(clamp(dot(uSun, v), -1.0, 1.0));
         float ls = mu0 / (mu0 + mu) * (1.0 + 0.35 * exp(-g / 0.08));            // Lommel–Seeliger with the opposition surge

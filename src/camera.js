@@ -27,10 +27,11 @@ export function createCameraRig(camera, canvas) {
     setMode(m) { mode = m; controls.enabled = m === 'orbit'; init = true; },
     sideDistance(aspect) { return Math.min(150, (ENV.xHalf + 2.5) / (Math.tan(camera.fov * Math.PI / 360) * aspect)); },
     update(dt, ship, aspect) {                              // ship: { p, q, f, u } as three.js objects (render-space, wrapped x)
+      const rootX = camera.position.x;                      // the backdrop follows the camera in x after this update (space.js): aim where the target will be
       if (Math.abs(ship.p.x - lastX) > ENV.xHalf) { const dx = ship.p.x - lastX; pos.x += dx; look.x += dx; camera.position.x += dx; controls.target.x += dx; }
       lastX = ship.p.x;
       if (mode === 'moon' && rig.moon && rig.moon.visible) {
-        tP.copy(ship.p).addScaledVector(ship.u, 2.5); rig.moon.getWorldPosition(tL);   // from just above the ship: the Moon is 2600 units out, so the parallax is nil
+        tP.copy(ship.p).addScaledVector(ship.u, 2.5); rig.moon.getWorldPosition(tL); tL.x += tP.x - rootX;   // from just above the ship: the Moon is 2600 units out, so the parallax is nil
         camera.position.copy(tP); camera.up.copy(WORLD_UP); camera.lookAt(tL); init = true;
       } else if (mode === 'side') {
         const d = rig.sideDistance(aspect);
