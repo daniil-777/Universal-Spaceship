@@ -1,7 +1,7 @@
 // earthtiles.js — pure geo maths for the Earth zoom view (no three.js, Node-testable): Web Mercator tiles, which open
 // imagery source serves which level, Terrarium elevation decoding, the level of detail for a viewing distance and the
 // rings' tile windows; then the local frame, the Sun in it, the telescope camera's pose, panning and the clip planes.
-import { julianDay, gmst, sunEci } from './ephem.js';
+import { julianDay, gmst, sunEci, moonEci } from './ephem.js';
 export const R_KM = 6371, MAX_LAT = 85.0511287798066, MIN_LEVEL = 4, MAX_LEVEL = 18, RING_TILES = 8, HEIGHT_TILES = 4, MAX_HEIGHT_LEVEL = 13;
 // From test/probe_earthtiles.mjs (2026-09-28): the newest Sentinel-2 cloudless mosaic, and Esri's placeholder for
 // missing deep imagery (the same 2521-byte JPEG over every open-ocean tile at levels 17-18).
@@ -66,6 +66,11 @@ export function heightWindow(win) {
   const x0 = Math.floor(cx) - HEIGHT_TILES / 2, y0 = Math.floor(cy) - HEIGHT_TILES / 2;
   return { level, x0, y0, off: [(win.x0 * s - x0) / HEIGHT_TILES, (win.y0 * s - y0) / HEIGHT_TILES], scale: RING_TILES * s / HEIGHT_TILES };
 }
+// The height tile under a ring's colour tile (x, y unwrapped, as windowTiles gives them): its atlas slot and key.
+export function heightTileFor(x, y, level, hwin) {
+  const s = 2 ** (hwin.level - level), hx = Math.floor(x * s), hy = Math.floor(y * s), n = 2 ** hwin.level;
+  return { slot: mod(hy, HEIGHT_TILES) * HEIGHT_TILES + mod(hx, HEIGHT_TILES), key: `${hwin.level}/${mod(hx, n)}/${hy}` };
+}
 // The window's tiles, nearest the centre first: slot = the toroidal atlas cell, key = "z/x/y" with x wrapped.
 export function windowTiles(win, size) {
   const n = 2 ** win.level, c = (size - 1) / 2, out = [];
@@ -78,6 +83,20 @@ export function windowTiles(win, size) {
 }
 
 const wrap180 = (lon) => mod(lon + 180, 360) - 180;
+export const KM_PER_DEG = 40075.016 / 360;
+
+// Where the zoom opens: in atmospheric flight over the route, moved on by the distance flown (8 km up); in lunar orbit
+// over the point on Earth facing the Moon (from 20,000 km, no ship marker: the ship is at the Moon); otherwise straight
+// down from the ship. orbit: space.orbitInfo; route: { lat, lon0, scrollKm } or null.
+export function subLunarPoint(utcMs) {
+  const jd = julianDay(utcMs), g = gmst(jd), m = moonEci(jd), c = Math.cos(g), s = Math.sin(g), x = c * m[0] + s * m[1], y = -s * m[0] + c * m[1];
+  return { lat: Math.asin(m[2] / Math.hypot(x, y, m[2])) / DEG, lon: wrap180(Math.atan2(y, x) / DEG) };
+}
+export function entryPoint(orbit, route) {
+  if (route) return { lat: route.lat, lon: wrap180(route.lon0 + route.scrollKm / (KM_PER_DEG * Math.cos(route.lat * DEG))), altKm: 8, ship: true };
+  if (orbit.body === 'moon') return { ...subLunarPoint(orbit.utc), altKm: 20000, ship: false };
+  return { lat: orbit.lat, lon: orbit.lon, altKm: orbit.altKm, ship: true };
+}
 
 // A frame on the sphere (R_KM) at the view's target, in kilometres: x East, y Up, z South (north is −z, as in
 // src/terrain.js). Double precision: the ring vertices are placed relative to it, so no large coordinates reach the GPU.
@@ -95,6 +114,10 @@ export function createLocalFrame(lat0Deg, lon0Deg) {
     upAt(latDeg, lonDeg, out = [0, 0, 0]) { return local(ecef(latDeg, lonDeg, 1, t), out); },
     northAt(latDeg, lonDeg, out = [0, 0, 0]) { const a = latDeg * DEG, b = lonDeg * DEG; t[0] = -Math.sin(a) * Math.cos(b); t[1] = -Math.sin(a) * Math.sin(b); t[2] = Math.cos(a); return local(t, out); },
     dirToLocal(v, out = [0, 0, 0]) { return local(v, out); },
+    toLatLon(v) {
+      const x = p0[0] + v[0] * e[0] + v[1] * u[0] - v[2] * n[0], y = p0[1] + v[0] * e[1] + v[1] * u[1] - v[2] * n[1], z = p0[2] + v[0] * e[2] + v[1] * u[2] - v[2] * n[2];
+      return { lat: Math.asin(z / Math.hypot(x, y, z)) / DEG, lon: Math.atan2(y, x) / DEG };
+    },
   };
 }
 // The textured globe (src/earth.js; Greenwich on the sphere's +x, the north pole on +y, 90° E on −z): the local images
@@ -117,10 +140,10 @@ export function cameraPose(frame, v, out = { pos: [0, 0, 0], up: [0, 0, 0], look
     const f = N[i] * ch + E[i] * sh;
     out.pos[i] = T[i] + v.rangeKm * (U[i] * ct - f * st); out.up[i] = U[i] * st + f * ct;
   }
-  const back = v.rangeKm * st;
-  out.camLat = Math.max(-MAX_LAT, Math.min(MAX_LAT, v.lat - back * ch / R_KM / DEG));
-  out.camLon = wrap180(v.lon - back * sh / (R_KM * Math.cos(v.lat * DEG)) / DEG);
-  out.camAltKm = g + v.rangeKm * ct;
+  // the true height above the sphere (the Earth's centre is at (0, −R, 0) in the frame) and the point under the camera
+  const ll = frame.toLatLon(out.pos);
+  out.camAltKm = Math.hypot(out.pos[0], out.pos[1] + R_KM, out.pos[2]) - R_KM;
+  out.camLat = Math.max(-MAX_LAT, Math.min(MAX_LAT, ll.lat)); out.camLon = ll.lon;
   return out;
 }
 export function panTarget(v, dRightKm, dFwdKm) {

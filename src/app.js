@@ -440,8 +440,7 @@ async function main() {
   setCameraMode(state.camera); ui.setCamera(state.camera);
   pip = createPipCam(renderer); if (qs.has('cam2')) pip.setMode(qs.get('cam2'));
   board = createBoard(document.getElementById('board'), { onCamera: () => pip.cycle() }); board.setCamera(pip.mode);
-  board.onRect((r) => pip.setRect(r)); if (qs.get('board') === '0') { board.setVisible(false); ui.setControls({ board: false }); }
-  zoom = attachEarthZoom({ renderer, space, host: { get manual() { return state.manual; }, setManual: (b) => { state.manual = b; ui.setManual(b); }, toast: (m) => ui.toast(m, 3000), credit: () => document.getElementById('credit').textContent, setCredit: (t) => ui.setCredit(t), flightControls: (on) => { rig.controls.enabled = on && rig.mode === 'orbit'; }, entry: () => { const o = space.orbitInfo, r = ROUTES[state.route]; return state.atmo && terrain ? { lat: r.lat, lon: r.lon0 + terrain.far.stats.scroll * 2.8 / (111.32 * Math.cos(r.lat * Math.PI / 180)), altKm: 8 } : { lat: o.lat, lon: o.lon, altKm: o.altKm }; } } });
+  board.onRect((r) => pip.setRect(r)); if (qs.get('board') === '0') { board.setVisible(false); ui.setControls({ board: false }); } zoom = attachEarthZoom({ renderer, space, app: { state, ui, ROUTES, get rig() { return rig; }, get terrain() { return terrain; } } });
   ui.loading('loading the policy…');
   await loadPolicy(); ui.policyInfo(policyText()); showPretrainingCurves();
   if (qs.has('mode')) { const named = { color: 0, colour: 0, mono: 1, ink: 2 }[qs.get('mode')]; setMode(named !== undefined ? named : (+qs.get('mode') || 0)); }

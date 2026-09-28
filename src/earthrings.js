@@ -2,12 +2,15 @@
 // target, streamed the way src/terrain.js streams its strips (one curved mesh + one GPU atlas per ring, tiles copied in
 // as they arrive, an atlas addressed toroidally so re-centring fetches only the new row or column). Rings sit on levels
 // L0, L0−1, L0−2, L0−3, L0−5 (src/earthtiles.js); a ring shows once 90 % of its tiles are in and a per-slot mask hides
-// any tile not yet (or never) loaded, so the coarser ring or the globe covers it — no holes. Heights: Terrarium tiles
-// one level coarser in a 4 × 4 atlas, decoded in the vertex shader. Units: km in the view's local frame.
+// any tile that is not (yet) in together with the height tile under it, so the coarser ring or the globe covers it —
+// no holes, and no imagery drawn at sea level while its relief is still on the way. Heights: Terrarium tiles one level
+// coarser in a 4 × 4 atlas, decoded in the vertex shader. Tiles come from src/earthloader.js. Units: km in the view's
+// local frame.
 import * as THREE from 'three';
-import { RING_TILES, RING_COUNT, HEIGHT_TILES, MAX_LEVEL, ESRI_BLANK, HEIGHT_SOURCE, sourceForLevel, tileUrl, ringLevels, ringWindow, heightWindow, windowTiles, tileToLonLat, lonLatToTile, tileSizeKm, decodeTerrarium, mod } from './earthtiles.js';
+import { RING_TILES, RING_COUNT, HEIGHT_TILES, MAX_LEVEL, HEIGHT_SOURCE, sourceForLevel, tileUrl, ringLevels, ringWindow, heightWindow, heightTileFor, windowTiles, tileToLonLat, lonLatToTile, tileSizeKm, decodeTerrarium, mod } from './earthtiles.js';
+import { createTileLoader } from './earthloader.js';
 
-const T = 256, GRID = 128, SHOW_AT = 0.9, HIDE_AT = 0.5, UPLOADS_PER_FRAME = 6, RETRY_MS = 30000;
+const T = 256, GRID = 128, SHOW_AT = 0.9, HIDE_AT = 0.5, UPLOADS_PER_FRAME = 6;
 
 const VERT = /* glsl */`uniform sampler2D tHeight; uniform vec2 uHOff; uniform float uHScale, uHSize, uHeightK, uStepKm;
   attribute vec3 aUp; varying vec2 vUv; varying vec3 vW, vN, vUp;
@@ -41,55 +44,17 @@ const FRAG = /* glsl */`uniform sampler2D tColor, tMask, tInner; uniform vec2 uC
     vec2 e = smoothstep(vec2(0.0), vec2(0.08), vUv) * smoothstep(vec2(0.0), vec2(0.08), 1.0 - vUv);
     gl_FragColor = vec4(col, uVis * e.x * e.y * day); }`;          // the night side fades to the globe's city lights
 
-export function createTileLoader({ maxInFlight = 8, keep = 192 } = {}) {
-  const cache = new Map(), failed = new Map(), warned = new Set(), queue = [], recent = [], stats = { requested: 0, loaded: 0, failed: 0, blank: 0 };
-  let inFlight = 0;
-  const hex = (buf) => Array.from(new Uint8Array(buf), (b) => b.toString(16).padStart(2, '0')).join('');
-  const isBlank = async (buf) => !!ESRI_BLANK && buf.byteLength === ESRI_BLANK.bytes && !!globalThis.crypto?.subtle && hex(await crypto.subtle.digest('SHA-1', buf)) === ESRI_BLANK.sha1;
-  const remember = (url, bmp) => { cache.delete(url); cache.set(url, bmp); if (cache.size > keep) cache.delete(cache.keys().next().value); };
-  const note = (bad) => { recent.push(bad ? 1 : 0); if (recent.length > 24) recent.shift(); };
-  async function run(job) {
-    inFlight++; let bmp = null;
-    try {
-      const res = await fetch(job.url, { mode: 'cors' });
-      if (!res.ok) throw new Error('HTTP ' + res.status);
-      const buf = await res.arrayBuffer();
-      if (await isBlank(buf)) { stats.blank++; failed.set(job.url, Infinity); }
-      else { bmp = await createImageBitmap(new Blob([buf]), job.raw ? { colorSpaceConversion: 'none', premultiplyAlpha: 'none' } : {}); remember(job.url, bmp); stats.loaded++; }
-      note(false);
-    } catch (e) {
-      stats.failed++; failed.set(job.url, performance.now()); note(true);
-      const host = new URL(job.url).host;
-      if (!warned.has(host)) { warned.add(host); console.warn(`earth zoom: tiles from ${host} are not loading (${e.message})`); }
-    }
-    inFlight--; job.done(bmp); pump();
-  }
-  function pump() {
-    if (queue.length > 1) queue.sort((a, b) => a.prio - b.prio);
-    while (inFlight < maxInFlight && queue.length) { const job = queue.shift(); if (job.wanted()) run(job); else job.done(null); }
-  }
-  return {
-    stats, get inFlight() { return inFlight; }, get queued() { return queue.length; },
-    get failRate() { return recent.length < 8 ? 0 : recent.reduce((a, b) => a + b, 0) / recent.length; },
-    peek: (url) => cache.get(url) || null,
-    request(job) {
-      const hit = cache.get(job.url);
-      if (hit) { remember(job.url, hit); job.done(hit); return; }
-      const t = failed.get(job.url);
-      if (t !== undefined && performance.now() - t < RETRY_MS) { job.done(null); return; }
-      stats.requested++; queue.push(job); pump();
-    },
-    prune() { for (let i = queue.length - 1; i >= 0; i--) if (!queue[i].wanted()) { queue[i].done(null); queue.splice(i, 1); } },
-  };
-}
+// The atlases start empty and are only ever written on the GPU: all of them share one zero buffer per size.
+const ZEROS = new Map();
+const zeros = (n) => { if (!ZEROS.has(n)) ZEROS.set(n, new Uint8Array(n)); return ZEROS.get(n); };
 
 export function createEarthRings(scene, renderer, { loader = createTileLoader() } = {}) {
   const uploads = [], dst = new THREE.Vector2(), cpu = new Map(), _p = [0, 0, 0], _u = [0, 0, 0];
-  const zero = new THREE.DataTexture(new Uint8Array(T * T * 4), T, T, THREE.RGBAFormat); zero.needsUpdate = true;
+  const zero = new THREE.DataTexture(zeros(T * T * 4), T, T, THREE.RGBAFormat); zero.needsUpdate = true;
   let frame = null, scratch = null;
   const count = (w, k) => { let c = 0; for (let i = 0; i < w.length; i++) if (w[i] && w[i] === k[i]) c++; return c; };
   function atlas(size, colorSpace, mips) {
-    const t = new THREE.DataTexture(new Uint8Array(size * size * 4), size, size, THREE.RGBAFormat);
+    const t = new THREE.DataTexture(zeros(size * size * 4), size, size, THREE.RGBAFormat);
     t.colorSpace = colorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.flipY = false; t.generateMipmaps = mips; t.anisotropy = mips ? 8 : 1;
     t.minFilter = mips ? THREE.LinearMipmapLinearFilter : THREE.NearestFilter; t.magFilter = mips ? THREE.LinearFilter : THREE.NearestFilter; t.needsUpdate = true;
     renderer.initTexture(t); return t;
@@ -113,7 +78,7 @@ export function createEarthRings(scene, renderer, { loader = createTileLoader() 
     const mesh = new THREE.Mesh(geo, mat); mesh.frustumCulled = false; mesh.visible = false; scene.add(mesh);
     const S = RING_TILES * RING_TILES, H = HEIGHT_TILES * HEIGHT_TILES;
     return { level: -1, win: null, hwin: null, mesh, mat, color, height, mask, vis: 0, hk: 0, shown: false, hShown: false, valid: 0, hValid: 0, stats: null,
-      want: Array(S).fill(''), key: Array(S).fill(''), hwant: Array(H).fill(''), hkey: Array(H).fill(''), hbmp: Array(H).fill(null) };
+      want: Array(S).fill(''), key: Array(S).fill(''), tile: Array(S).fill(null), hwant: Array(H).fill(''), hkey: Array(H).fill(''), hfail: Array(H).fill(''), hbmp: Array(H).fill(null) };
   }
   const rings = Array.from({ length: RING_COUNT }, () => makeRing());
 
@@ -134,7 +99,7 @@ export function createEarthRings(scene, renderer, { loader = createTileLoader() 
     const win = ringWindow(lon, lat, level);
     if (r.level === level && r.win && r.win.x0 === win.x0 && r.win.y0 === win.y0) return;
     if (r.level !== level) {
-      r.level = level; r.vis = 0; r.hk = 0; r.shown = r.hShown = false; r.key.fill(''); r.hkey.fill(''); r.hbmp.fill(null); r.mask.image.data.fill(0);
+      r.level = level; r.vis = 0; r.hk = 0; r.shown = r.hShown = false; r.key.fill(''); r.hkey.fill(''); r.hfail.fill(''); r.hbmp.fill(null); r.mask.image.data.fill(0); r.mask.needsUpdate = true;
       for (let s = 0; s < HEIGHT_TILES * HEIGHT_TILES; s++) copy(zero, r.height, s, HEIGHT_TILES);
     }
     r.win = win; r.hwin = heightWindow(win); build(r);
@@ -147,21 +112,24 @@ export function createEarthRings(scene, renderer, { loader = createTileLoader() 
     r.want.fill('');
     const tiles = windowTiles(win, RING_TILES); r.valid = tiles.length;
     for (const t of tiles) {
-      r.want[t.slot] = t.key;
+      r.want[t.slot] = t.key; r.tile[t.slot] = t;
       if (r.key[t.slot] === t.key) continue;
       loader.request({ url: tileUrl(src, level, t.x, t.y), prio: prio + t.d, raw: false, wanted: () => r.level === level && r.want[t.slot] === t.key,
         done: (bmp) => { if (bmp) uploads.push({ r, slot: t.slot, key: t.key, bmp, height: false }); } });
     }
-    for (let s = 0; s < r.want.length; s++) if (r.want[s] !== r.key[s]) r.mask.image.data[s] = 0;
-    r.mask.needsUpdate = true;
     r.hwant.fill('');
     const htiles = windowTiles({ level: hw.level, x0: hw.x0, y0: hw.y0 }, HEIGHT_TILES); r.hValid = htiles.length;
     for (const t of htiles) {
       r.hwant[t.slot] = t.key;
-      if (r.hkey[t.slot] === t.key) continue;
+      if (r.hkey[t.slot] === t.key || r.hfail[t.slot] === t.key) continue;
       if (r.hkey[t.slot]) { copy(zero, r.height, t.slot, HEIGHT_TILES); r.hkey[t.slot] = ''; r.hbmp[t.slot] = null; }
-      loader.request({ url: tileUrl(HEIGHT_SOURCE, hw.level, t.x, t.y), prio: prio + 50 + t.d, raw: true, wanted: () => r.level === level && r.hwant[t.slot] === t.key,
-        done: (bmp) => { if (bmp) uploads.push({ r, slot: t.slot, key: t.key, bmp, height: true }); } });
+      r.hfail[t.slot] = '';
+      const wanted = () => r.level === level && r.hwant[t.slot] === t.key;
+      loader.request({ url: tileUrl(HEIGHT_SOURCE, hw.level, t.x, t.y), prio: prio + 50 + t.d, raw: true, wanted,
+        done: (bmp, why) => {
+          if (bmp) uploads.push({ r, slot: t.slot, key: t.key, bmp, height: true });
+          else if ((why === 'failed' || why === 'blank') && wanted()) r.hfail[t.slot] = t.key;   // no relief to wait for here: show the imagery flat
+        } });
     }
   }
   function flush() {
@@ -171,13 +139,22 @@ export function createEarthRings(scene, renderer, { loader = createTileLoader() 
       const src = new THREE.Texture(u.bmp); src.flipY = false; src.generateMipmaps = false; src.colorSpace = u.height ? THREE.NoColorSpace : THREE.SRGBColorSpace;
       try {
         copy(src, u.height ? r.height : r.color, u.slot, u.height ? HEIGHT_TILES : RING_TILES);
-        if (u.height) { r.hkey[u.slot] = u.key; r.hbmp[u.slot] = u.bmp; }
-        else { r.key[u.slot] = u.key; r.mask.image.data[u.slot] = 255; r.mask.needsUpdate = true; }
+        if (u.height) { r.hkey[u.slot] = u.key; r.hbmp[u.slot] = u.bmp; } else r.key[u.slot] = u.key;
       } catch (e) {
         console.warn('earth zoom: a tile could not be uploaded', e.message);
       }
       src.dispose(); done++;
     }
+  }
+  // A colour slot shows once its imagery AND the height tile under it are in (or that height tile failed for good).
+  function refreshMask(r) {
+    const m = r.mask.image.data; let changed = false;
+    for (let s = 0; s < m.length; s++) {
+      let on = 0;
+      if (r.want[s] && r.key[s] === r.want[s]) { const t = r.tile[s], h = heightTileFor(t.x, t.y, r.level, r.hwin); on = r.hkey[h.slot] === h.key || r.hfail[h.slot] === h.key ? 255 : 0; }
+      if (m[s] !== on) { m[s] = on; changed = true; }
+    }
+    if (changed) r.mask.needsUpdate = true;
   }
   function decoded(key, bmp) {
     let h = cpu.get(key);
@@ -194,6 +171,9 @@ export function createEarthRings(scene, renderer, { loader = createTileLoader() 
   return {
     loader,
     rebase(f) { frame = f; for (const r of rings) if (r.win) build(r); },
+    // A closed view stops fetching; on reopening every ring re-requests what it is still missing.
+    suspend() { loader.suspend(); uploads.length = 0; },
+    resume() { loader.resume(); for (const r of rings) r.win = null; },
     update(dt, view) {
       const want = ringLevels(view.L0);
       for (const L of want) place(rings.find((q) => q.level === L) || rings.find((q) => !want.includes(q.level)), L, view.lat, view.lon);
@@ -201,6 +181,7 @@ export function createEarthRings(scene, renderer, { loader = createTileLoader() 
       const ease = 1 - Math.exp(-dt * 3);
       for (const r of rings) {
         const used = want.includes(r.level), have = used ? count(r.want, r.key) : 0, hHave = used ? count(r.hwant, r.hkey) : 0;
+        if (used) refreshMask(r);
         r.shown = used && have >= (r.shown ? HIDE_AT : SHOW_AT) * r.valid;
         r.hShown = used && hHave >= (r.hShown ? HIDE_AT : SHOW_AT) * r.hValid;
         r.vis += ((r.shown ? 1 : 0) - r.vis) * ease; r.hk += ((r.hShown ? 1 : 0) - r.hk) * ease;

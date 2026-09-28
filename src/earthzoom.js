@@ -9,7 +9,20 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { createEarth } from './earth.js';
 import { createEarthRings } from './earthrings.js';
-import { R_KM, MAX_LAT, ZOOM_CREDIT, sourceForLevel, tileSizeKm, createLocalFrame, globeAxes, levelFloat, pickInnerLevel, cameraPose, panTarget, clipPlanes, sunLocal } from './earthtiles.js';
+import { R_KM, MAX_LAT, ZOOM_CREDIT, sourceForLevel, tileSizeKm, createLocalFrame, globeAxes, levelFloat, pickInnerLevel, cameraPose, panTarget, clipPlanes, sunLocal, entryPoint } from './earthtiles.js';
+
+const TERRAIN_KM_PER_UNIT = 2.8;   // src/terrain.js's default kmPerUnit: how far one unit of the scrolling imagery strip is
+// The page's side of the view, built from app.js's state so app.js only passes it in (it is at its line limit).
+function appHost(app, space) {
+  return {
+    get manual() { return app.state.manual; }, setManual: (b) => { app.state.manual = b; app.ui.setManual(b); }, toast: (m) => app.ui.toast(m, 3000),
+    flightControls: (on) => { const rig = app.rig; if (rig) rig.controls.enabled = on && rig.mode === 'orbit'; },
+    entry: () => {
+      const route = app.state.atmo && app.terrain ? { ...app.ROUTES[app.state.route], scrollKm: app.terrain.far.stats.scroll * TERRAIN_KM_PER_UNIT } : null;
+      return entryPoint(space.orbitInfo, route);
+    },
+  };
+}
 
 export const ZOOM = { fovDeg: 45, minClearKm: 0.3, camClearKm: 0.15, maxRangeKm: 20000, maxTilt: 70 * Math.PI / 180, ringsFullBelowKm: 2500, ringsGoneAboveKm: 4000, hazeK: 0.55, hazeKm: 40 };
 const STEER_KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Equal', 'Minus', 'NumpadAdd', 'NumpadSubtract', 'KeyQ', 'KeyE', 'KeyR', 'KeyF']);
@@ -18,11 +31,15 @@ const fade = (from, to, x) => { const t = clamp((x - from) / (to - from), 0, 1);
 const fmtDeg = (x, pos, neg) => `${Math.abs(x).toFixed(4)}° ${x >= 0 ? pos : neg}`;
 const fmtKm = (km) => (km >= 10 ? `${Math.round(km).toLocaleString('en-US')} km` : km >= 1 ? `${km.toFixed(1)} km` : `${Math.round(km * 1000)} m`);
 
-export function attachEarthZoom({ renderer, space, host, texturePath = 'textures/' }) {
+export function attachEarthZoom({ renderer, space, app = null, host = app ? appHost(app, space) : null, texturePath = 'textures/' }) {
   const canvas = renderer.domElement, btn = document.getElementById('btnZoom'), sunSwitch = document.getElementById('swZoomSun'), hud = document.getElementById('zoomHud');
+  // the zoom's own credit line: shown instead of the page's while the view is open, so the page's line (which the flight
+  // may change meanwhile, e.g. when atmospheric flight starts) is never overwritten
+  const credit = document.getElementById('zoomCredit');
+  if (credit) credit.textContent = ZOOM_CREDIT;
   const v = { lat: 0, lon: 0, rangeKm: 420, tilt: 0, heading: 0, groundKm: 0 }, keys = new Set(), ptrs = new Map(), last = { clearKm: 0, camAltKm: 0 };
   const pose = { pos: [0, 0, 0], up: [0, 0, 0], look: [0, 0, 0], camLat: 0, camLon: 0, camAltKm: 0 }, sun = [0, 0, 0], up = [0, 0, 0], mk = [0, 0, 0], m4 = new THREE.Matrix4();
-  let active = false, view = null, wasManual = false, prevCredit = '', dayLight = !!(sunSwitch && sunSwitch.checked), pinch = 0, hudT = 0;
+  let active = false, view = null, wasManual = false, dayLight = !!(sunSwitch && sunSwitch.checked), pinch = 0, hudT = 0;
 
   function build() {
     const scene = new THREE.Scene(), camera = new THREE.PerspectiveCamera(ZOOM.fovDeg, 1, 0.1, 1000), sunDir = new THREE.Vector3(0, 1, 0);
@@ -56,7 +73,7 @@ export function attachEarthZoom({ renderer, space, host, texturePath = 'textures
   function placeMarker() {
     const V = view, e = host.entry(), cam = V.camera.position;
     V.frame.toLocal(e.lat, e.lon, V.rings.heightAt(e.lat, e.lon) + 0.02, mk); V.frame.upAt(e.lat, e.lon, up); V.marker.position.fromArray(mk);
-    V.marker.visible = (cam.x - mk[0]) * up[0] + (cam.y - mk[1]) * up[1] + (cam.z - mk[2]) * up[2] > 0;
+    V.marker.visible = e.ship !== false && (cam.x - mk[0]) * up[0] + (cam.y - mk[1]) * up[1] + (cam.z - mk[2]) * up[2] > 0;
     V.marker.scale.setScalar(Math.max(0.004, 0.006 * cam.distanceTo(V.marker.position)));
   }
   function writeHud() {
@@ -94,10 +111,10 @@ export function attachEarthZoom({ renderer, space, host, texturePath = 'textures
     if (!view) view = build();
     const e = host.entry();
     Object.assign(v, { lat: clamp(e.lat, -MAX_LAT, MAX_LAT), lon: e.lon, rangeKm: clamp(e.altKm, 1, ZOOM.maxRangeKm), tilt: 0, heading: 0 });
-    view.L0 = null; rebase();
+    view.L0 = null; view.rings.resume(); rebase();
     wasManual = !!host.manual;
     if (wasManual) { host.setManual(false); host.toast('the autopilot flies while you look around'); }
-    prevCredit = host.credit(); host.setCredit(ZOOM_CREDIT); host.flightControls(false);
+    host.flightControls(false);
     active = true; document.body.classList.add('zooming');
     if (hud) hud.classList.remove('hidden');
     if (btn) btn.textContent = 'Back to flight';
@@ -107,7 +124,7 @@ export function attachEarthZoom({ renderer, space, host, texturePath = 'textures
     active = false; keys.clear(); ptrs.clear(); pinch = 0; document.body.classList.remove('zooming');
     if (hud) hud.classList.add('hidden');
     if (btn) btn.textContent = 'Zoom in';
-    host.setCredit(prevCredit); host.flightControls(true);
+    view.rings.suspend(); host.flightControls(true);
     if (wasManual) { host.setManual(true); host.toast('you have the controls again'); }
     wasManual = false;
   }
@@ -150,7 +167,7 @@ export function attachEarthZoom({ renderer, space, host, texturePath = 'textures
     get info() {
       if (!view) return { active };
       return { active, lat: v.lat, lon: v.lon, rangeKm: v.rangeKm, tilt: v.tilt, heading: v.heading, L0: view.L0, clearKm: last.clearKm, camAltKm: last.camAltKm,
-        aspect: view.camera.aspect, settled: view.rings.settled, ...view.rings.info };
+        aspect: view.camera.aspect, shipMarker: view.marker.visible, settled: view.rings.settled, ...view.rings.info };
     },
     capture() { render(0); return canvas.toDataURL('image/png'); },
   };

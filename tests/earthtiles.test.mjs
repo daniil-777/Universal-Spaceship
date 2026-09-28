@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { lonLatToTile, tileToLonLat, tileSizeKm, SOURCES, EOX_YEAR, sourceForLevel, tileUrl, HEIGHT_SOURCE, heightLevel, decodeTerrarium, levelFloat, pickInnerLevel, ringLevels, ringWindow, heightWindow, windowTiles, RING_TILES, RING_COUNT, HEIGHT_TILES, MAX_LAT, R_KM, createLocalFrame, globeAxes, sunLocal, cameraPose, panTarget, clipPlanes } from '../src/earthtiles.js';
+import { lonLatToTile, tileToLonLat, tileSizeKm, SOURCES, EOX_YEAR, sourceForLevel, tileUrl, HEIGHT_SOURCE, heightLevel, decodeTerrarium, levelFloat, pickInnerLevel, ringLevels, ringWindow, heightWindow, windowTiles, RING_TILES, RING_COUNT, HEIGHT_TILES, MAX_LAT, R_KM, createLocalFrame, globeAxes, sunLocal, cameraPose, panTarget, clipPlanes, heightTileFor, entryPoint, KM_PER_DEG } from '../src/earthtiles.js';
+import { julianDay, gmst, moonEci } from '../src/ephem.js';
 
 const close = (a, b, eps, msg = '') => assert.ok(Math.abs(a - b) <= eps, `${msg} ${a} vs ${b}`);
 
@@ -88,7 +89,36 @@ test('camera pose: straight down with north up; heading 90° puts east up; tilte
   let p = cameraPose(f, v); close(p.pos[0], 0, 1e-9); close(p.pos[1], 51, 1e-9); close(p.pos[2], 0, 1e-9); close(p.up[0], 0, 1e-9); close(p.up[2], -1, 1e-9); close(p.look[1], 1, 1e-9);
   p = cameraPose(f, { ...v, heading: Math.PI / 2 }); close(p.up[0], 1, 1e-9); close(p.up[2], 0, 1e-9);
   p = cameraPose(f, { ...v, tilt: Math.PI / 3 }); close(p.pos[1], 26, 1e-9); close(p.pos[2], 50 * Math.sin(Math.PI / 3), 1e-9, 'south of the target');
-  assert.ok(p.camLat < v.lat); close(p.camLon, v.lon, 1e-9); close(p.camAltKm, 26, 1e-9); close(Math.hypot(...p.up), 1, 1e-12);
+  assert.ok(p.camLat < v.lat); close(p.camLon, v.lon, 1e-9); close(p.camAltKm, Math.hypot(50 * Math.sin(Math.PI / 3), R_KM + 26) - R_KM, 1e-9); close(Math.hypot(...p.up), 1, 1e-12);
+});
+
+test('camera pose tilted far out: the altitude is the true height above the sphere, the far plane reaches past the limb and the target', () => {
+  const f = createLocalFrame(45.976, 7.658);
+  for (const [range, tiltDeg] of [[10000, 70], [15000, 60], [20000, 70], [420, 70], [5, 60]]) {
+    const p = cameraPose(f, { lat: 45.976, lon: 7.658, rangeKm: range, tilt: tiltDeg * Math.PI / 180, heading: 0.7, groundKm: 0 });
+    const d = Math.hypot(p.pos[0], p.pos[1] + R_KM, p.pos[2]); close(p.camAltKm, d - R_KM, 1e-6, 'true altitude');
+    const c = clipPlanes(p.camAltKm, p.camAltKm), limb = Math.sqrt(d * d - R_KM * R_KM);
+    assert.ok(c.far > limb && c.far > range, `far ${c.far.toFixed(0)} vs limb ${limb.toFixed(0)} and target ${range} km at ${tiltDeg}°`);
+    const q = f.toLatLon(p.pos); close(p.camLat, q.lat, 1e-9); close(p.camLon, q.lon, 1e-9);
+  }
+});
+
+test('entry point: over the ship in Earth orbit; over the route moved on by the distance flown; from lunar orbit over the point on Earth facing the Moon', () => {
+  assert.deepEqual(entryPoint({ body: 'earth', lat: 10, lon: 20, altKm: 420, utc: 0 }, null), { lat: 10, lon: 20, altKm: 420, ship: true });
+  let e = entryPoint({ body: 'earth', lat: 0, lon: 0, altKm: 420, utc: 0 }, { lat: 40.74, lon0: -74.5, scrollKm: 84.4 });
+  close(e.lat, 40.74, 1e-12); close(e.lon, -74.5 + 84.4 / (KM_PER_DEG * Math.cos(40.74 * Math.PI / 180)), 1e-9); assert.equal(e.altKm, 8); assert.equal(e.ship, true);
+  e = entryPoint({ body: 'earth', lat: 0, lon: 0, altKm: 420, utc: 0 }, { lat: 0, lon0: 179.9, scrollKm: 50 }); assert.ok(e.lon < -179 && e.lon > -180, 'longitude wraps ' + e.lon);
+  const t = Date.UTC(2026, 8, 28, 12), m = entryPoint({ body: 'moon', lat: 5, lon: 6, altKm: 100, utc: t }, null);
+  assert.equal(m.ship, false); assert.equal(m.altKm, 20000); assert.ok(Math.abs(m.lat) < 29, 'the Moon stays within ±28.6° of the equator');
+  const jd = julianDay(t), g = gmst(jd), mm = moonEci(jd), ecef = [Math.cos(g) * mm[0] + Math.sin(g) * mm[1], -Math.sin(g) * mm[0] + Math.cos(g) * mm[1], mm[2]];
+  const up = createLocalFrame(m.lat, m.lon).dirToLocal(ecef.map((c) => c / Math.hypot(...ecef))); assert.ok(up[1] > 0.99999, 'the Moon is straight overhead ' + up[1]);
+});
+
+test('each colour tile of a ring finds its height tile in the ring’s height window', () => {
+  for (const [lon, lat] of [[7.658, 45.976], [-74, 40.7], [179.9, 0], [0, 84]]) for (let L = 2; L <= 18; L++) {
+    const w = ringWindow(lon, lat, L), hw = heightWindow(w), keys = new Map(windowTiles({ level: hw.level, x0: hw.x0, y0: hw.y0 }, HEIGHT_TILES).map((t) => [t.slot, t.key]));
+    for (const t of windowTiles(w, RING_TILES)) { const h = heightTileFor(t.x, t.y, L, hw); assert.equal(keys.get(h.slot), h.key, `L${L} ${t.key}`); }
+  }
 });
 
 test('panning moves the target along the ground in the view’s axes; latitude clamps at the Mercator limit, longitude wraps', () => {
