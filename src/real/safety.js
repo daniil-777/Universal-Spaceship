@@ -78,7 +78,7 @@ function* subsets(list, maxK, from = 0, cur = []) {
 }
 export function projectExact(v0, halves, ball) {
   let best = null, bd = Infinity;
-  const take = (v) => { if (!v || violation(v, halves, ball) > 1e-9) return; const d = Math.hypot(v[0] - v0[0], v[1] - v0[1], v[2] - v0[2]); if (d < bd) { bd = d; best = v; } };
+  const take = (v) => { if (!v || !(violation(v, halves, ball) <= 1e-9)) return; const d = Math.hypot(v[0] - v0[0], v[1] - v0[1], v[2] - v0[2]); if (d < bd) { bd = d; best = v; } };
   for (const cs of subsets(halves, 3)) take(cs.length ? solveEq(v0, cs) : [v0[0], v0[1], v0[2]]);
   if (ball) for (const cs of subsets(halves, 2)) {
     const p = cs.length ? solveEq([0, 0, 0], cs) : [0, 0, 0];
@@ -104,8 +104,24 @@ export function project(v0, halves, ball) {
 }
 
 const DROP_ORDER = ['P4', 'P3', 'P2'];
+const finite3 = (a) => Number.isFinite(a[0]) && Number.isFinite(a[1]) && Number.isFinite(a[2]);
+// Rejects non-finite input (NaN/Infinity) before it reaches Dykstra or the exact fallback.
+// A NaN violation compares false against every threshold there, which would otherwise let the
+// unmodified, unsafe command through instead of failing safe.
+function validInput(vDes, x, ctx) {
+  if (!finite3(vDes) || !finite3(x)) return false;
+  if (ctx.inCorridor && !Number.isFinite(ctx.axial)) return false;
+  for (const c of ctx.extra || []) {
+    if (!finite3(c.n) || !Number.isFinite(c.b)) return false;
+  }
+  return true;
+}
 // The filter: v_des (LVLH, m/s) -> safe velocity. Logs every drop and brake into log (array) with time t.
 export function filterVelocity(vDes, x, ctx = {}, log = null, t = 0) {
+  if (!validInput(vDes, x, ctx)) {
+    if (log) log.push({ t, kind: 'brake', cls: 'P1', why: 'invalid input' });
+    return { v: [0, 0, 0], brake: true, dropped: [], changed: true };
+  }
   const { r, u, list, ball } = constraints(x, ctx);
   if (!ctx.inCorridor && r <= KOS_R) {
     if (log) log.push({ t, kind: 'brake', cls: 'P1', why: 'inside KOS outside the corridor' });

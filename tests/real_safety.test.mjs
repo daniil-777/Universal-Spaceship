@@ -65,3 +65,28 @@ test('the nominal CORRIDOR and FINAL commands pass the filter unchanged', () => 
   const h1 = filterVelocity([0.2, 0, 0], [-250, 0, 0], { inCorridor: true, axial: 217.2 });
   assert.ok(!h1.changed);
 });
+
+test('deviation 6: the in-corridor axial approach-speed barrier caps closing speed, a retreat passes unchanged', () => {
+  const x = [-82.76, 0.99, 0];
+  const capped = filterVelocity([0.5, 0, 0], x, { inCorridor: true, axial: 50 });
+  assert.ok(Math.abs(capped.v[0] - 0.11) < 1e-6 && capped.changed, `axial barrier at h = 50: ${capped.v}`);
+  const cmd = [-0.05, 0, 0];
+  const retreat = filterVelocity(cmd, x, { inCorridor: true, axial: 50 });
+  assert.ok(!retreat.changed, `retreating command should pass unchanged: ${retreat.v}`);
+  assert.ok(Math.abs(retreat.v[0] - cmd[0]) < 1e-9 && Math.abs(retreat.v[1] - cmd[1]) < 1e-9 && Math.abs(retreat.v[2] - cmd[2]) < 1e-9, `retreating command changed: ${retreat.v}`);
+});
+
+test('invalid input fails safe: v = [0, 0, 0], brake, and "invalid input" is logged', () => {
+  const cases = [
+    { vDes: [1, 0, 0], x: [-100, 0, 0], ctx: { inCorridor: true } },
+    { vDes: [1, 0, 0], x: [NaN, 0, 0], ctx: {} },
+    { vDes: [1, 0, 0], x: [-500, 0, 0], ctx: { extra: [{ n: [1, 0, 0], b: NaN, cls: 'P1' }] } },
+  ];
+  for (const { vDes, x, ctx } of cases) {
+    const log = [];
+    const out = filterVelocity(vDes, x, ctx, log, 7);
+    assert.ok(out.brake && out.changed, `case ${JSON.stringify(ctx)}: ${JSON.stringify(out)}`);
+    assert.ok(out.v.every((c) => c === 0), `v should be [0, 0, 0]: ${out.v}`);
+    assert.ok(log.some((e) => e.why === 'invalid input'), 'must log "invalid input"');
+  }
+});
