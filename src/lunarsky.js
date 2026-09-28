@@ -40,9 +40,13 @@ function compose(X, Y, P, sun, earth, r) {
 
 export function createLunarSky({ t0 = Date.now(), h = 1500 } = {}) {
   const clock = createSkyClock(t0); let epoch = t0, real = 0, hKm = h, u0 = 0;
-  const rad = () => R_MOON + hKm, mean = () => Math.sqrt(MU_MOON / rad() ** 3), jd0 = julianDay(t0);
-  const m0 = moonEci(jd0), e0 = unit(m0.map((c) => -c)), P = POLE, X = unit(e0.map((c, i) => c - dot(e0, P) * P[i])), Y = cross(P, X);   // the lunar equator: X toward the Earth
-  const { A, u } = compose(X, Y, P, sunEci(jd0), e0, rad()); u0 = u;   // the orbit: r̂(u) = cos u·A + sin u·P
+  const rad = () => R_MOON + hKm, mean = () => Math.sqrt(MU_MOON / rad() ** 3);
+  const P = POLE; let A = [1, 0, 0];                              // the orbit: r̂(u) = cos u·A + sin u·P
+  const place = (utc) => {                                         // compose the view for this moment and height: the plane (A) and the phase (u0) from utc on
+    const jd = julianDay(utc), e = unit(moonEci(jd).map((c) => -c)), X = unit(e.map((c, i) => c - dot(e, P) * P[i])), Y = cross(P, X);   // the lunar equator: X toward the Earth
+    const best = compose(X, Y, P, sunEci(jd), e, rad()); A = best.A; u0 = best.u; epoch = utc;
+  };
+  place(t0);
   const out = { body: 'moon', axes: [[1, 0, 0], [0, 1, 0], [0, 0, 1]], earthAxes: [[1, 0, 0], [0, 1, 0], [0, 0, 1]], sun: [0, 1, 0], earth: [1, 0, 0], earthDist: 384400,
     moon: [0, -1, 0], moonDist: rad(), north: [0, 1, 0], moonToEarth: [1, 0, 0], moonFraction: 0.5, earthFraction: 0.5, rHat: [1, 0, 0], u: u0, dip: 0, pitch: 0,
     speed: 0, groundSpeed: 0, alt: h, lat: 0, lon: 0, utc: t0, warp: 1, radiusKm: R_MOON };
@@ -66,7 +70,8 @@ export function createLunarSky({ t0 = Date.now(), h = 1500 } = {}) {
   }
   return {
     out, update, clock,
-    get period() { return 2 * Math.PI / mean(); }, get meanMotion() { return mean(); },
+    get period() { return 2 * Math.PI / mean(); }, get meanMotion() { return mean(); }, get altitude() { return hKm; },
+    recompose() { place(clock.now(real)); },                        // a switch to the Moon later on: the composed view for now and the current height
     setWarp(w) { clock.setWarp(w, real); },
     setAltitude(km) { const now = clock.now(real); u0 += mean() * (now - epoch) / 1000; epoch = now; hKm = km; },   // the same plane and place, a new height
   };

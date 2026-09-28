@@ -144,6 +144,7 @@ export function createEarth({ texturePath, R, position, axis, sunDir, sunCol, sp
     setScale(k) {                                                    // the far Earth of a lunar orbit: the globe k× smaller, its atmosphere's lengths with it
       if (k === scale) return; scale = k; group.scale.setScalar(k); beta.copy(beta0).divideScalar(k); atmoMat.uniforms.uMie.value = mie0 / k;
       for (const m of [groundMat, cloudMat, atmoMat]) { m.uniforms.uR.value = R * k; m.uniforms.uH.value = H * k; }
+      for (const m of [cloudMat, atmoMat]) { m.polygonOffset = k < 1; m.polygonOffsetFactor = 0; m.polygonOffsetUnits = -4; }   // far away the shells sit within a depth step of the ground: pull them forward
     },
     dispose() { disposed = true; [ground, clouds, atmo].forEach((m) => { m.geometry.dispose(); m.material.dispose(); }); textures.forEach((t) => t.dispose()); },
   };

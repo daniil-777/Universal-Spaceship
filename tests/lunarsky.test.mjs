@@ -55,3 +55,14 @@ test('lunar orbit: the phase advances at the mean motion (time warp included) an
   assert.ok(Math.abs(o.speed - 0.8531) < 1e-3 && o.alt === 5000, `v ${o.speed}`);
   assert.ok(dot(o.rHat, r0) > 1 - 1e-12, 'same place over the Moon');
 });
+
+test('lunar orbit: a later switch re-composes the view for that moment and height, and the altitude reads back at once', () => {
+  for (let k = 0; k < 6; k++) {
+    const L = createLunarSky({ t0: T0 + k * 5 * 86400000, h: 1500 }); L.update(0); L.setAltitude(5000);
+    assert.equal(L.altitude, 5000, 'the new height before any update');
+    L.setWarp(1000); L.update(11); L.recompose(); const o = L.update(11), g = groundSunAt(o, -30 * DEG), sw = world(o.sun, o.pitch);   // 11 s at 1000×: 3 h 03 min of sky time later
+    assert.equal(o.alt, 5000); assert.ok(Math.abs(o.utc - (T0 + k * 5 * 86400000 + 11000000)) < 1, 'the sky clock carries on');
+    assert.ok(g !== null && g > 8 * DEG && g < 55 * DEG, `start ${k * 5} d + 2.8 h: the Sun ${g && (g / DEG).toFixed(1)}° over the ground in view`);
+    assert.ok(Math.acos(Math.cos(-13 * DEG) * sw[0] + Math.sin(-13 * DEG) * sw[1]) > 40 * DEG, 'the Sun out of the frame');
+  }
+});

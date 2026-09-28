@@ -265,7 +265,9 @@ function createRings(planet, r) {
 }
 
 // ---------------------------------------------------------------- public API
-export function createSpace(scene, { seed = 1, texturePath = 'textures/' } = {}) {
+export function createSpace(scene, { seed = 1, texturePath = 'textures/', start = 'auto', lowPass = false, halfFov } = {}) {
+  // start: the Earth orbit's opening view — 'auto' (the Moon rising beside the ship when it is lit enough to see, else dawn), 'dawn', 'moon';
+  // lowPass: the page opens on a low pass (the Moon placed over that lower limb); halfFov: the screen's horizontal half-angle in the chase view
   const rng = mulberry32(seed * 7919 + 17);
   const sunDir = SUN_POS.clone().normalize();                     // root-local; the sun is parallel light for everything
   const sunDirWorld = sunDir.clone(), airSunWorld = new THREE.Vector3(); let sunLitNow = 1;   // follows the yaw; shared by every planet/Earth shader
@@ -277,8 +279,10 @@ export function createSpace(scene, { seed = 1, texturePath = 'textures/' } = {})
   const sky = createSky(rng, bandN, bandT, [venus]);
   const sun = createSun(), flare = createFlare();
   // Earth: the real one — its orientation from the date, the Earth's rotation and the ship's orbit (src/skyorbit.js), every frame; the Moon where it is
-  const sky3 = createSkyOrbit({ t0: Date.now(), h: ORBIT_KM }), moon = createMoon({ texturePath });
-  const lunar = createLunarSky({ t0: Date.now(), h: 1500 }); let body = 'earth', lun = false; const _qp = new THREE.Quaternion(), _mc = new THREE.Vector3();   // ?orbit=moon: a lunar orbit instead
+  const sky3 = createSkyOrbit({ t0: Date.now(), h: ORBIT_KM, start, viewH: lowPass ? LOW_KM : ORBIT_KM, halfFov }), moon = createMoon({ texturePath });
+  const lunar = createLunarSky({ t0: Date.now(), h: 1500 }); let body = 'earth', lun = false, moonScale = 4;   // moonScale: the Earth orbit's Moon drawn larger than life (1 = true size, 0.52°), like Stellarium's 'enlarge Moon'
+  const _qp = new THREE.Quaternion(), _mc = new THREE.Vector3();   // lunar orbit (?orbit=moon): the backdrop's pitch; the Moon's centre for the flare
+  sky3.update(0); lunar.update(0);                                 // both skies carry real values (phases, heights) before the first frame reads them
   const earth = createEarth({ texturePath, R: EARTH_R, position: new THREE.Vector3(0, earthY(ORBIT_KM), 0), axis: new THREE.Vector3(0, 1, 0), sunDir: sunDirWorld, sunCol: earthSun, spin: 0, spin0: 0 });
   const aircraft = createAircraft(earth.group.children[0], { R: EARTH_R, n: 14, spin: 0, spin0: 0, hub: new THREE.Vector3(0, 1, 0) });   // jets over the surface, shown during low passes
   let frozen = false, snap = false; const _qw = new THREE.Quaternion(), _qi = new THREE.Quaternion(), _bx = new THREE.Vector3(), _by = new THREE.Vector3(), _bz = new THREE.Vector3(), _mb = new THREE.Matrix4();
@@ -347,11 +351,15 @@ export function createSpace(scene, { seed = 1, texturePath = 'textures/' } = {})
     setWarp(w) { sky3.setWarp(w); lunar.setWarp(w); },
     get body() { return body; },
     setBody(b) {                                                      // 'earth': the ISS-like orbit; 'moon': a polar lunar orbit (src/lunarsky.js) — the Moon big below, the Earth a far globe
-      body = b === 'moon' ? 'moon' : 'earth'; if (body === 'moon') moon.hiRes(); fillSpace.ground.set(body === 'moon' ? 0x161616 : 0x0e1626); fill.groundColor.copy(fillSpace.ground).lerp(fillAir.ground, atmoK);   // moonshine from below is grey
+      const prev = body; body = b === 'moon' ? 'moon' : 'earth'; if (body === 'moon') moon.hiRes();
+      if (body === 'moon' && prev !== 'moon') lunar.recompose();       // the lunar view composed for now and the chosen height
+      if (body === 'earth' && prev !== 'earth') { frozen = false; snap = true; }   // the Earth orbit carries on: one live frame re-reads the globe from it
+      fillSpace.ground.set(body === 'moon' ? 0x161616 : 0x0e1626); fill.groundColor.copy(fillSpace.ground).lerp(fillAir.ground, atmoK);   // moonshine from below is grey
       if (body === 'earth') { earth.setScale(1); earth.group.position.set(0, earthY(ORBIT_KM) + (earthY(LOW_KM) - earthY(ORBIT_KM)) * alt, 0).lerp(EARTH_POS_ATMO, atmoK); sun.mesh.scale.setScalar(1); }
     },
-    setMoonAltitude(km) { lunar.setAltitude(km); }, get moonAltitude() { return lunar.out.alt; },
-    get telescope() { return body === 'moon' ? { target: earth.group, fov: 3.2, name: 'Earth', lit: lunar.out.earthFraction } : { target: moon.mesh, fov: 1.2, name: 'Moon', lit: sky3.out.moonFraction }; },   // the ship's long lens: the Moon from the Earth's orbit, the Earth from the Moon's
+    setMoonScale(k) { moonScale = Math.max(1, Math.min(8, +k || 1)); }, get moonScale() { return moonScale; },   // the telescope widens by as much, so its view stays the true one
+    setMoonAltitude(km) { lunar.setAltitude(km); }, get moonAltitude() { return lunar.altitude; },
+    get telescope() { return body === 'moon' ? { target: earth.group, fov: 3.2, name: 'Earth', lit: lunar.out.earthFraction } : { target: moon.mesh, fov: 1.2 * moonScale, lens: 1.2, name: 'Moon', lit: sky3.out.moonFraction }; },   // the ship's long lens: the Moon from the Earth's orbit, the Earth from the Moon's
     get orbitInfo() { const o = body === 'moon' ? lunar.out : sky3.out; return { body, speedKmh: o.speed * 3600, groundKmh: o.groundSpeed * 3600, altKm: o.alt, lat: o.lat * 180 / Math.PI, lon: o.lon * 180 / Math.PI, warp: o.warp, utc: o.utc, moonFraction: o.moonFraction }; },
     setAtmosphere(on) { atmoTarget = on ? 1 : 0; },                   // atmospheric flight: the surface right below, sky dome, haze, ground scrolling at flight speed
     get atmosphere() { return atmoK; },
@@ -364,7 +372,7 @@ export function createSpace(scene, { seed = 1, texturePath = 'textures/' } = {})
         for (const p of planets) p.group.visible = atmoK < 0.5;
         fill.color.copy(fillSpace.sky).lerp(fillAir.sky, atmoK); fill.groundColor.copy(fillSpace.ground).lerp(fillAir.ground, atmoK); fill.intensity = fillSpace.i + (fillAir.i - fillSpace.i) * atmoK;
       }
-      lun = body === 'moon'; const o = lun ? lunar.update(t) : sky3.update(t), live = atmoK < 0.5 || snap;
+      lun = body === 'moon'; const o3 = sky3.update(t), oL = lunar.update(t), o = lun ? oL : o3, live = atmoK < 0.5 || snap;   // both skies run on the page's time (warp, route phasing and switches stay in step)
       _qp.setFromAxisAngle(Z, lun ? Math.max(0, o.dip - LEO_DIP) : 0); _qi.copy(root.quaternion).invert().multiply(_qp);   // lunar orbit: the backdrop pitched up by the extra dip, so the limb sits where the LEO Earth's does
       if (lun) {                                                          // the far Earth: true direction and angular size at EARTH_FAR, turning with GMST
         _mb.makeBasis(_bx.fromArray(o.earthAxes[0]), _by.fromArray(o.earthAxes[1]), _bz.fromArray(o.earthAxes[2])); _qw.setFromRotationMatrix(_mb); earth.group.quaternion.copy(_qi).multiply(_qw);
@@ -375,11 +383,11 @@ export function createSpace(scene, { seed = 1, texturePath = 'textures/' } = {})
       } else frozen = true;
       _el.fromArray(o.sun).applyQuaternion(_qi); sunDir.copy(_el).lerp(SUN0, atmoK).normalize(); sunDirWorld.copy(sunDir).applyQuaternion(root.quaternion);   // the true Sun in orbit, the scene's sun in the air
       sun.mesh.position.copy(sunDir).multiplyScalar(lun ? SUN_FAR : SUN_DIST); sun.mesh.scale.setScalar(lun ? SUN_FAR / SUN_DIST : 1); sunLight.position.copy(sunDir).multiplyScalar(1000);
-      const dip = lun ? o.dip : Math.acos(EARTH_R / (EARTH_R + o.alt / KM)), sw = lun ? 0.0047 : 0.009, lit = THREE.MathUtils.smoothstep(Math.asin(o.sun[1]), -dip - sw, -dip + sw);   // behind the Earth or the Moon (airless: the Sun's own radius): eclipse (orbit only)
+      const dip = lun ? o.dip : Math.acos(EARTH_R / (EARTH_R + o.alt / KM)), sw = lun ? SUN_R / SUN_DIST : 0.009, lit = THREE.MathUtils.smoothstep(Math.asin(o.sun[1]), -dip - sw, -dip + sw);   // behind the Earth or the Moon (airless: the drawn disc's radius, so the light goes when the disc does): eclipse (orbit only)
       sunLight.intensity = 2.4 * (lit + (1 - lit) * atmoK); sunLitNow = lit + (1 - lit) * atmoK;
       const mk = lun ? Math.min(EARTH_R / R_MOON, 3000 / o.moonDist) : 0;   // lunar orbit: the Moon to scale with its nearest point ≥ 0.8 km/unit away, the far side < 2300 units (inside the stars)
       moon.mesh.visible = atmoK < 0.5; _mw.fromArray(o.moon); _ml.copy(_mw).applyQuaternion(_qi).multiplyScalar(lun ? mk * o.moonDist : MOON_D); _ew.fromArray(o.moonToEarth); _el.copy(_ew).applyQuaternion(_qi); _ew.applyQuaternion(_qp); _nl.fromArray(o.north).applyQuaternion(_qi);
-      moon.place(_ml, lun ? mk * R_MOON : MOON_D * Math.tan(Math.asin(R_MOON / o.moonDist)), sunDirWorld, _el, _nl, o.earthFraction, _ew);   // the ground track swings north and south
+      moon.place(_ml, lun ? mk * R_MOON : MOON_D * Math.tan(Math.asin(R_MOON / o.moonDist)) * moonScale, sunDirWorld, _el, _nl, o.earthFraction, _ew);   // the ground track swings north and south
       if (atmoK > 0.01) { earth.group.rotateOnAxis(Z, -dt * atmoK * 0.45 / EARTH_R); dome.position.copy(camera.position).sub(root.position).applyQuaternion(_q.copy(root.quaternion).invert()); domeMat.uniforms.uSun.value.copy(sunDir); }   // the far ground turns at the terrain strip's speed
       aircraft.update(dt, lun ? 0 : alt * (1 - atmoK));                                                   // sphere jets only on low passes; corridor airliners take over in the atmosphere
       if (dirty) { yaw += (yawTarget - yaw) * (1 - Math.exp(-dt * 2.5)); if (Math.abs(yawTarget - yaw) < 1e-4) { yaw = yawTarget; dirty = false; } applyYaw(); }

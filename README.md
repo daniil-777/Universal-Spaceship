@@ -52,7 +52,12 @@ now, and the ground track slides west each orbit as the planet turns beneath it.
 flies in the Earth's shadow. The **Moon** hangs in the sky at its true direction, size and phase — NASA's LRO colour
 mosaic with LOLA relief (`textures/moon/`, the Scientific Visualization Studio's CGI Moon Kit), lit by the Lommel–Seeliger
 law of lunar soil (a crisp terminator, the opposition surge at full Moon) with earthshine on its dark side
-(`src/moon.js`). The *Time warp* slider (1×–300×) runs the whole sky faster. Choosing an atmospheric route re-phases the
+(`src/moon.js`). Whenever it is lit enough to see (≥ 15 %), the flight starts with the Moon rising over the Earth's
+limb beside the ship — over the day side while it waxes and through full, before sunrise in the week it wanes (it then
+rises ahead of the Sun) — and it climbs through the frame in about seven minutes, returning once an orbit (`?start=dawn`
+keeps the classic dawn pass, `?start=moon` forces the Moon). Its true size is only 0.52° — about ten pixels — so, like
+Stellarium's *enlarge Moon*, it is drawn 4× larger by default (Playbox *Moon size*, `?moonscale=1` for the true size);
+the *Moon* camera widens by as much, so the telescope's view stays the true one. The *Time warp* slider (1×–300×) runs the whole sky faster. Choosing an atmospheric route re-phases the
 orbit so the descent begins over that place (and the low-pass airliners are re-routed through whatever point is under
 the ship when a pass begins).
 
