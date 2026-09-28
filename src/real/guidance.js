@@ -2,7 +2,7 @@
 // (X, Y box-kept while Z swings to 0, then the Zd null) -> H1 (>= 300 s, GO) -> CORRIDOR -> H2 (60 s, GO) -> FINAL
 // -> contact (judged by the sim). BREAKOUT pre-empts any phase; from H1 acquisition to the 3 m commit point a Rule-P
 // breakout must exist (Rule A), checked every 10 s. Output: the velocity command for the filter and the control.
-import { DEG, H1_POINT, H2_RHO, GO, KOS_R, FINAL_SPEED, RULE_P_TRANSFER, BREAKOUT_V, SHIP_PORT, LATERAL_SETS, portRel, inCone } from './consts.js';
+import { DEG, H1_POINT, H2_RHO, GO, KOS_R, FINAL_SPEED, RULE_P_TRANSFER, BREAKOUT_V, SHIP_PORT, LATERAL_SETS, TRANS_SETS, portRel, inCone } from './consts.js';
 import { planTransfer, planMcc, planBreakout, ruleP } from './passive.js';
 import { propagate } from './cw.js';
 import { THETA_FINAL, BURN_TOL, BURN_TOL_V } from './control.js';
@@ -23,6 +23,9 @@ const QREF = [0, 0, 0, 1];
 // failed: the jets FDIR has declared failed-off. Flight rule: no KOS entry without torque-balanced lateral translation.
 export function createGuidance({ phase = PH.TRANSFER, t0 = 0, events = [], failed = [] } = {}) {
   const lateralOk = !LATERAL_SETS.some((set) => set.some((i) => failed.includes(i)));
+  // the DEPART of a far-start transfer is a radial -Y burn (TRANS_SETS[3], P1 and P3): its planned radial dv is
+  // -0.30 to -0.92 m/s over the whole T search, never +Y
+  const departOk = !TRANS_SETS[3].some((i) => failed.includes(i));
   const st = { phase, tPhase: t0, burn: null, plan: null, tDep: null, mcc: [false, false], boAvail: true, boT: -Infinity, committed: false, noGoSince: null, lastZ: null };
   const p = new Float64Array(3), e = new Float64Array(3), we = new Float64Array(3), vr = new Float64Array(3);
   const setPhase = (ph, t, why = '') => { st.phase = ph; st.tPhase = t; events.push({ t, kind: 'phase', phase: ph, why }); };
@@ -80,6 +83,10 @@ export function createGuidance({ phase = PH.TRANSFER, t0 = 0, events = [], faile
     switch (st.phase) {
       case PH.TRANSFER: {
         if (st.tDep === null) {
+          // flight rule (deviation 11) at the start: a failed jet of the DEPART set would fly the departure lopsided
+          // for minutes and miss Rule P, so that run breaks out before the transfer; any other failed lateral jet
+          // flies the transfer and breaks out at H1 (NO-GO there)
+          if (!departOk) { breakout(t, 'NO-GO: a lateral translation jet has failed', nav); return update(t, nav); }
           if (!st.plan) st.plan = planTransfer(xh, { rMin: RULE_P_TRANSFER + PLAN_MARGIN.depart });
           if (!st.plan) { events.push({ t, kind: 'nogo', why: 'no Rule-P transfer' }); return cmd; }
           startBurn('DEPART', st.plan.v, t, xh); events.push({ t, kind: 'plan', T: st.plan.T, dz: st.plan.dz, nominal: st.plan.nominal, rMin: st.plan.rMin });

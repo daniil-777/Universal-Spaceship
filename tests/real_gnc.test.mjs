@@ -1,7 +1,7 @@
 // Real spacecraft S1: TRANSFER, Rule P / Rule A, GO and the near starts (spec sections 3, 6 and 10).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { N, T_ORB, DAY, DRAG_B, KOS_R, JET_INDEX, BREAKOUT_V } from '../src/real/consts.js';
+import { N, T_ORB, DAY, DRAG_B, KOS_R, JET_INDEX, BREAKOUT_V, PROP0 } from '../src/real/consts.js';
 import { propagate } from '../src/real/cw.js';
 import { passiveMin, planTransfer, ruleP, breakoutOk, planBreakout } from '../src/real/passive.js';
 import { createRealSim, drawRun } from '../src/real/sim.js';
@@ -81,6 +81,26 @@ test('review focus: a failed translation-critical primary (P1-P8) ends safe, nev
     const sim = createRealSim({ seed: 21, run: { ...drawRun(21, { start: 'near' }), failed: [JET_INDEX[name]] } });
     sim.run();
     assert.ok(sim.rep.result === 'capture' || sim.rep.result === 'breakout', `${name}: ${sim.rep.result} ${sim.rep.reason}`);
+  }
+});
+
+test('review focus: a failed lateral primary ends safe — a failed DEPART jet breaks out at once, others break out at H1', () => {
+  // six forced P1 far starts whose degraded -Y departures broke Rule P or ran out of propellant: break out at t = 0;
+  // seed 64 (drawn with a failed P7) and a forced P2 (seed 20, whose far-start breakout was not passively safe): fly to H1
+  const runs = [4, 7, 13, 20, 24, 25].map((s) => ({ seed: s, atOnce: true, run: { ...drawRun(s, { start: 'far' }), failed: [JET_INDEX.P1] } }));
+  runs.push({ seed: 64, atOnce: false, run: drawRun(64, { start: 'far' }) }, { seed: 20, atOnce: false, run: { ...drawRun(20, { start: 'far' }), failed: [JET_INDEX.P2] } });
+  assert.deepEqual(runs[6].run.failed, [JET_INDEX.P7], 'seed 64 draws a failed P7');
+  for (const o of runs) {
+    const sim = createRealSim(o), tag = `seed ${o.seed} (failed jet ${o.run.failed})`;
+    sim.run();
+    assert.equal(sim.rep.result, 'breakout', `${tag}: ${sim.rep.result} ${sim.rep.reason}`);
+    assert.ok(sim.rep.prop < PROP0 && sim.events.every((e) => e.truthRMin === undefined || e.truthRMin >= 240), `${tag}: Rule P or propellant (${sim.rep.prop} kg)`);
+    const abort = sim.events.find((e) => e.kind === 'abort'), bo = sim.events.find((e) => e.kind === 'BREAKOUT');
+    assert.ok(abort && abort.verified && /NO-GO: a lateral translation jet has failed/.test(abort.why) && bo && bo.truth.ok, `${tag}: ${JSON.stringify(abort)}`);
+    const flown = sim.events.filter((e) => ['plan', 'DEPART', 'MCC', 'MCC skipped', 'ARRIVE', 'ZNULL'].includes(e.kind)).map((e) => e.kind);
+    const phaseAtAbort = sim.events.slice(0, sim.events.indexOf(abort)).filter((e) => e.kind === 'phase').map((e) => e.phase).at(-1);
+    if (o.atOnce) assert.ok(abort.t === 0 && flown.length === 0, `${tag}: abort at ${abort.t} s after [${flown}]`);
+    else assert.ok(flown.includes('DEPART') && flown.includes('ARRIVE') && phaseAtAbort === PH.H1, `${tag}: abort in ${phaseAtAbort} after [${flown}]`);
   }
 });
 
