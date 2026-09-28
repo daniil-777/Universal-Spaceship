@@ -53,7 +53,9 @@ export function pickInnerLevel(zf, current = null) {
   while (zf < L - 1.3 && L > MIN_LEVEL) L -= 1;
   return Math.max(MIN_LEVEL, Math.min(MAX_LEVEL, L));
 }
-export const ringLevels = (L0) => [L0, L0 - 1, L0 - 2, L0 - 3, L0 - 5].filter((L) => L >= 2);
+// The two outer rings sit on even levels (E ≤ L0 − 3 and E − 2): a one-level zoom step then brings at most one new ring
+// and never retires the horizon ring mid-zoom (with L0 − 3, L0 − 5 every step retired both and the horizon flashed).
+export const ringLevels = (L0) => { const E = 2 * Math.floor((L0 - 3) / 2); return [L0, L0 - 1, L0 - 2, E, E - 2].filter((L) => L >= 2); };
 
 // 8 × 8 tiles around the point; the origin sits on even tile indices so the 4 × 4 height tiles one level up line up.
 export function ringWindow(lonDeg, latDeg, level) {

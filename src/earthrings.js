@@ -1,7 +1,8 @@
 // earthrings.js — the Earth zoom view's ground: five nested rings of real imagery with real relief around the view's
 // target, streamed the way src/terrain.js streams its strips (one curved mesh + one GPU atlas per ring, tiles copied in
 // as they arrive, an atlas addressed toroidally so re-centring fetches only the new row or column). Rings sit on levels
-// L0, L0−1, L0−2, L0−3, L0−5 (src/earthtiles.js); a ring shows once 90 % of its tiles are in and a per-slot mask hides
+// L0, L0−1, L0−2 and two even outer levels (src/earthtiles.js ringLevels); a ring shows once 90 % of its tiles are in, missing
+// tiles are asked for again every RETRY_S seconds (a network blip heals without panning), and a per-slot mask hides
 // any tile that is not (yet) in together with the height tile under it, so the coarser ring or the globe covers it —
 // no holes, and no imagery drawn at sea level while its relief is still on the way. Heights: Terrarium tiles one level
 // coarser in a 4 × 4 atlas, decoded in the vertex shader. Tiles come from src/earthloader.js. Units: km in the view's
@@ -10,7 +11,7 @@ import * as THREE from 'three';
 import { RING_TILES, RING_COUNT, HEIGHT_TILES, MAX_LEVEL, HEIGHT_SOURCE, sourceForLevel, tileUrl, ringLevels, ringWindow, heightWindow, heightTileFor, windowTiles, tileToLonLat, lonLatToTile, tileSizeKm, decodeTerrarium, mod } from './earthtiles.js';
 import { createTileLoader } from './earthloader.js';
 
-const T = 256, GRID = 128, SHOW_AT = 0.9, HIDE_AT = 0.5, UPLOADS_PER_FRAME = 6;
+const T = 256, GRID = 128, SHOW_AT = 0.9, HIDE_AT = 0.5, UPLOADS_PER_FRAME = 6, RETRY_S = 10;
 
 const VERT = /* glsl */`uniform sampler2D tHeight; uniform vec2 uHOff; uniform float uHScale, uHSize, uHeightK, uStepKm;
   attribute vec3 aUp; varying vec2 vUv; varying vec3 vW, vN, vUp; varying float vSea;
@@ -56,7 +57,7 @@ const zeros = (n) => { if (!ZEROS.has(n)) ZEROS.set(n, new Uint8Array(n)); retur
 export function createEarthRings(scene, renderer, { loader = createTileLoader() } = {}) {
   const uploads = [], dst = new THREE.Vector2(), cpu = new Map(), _p = [0, 0, 0], _u = [0, 0, 0];
   const zero = new THREE.DataTexture(zeros(T * T * 4), T, T, THREE.RGBAFormat); zero.needsUpdate = true;
-  let frame = null, scratch = null;
+  let frame = null, scratch = null, retryT = 0;
   const count = (w, k) => { let c = 0; for (let i = 0; i < w.length; i++) if (w[i] && w[i] === k[i]) c++; return c; };
   function atlas(size, colorSpace, mips) {
     const t = new THREE.DataTexture(zeros(size * size * 4), size, size, THREE.RGBAFormat);
@@ -83,7 +84,8 @@ export function createEarthRings(scene, renderer, { loader = createTileLoader() 
     const mesh = new THREE.Mesh(geo, mat); mesh.frustumCulled = false; mesh.visible = false; scene.add(mesh);
     const S = RING_TILES * RING_TILES, H = HEIGHT_TILES * HEIGHT_TILES;
     return { level: -1, win: null, hwin: null, mesh, mat, color, height, mask, vis: 0, hk: 0, shown: false, hShown: false, valid: 0, hValid: 0, stats: null,
-      want: Array(S).fill(''), key: Array(S).fill(''), tile: Array(S).fill(null), hwant: Array(H).fill(''), hkey: Array(H).fill(''), hfail: Array(H).fill(''), hbmp: Array(H).fill(null) };
+      want: Array(S).fill(''), key: Array(S).fill(''), pend: Array(S).fill(''), tile: Array(S).fill(null),
+      hwant: Array(H).fill(''), hkey: Array(H).fill(''), hpend: Array(H).fill(''), hfail: Array(H).fill(''), hbmp: Array(H).fill(null), htile: Array(H).fill(null) };
   }
   const rings = Array.from({ length: RING_COUNT }, () => makeRing());
 
@@ -104,7 +106,8 @@ export function createEarthRings(scene, renderer, { loader = createTileLoader() 
     const win = ringWindow(lon, lat, level);
     if (r.level === level && r.win && r.win.x0 === win.x0 && r.win.y0 === win.y0) return;
     if (r.level !== level) {
-      r.level = level; r.vis = 0; r.hk = 0; r.shown = r.hShown = false; r.key.fill(''); r.hkey.fill(''); r.hfail.fill(''); r.hbmp.fill(null); r.mask.image.data.fill(0); r.mask.needsUpdate = true;
+      r.level = level; r.vis = 0; r.hk = 0; r.shown = r.hShown = false; r.key.fill(''); r.pend.fill(''); r.hkey.fill(''); r.hpend.fill(''); r.hfail.fill(''); r.hbmp.fill(null);
+      r.mask.image.data.fill(0); r.mask.needsUpdate = true;
       for (let s = 0; s < HEIGHT_TILES * HEIGHT_TILES; s++) copy(zero, r.height, s, HEIGHT_TILES);
     }
     r.win = win; r.hwin = heightWindow(win); build(r);
@@ -113,29 +116,43 @@ export function createEarthRings(scene, renderer, { loader = createTileLoader() 
     u.uHOff.value.set(mod(hw.x0, HEIGHT_TILES) / HEIGHT_TILES + hw.off[0], mod(hw.y0, HEIGHT_TILES) / HEIGHT_TILES + hw.off[1]); u.uHScale.value = hw.scale;
     u.uStepKm.value = tileSizeKm(level, centreLat) * RING_TILES / GRID; u.uVRange.value.set(-win.y0 / RING_TILES, (n - win.y0) / RING_TILES);
     r.mesh.renderOrder = 2 + level; r.mat.polygonOffsetFactor = MAX_LEVEL - level; r.mat.polygonOffsetUnits = 4 * (MAX_LEVEL - level);
-    const src = sourceForLevel(level), prio = (MAX_LEVEL - level) * 100;
     r.want.fill('');
     const tiles = windowTiles(win, RING_TILES); r.valid = tiles.length;
     for (const t of tiles) {
       r.want[t.slot] = t.key; r.tile[t.slot] = t;
-      if (r.key[t.slot] === t.key) continue;
-      loader.request({ url: tileUrl(src, level, t.x, t.y), prio: prio + t.d, raw: false, wanted: () => r.level === level && r.want[t.slot] === t.key,
-        done: (bmp) => { if (bmp) uploads.push({ r, slot: t.slot, key: t.key, bmp, height: false }); } });
+      if (r.key[t.slot] !== t.key && r.pend[t.slot] !== t.key) requestColour(r, t);
     }
     r.hwant.fill('');
     const htiles = windowTiles({ level: hw.level, x0: hw.x0, y0: hw.y0 }, HEIGHT_TILES); r.hValid = htiles.length;
     for (const t of htiles) {
-      r.hwant[t.slot] = t.key;
-      if (r.hkey[t.slot] === t.key || r.hfail[t.slot] === t.key) continue;
+      r.hwant[t.slot] = t.key; r.htile[t.slot] = t;
+      if (r.hkey[t.slot] === t.key || r.hfail[t.slot] === t.key || r.hpend[t.slot] === t.key) continue;
       if (r.hkey[t.slot]) { copy(zero, r.height, t.slot, HEIGHT_TILES); r.hkey[t.slot] = ''; r.hbmp[t.slot] = null; }
       r.hfail[t.slot] = '';
-      const wanted = () => r.level === level && r.hwant[t.slot] === t.key;
-      loader.request({ url: tileUrl(HEIGHT_SOURCE, hw.level, t.x, t.y), prio: prio + 50 + t.d, raw: true, wanted,
-        done: (bmp, why) => {
-          if (bmp) uploads.push({ r, slot: t.slot, key: t.key, bmp, height: true });
-          else if ((why === 'failed' || why === 'blank') && wanted()) r.hfail[t.slot] = t.key;   // no relief to wait for here: show the imagery flat
-        } });
+      requestHeight(r, t);
     }
+  }
+  function requestColour(r, t) {
+    const level = r.level; r.pend[t.slot] = t.key;
+    loader.request({ url: tileUrl(sourceForLevel(level), level, t.x, t.y), prio: (MAX_LEVEL - level) * 100 + t.d, raw: false, wanted: () => r.level === level && r.want[t.slot] === t.key,
+      done: (bmp) => {
+        if (r.pend[t.slot] === t.key) r.pend[t.slot] = '';
+        if (bmp) uploads.push({ r, slot: t.slot, key: t.key, bmp, height: false });
+      } });
+  }
+  function requestHeight(r, t) {
+    const level = r.level, hl = r.hwin.level, wanted = () => r.level === level && r.hwant[t.slot] === t.key; r.hpend[t.slot] = t.key;
+    loader.request({ url: tileUrl(HEIGHT_SOURCE, hl, t.x, t.y), prio: (MAX_LEVEL - level) * 100 + 50 + t.d, raw: true, wanted,
+      done: (bmp, why) => {
+        if (r.hpend[t.slot] === t.key) r.hpend[t.slot] = '';
+        if (bmp) uploads.push({ r, slot: t.slot, key: t.key, bmp, height: true });
+        else if ((why === 'failed' || why === 'blank') && wanted()) r.hfail[t.slot] = t.key;   // no relief to wait for here: show the imagery flat
+      } });
+  }
+  // Ask again for whatever is still missing and not on its way (the loader's retry time gates real refetches).
+  function retryMissing(r) {
+    for (let s = 0; s < r.want.length; s++) if (r.want[s] && r.key[s] !== r.want[s] && r.pend[s] !== r.want[s]) requestColour(r, r.tile[s]);
+    for (let s = 0; s < r.hwant.length; s++) if (r.hwant[s] && r.hkey[s] !== r.hwant[s] && r.hpend[s] !== r.hwant[s]) requestHeight(r, r.htile[s]);
   }
   function flush() {
     for (let done = 0; done < UPLOADS_PER_FRAME && uploads.length; ) {
@@ -183,9 +200,12 @@ export function createEarthRings(scene, renderer, { loader = createTileLoader() 
       const want = ringLevels(view.L0);
       for (const L of want) place(rings.find((q) => q.level === L) || rings.find((q) => !want.includes(q.level)), L, view.lat, view.lon);
       loader.prune(); flush();
+      retryT += dt;
+      if (retryT > RETRY_S) { retryT = 0; for (const r of rings) if (r.win && want.includes(r.level)) retryMissing(r); }
       const ease = 1 - Math.exp(-dt * 3);
       for (const r of rings) {
-        const used = want.includes(r.level), have = used ? count(r.want, r.key) : 0, hHave = used ? count(r.hwant, r.hkey) : 0;
+        // a height tile that failed for good counts as done: the rest of the ring's relief still shows (that tile stays flat)
+        const used = want.includes(r.level), have = used ? count(r.want, r.key) : 0, hHave = used ? count(r.hwant, r.hkey) + count(r.hwant, r.hfail) : 0;
         if (used) refreshMask(r);
         r.shown = used && have >= (r.shown ? HIDE_AT : SHOW_AT) * r.valid;
         r.hShown = used && hHave >= (r.hShown ? HIDE_AT : SHOW_AT) * r.hValid;
@@ -212,7 +232,8 @@ export function createEarthRings(scene, renderer, { loader = createTileLoader() 
         if (!h) continue;
         const fx = Math.min(T - 1.001, Math.max(0, (t.x - hx) * T - 0.5)), fy = Math.min(T - 1.001, Math.max(0, (t.y - hy) * T - 0.5));
         const ix = Math.floor(fx), iy = Math.floor(fy), ax = fx - ix, ay = fy - iy, i = iy * T + ix;
-        return ((h[i] * (1 - ax) + h[i + 1] * ax) * (1 - ay) + (h[i + T] * (1 - ax) + h[i + T + 1] * ax) * ay) / 1000;
+        // scaled like the drawn relief while it rises, so the camera and the marker never jump ahead of the ground
+        return ((h[i] * (1 - ax) + h[i + 1] * ax) * (1 - ay) + (h[i + T] * (1 - ax) + h[i + T + 1] * ax) * ay) / 1000 * r.hk;
       }
       return 0;
     },

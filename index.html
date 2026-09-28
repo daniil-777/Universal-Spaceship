@@ -85,14 +85,15 @@
   #toast { position: fixed; left: 50%; bottom: 28px; transform: translate(-50%, 12px); opacity: 0; padding: 9px 14px; border-radius: 12px; font-size: 12px; color: var(--text); transition: opacity .25s, transform .25s; pointer-events: none; z-index: 9; }
   #toast.show { opacity: 1; transform: translate(-50%, 0); }
   #zoomHud { position: fixed; left: 50%; top: 72px; transform: translateX(-50%); padding: 8px 14px; border-radius: 12px; font-size: 12px; font-variant-numeric: tabular-nums; color: var(--text); z-index: 8; pointer-events: none; white-space: nowrap; }
-  #zoomHud.hidden, body.zooming #board, #zoomCredit, body.zooming #credit { display: none; }
+  #zoomHud.hidden, body.zooming #board, body.zooming #hud, #zoomCredit, body.zooming #credit { display: none; }
+  #zoomCredit { position: fixed; left: 22px; bottom: 16px; max-width: max(260px, calc(100vw - 400px)); color: var(--text-3); font-size: 11px; z-index: 5; pointer-events: none; }
   body.zooming #zoomCredit { display: block; }
   body.zooming canvas#view { touch-action: none; cursor: grab; }
   #loading { position: fixed; inset: 0; background: #000; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; z-index: 20; transition: opacity .6s; color: #f5f5f7; }
   #loading.hidden { opacity: 0; pointer-events: none; }
   #loading h1 { font: 600 28px var(--font); letter-spacing: -.02em; margin: 0; }
   #loading p { margin: 0; color: rgba(245,245,247,.55); font-size: 12px; letter-spacing: .04em; }
-  #credit, #zoomCredit { position: fixed; right: 22px; bottom: 16px; color: var(--text-3); font-size: 11px; z-index: 3; }
+  #credit { position: fixed; right: 22px; bottom: 16px; color: var(--text-3); font-size: 11px; z-index: 3; }
   /* flight board: the onboard camera's frame (WebGL draws the picture under it) + a glass instrument card */
   #board { position: fixed; right: 22px; bottom: 40px; z-index: 3; display: flex; gap: 10px; align-items: stretch; }
   #board.hidden { display: none; }

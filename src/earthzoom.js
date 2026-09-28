@@ -25,7 +25,10 @@ function appHost(app, space) {
 }
 
 export const ZOOM = { fovDeg: 45, minClearKm: 0.3, camClearKm: 0.15, maxRangeKm: 20000, maxTilt: 70 * Math.PI / 180, ringsFullBelowKm: 2500, ringsGoneAboveKm: 4000, hazeK: 0.55, hazeKm: 40 };
-const STEER_KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Equal', 'Minus', 'NumpadAdd', 'NumpadSubtract', 'KeyQ', 'KeyE', 'KeyR', 'KeyF']);
+// WASD / Q E / R F by position (the same place on every layout); Z and + / − by the character on the key, so a Swiss or
+// German keyboard's Z (which sends KeyY) and its + / − keys work as labelled.
+const STEER_KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'KeyQ', 'KeyE', 'KeyR', 'KeyF']);
+const ZOOM_KEYS = { '+': 'in', '=': 'in', '-': 'out', '_': 'out' };
 const clamp = (x, lo, hi) => Math.min(hi, Math.max(lo, x));
 const fade = (from, to, x) => { const t = clamp((x - from) / (to - from), 0, 1); return t * t * (3 - 2 * t); };
 const fmtDeg = (x, pos, neg) => `${Math.abs(x).toFixed(4)}° ${x >= 0 ? pos : neg}`;
@@ -37,7 +40,7 @@ export function attachEarthZoom({ renderer, space, app = null, host = app ? appH
   // may change meanwhile, e.g. when atmospheric flight starts) is never overwritten
   const credit = document.getElementById('zoomCredit');
   if (credit) credit.textContent = ZOOM_CREDIT;
-  const v = { lat: 0, lon: 0, rangeKm: 420, tilt: 0, heading: 0, groundKm: 0 }, keys = new Set(), ptrs = new Map(), last = { clearKm: 0, camAltKm: 0 };
+  const v = { lat: 0, lon: 0, rangeKm: 420, tilt: 0, heading: 0, groundKm: 0 }, held = new Map(), ptrs = new Map(), last = { clearKm: 0, camAltKm: 0 };
   const pose = { pos: [0, 0, 0], up: [0, 0, 0], look: [0, 0, 0], camLat: 0, camLon: 0, camAltKm: 0 }, sun = [0, 0, 0], up = [0, 0, 0], mk = [0, 0, 0], m4 = new THREE.Matrix4();
   let active = false, view = null, wasManual = false, dayLight = !!(sunSwitch && sunSwitch.checked), pinch = 0, hudT = 0;
 
@@ -58,13 +61,13 @@ export function attachEarthZoom({ renderer, space, app = null, host = app ? appH
     view.globe.group.quaternion.setFromRotationMatrix(m4.makeBasis(a, b, c)); view.rings.rebase(view.frame);
   }
   function steer(dt) {
-    const k = (c) => keys.has(c), step = v.rangeKm * 0.8 * dt;
+    const on = new Set(held.values()), k = (c) => on.has(c), step = v.rangeKm * 0.8 * dt;
     if (k('KeyW') || k('ArrowUp')) panTarget(v, 0, step);
     if (k('KeyS') || k('ArrowDown')) panTarget(v, 0, -step);
     if (k('KeyD') || k('ArrowRight')) panTarget(v, step, 0);
     if (k('KeyA') || k('ArrowLeft')) panTarget(v, -step, 0);
-    if (k('Equal') || k('NumpadAdd')) v.rangeKm *= Math.exp(-1.5 * dt);
-    if (k('Minus') || k('NumpadSubtract')) v.rangeKm *= Math.exp(1.5 * dt);
+    if (k('in')) v.rangeKm *= Math.exp(-1.5 * dt);
+    if (k('out')) v.rangeKm *= Math.exp(1.5 * dt);
     if (k('KeyQ')) v.heading -= dt * Math.PI / 3;
     if (k('KeyE')) v.heading += dt * Math.PI / 3;
     if (k('KeyR')) v.tilt = Math.min(ZOOM.maxTilt, v.tilt + dt * 0.7);
@@ -121,7 +124,7 @@ export function attachEarthZoom({ renderer, space, app = null, host = app ? appH
   }
   function close() {
     if (!active) return;
-    active = false; keys.clear(); ptrs.clear(); pinch = 0; document.body.classList.remove('zooming');
+    active = false; held.clear(); ptrs.clear(); pinch = 0; document.body.classList.remove('zooming');
     if (hud) hud.classList.add('hidden');
     if (btn) btn.textContent = 'Zoom in';
     view.rings.suspend(); host.flightControls(true);
@@ -132,13 +135,14 @@ export function attachEarthZoom({ renderer, space, app = null, host = app ? appH
   const typing = (e) => e.target && /INPUT|TEXTAREA|SELECT/.test(e.target.tagName);
   window.addEventListener('keydown', (e) => {
     if (typing(e)) return;
-    if (e.code === 'KeyZ' && !e.metaKey && !e.ctrlKey) { e.preventDefault(); if (active) close(); else open(); return; }
+    if ((e.key || '').toLowerCase() === 'z' && !e.metaKey && !e.ctrlKey && !e.altKey) { e.preventDefault(); if (!e.repeat) { if (active) close(); else open(); } return; }
     if (!active) return;
-    if (e.code === 'Escape') { close(); return; }
-    if (STEER_KEYS.has(e.code)) { keys.add(e.code); e.preventDefault(); }
+    if (e.key === 'Escape' || e.code === 'Escape') { close(); return; }
+    const act = ZOOM_KEYS[e.key] || (STEER_KEYS.has(e.code) ? e.code : null);
+    if (act) { held.set(e.code, act); e.preventDefault(); }
   });
-  window.addEventListener('keyup', (e) => keys.delete(e.code));
-  window.addEventListener('blur', () => keys.clear());
+  window.addEventListener('keyup', (e) => held.delete(e.code));
+  window.addEventListener('blur', () => held.clear());
   canvas.addEventListener('pointerdown', (e) => {
     if (!active) return;
     canvas.setPointerCapture(e.pointerId); ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY, turn: e.button === 2 || e.ctrlKey || e.shiftKey });

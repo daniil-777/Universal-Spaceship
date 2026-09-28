@@ -38,7 +38,12 @@ test('level of detail: the screen pixel footprint picks the level; the inner rin
   assert.equal(pickInnerLevel(14.8, 16), 16); assert.equal(pickInnerLevel(14.6, 16), 15);
   assert.equal(pickInnerLevel(30), 18); assert.equal(pickInnerLevel(-5), 4); assert.equal(pickInnerLevel(30, 16), 18);
   assert.equal(RING_COUNT, 5);
-  assert.deepEqual(ringLevels(16), [16, 15, 14, 13, 11]); assert.deepEqual(ringLevels(5), [5, 4, 3, 2]); assert.deepEqual(ringLevels(4), [4, 3, 2]);
+  assert.deepEqual(ringLevels(16), [16, 15, 14, 12, 10]); assert.deepEqual(ringLevels(17), [17, 16, 15, 14, 12]); assert.deepEqual(ringLevels(5), [5, 4, 3, 2]); assert.deepEqual(ringLevels(4), [4, 3, 2]);
+  for (let L = 4; L < 18; L++) {
+    const a = ringLevels(L), b = ringLevels(L + 1), fresh = b.filter((x) => !a.includes(x));
+    assert.ok(fresh.length <= 1, `a one-level step from ${L} brings at most one new ring: ${fresh}`);
+    assert.ok(Math.min(...b) <= L + 1 - 5 || Math.min(...b) === 2, `the outer ring still reaches the horizon at ${L + 1}: ${b}`);
+  }
 });
 
 test('ring windows: 8 × 8 tiles on even indices around the point, 64 distinct toroidal slots, inner tiles first, poles and the antimeridian', () => {
