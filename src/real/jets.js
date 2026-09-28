@@ -81,7 +81,8 @@ export function torqueOf(jets, onTimes, out = new Float64Array(3)) {
   return out;
 }
 
-// per-axis torque authority of a mode (N m): the largest achievable |torque| on each axis with u in [0, 1]
+// Nominal authority (all jets up) about each body axis, with u in [0, 1], used as the fixed torque-weight scale;
+// failed jets are excluded from the decision variables in attSelect/select6, not from this scale.
 export function authority(jets, mode) {
   const out = [0, 0, 0];
   for (let a = 0; a < 3; a++) {

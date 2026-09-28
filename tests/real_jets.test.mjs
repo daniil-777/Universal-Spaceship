@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { JETS, JET_INDEX, INERTIA, MASS0, PROP0, KIND, G0, DEG, TRANS_SETS, CYCLE } from '../src/real/consts.js';
-import { createJets, transOnTimes, attSelect, torqueOf, authority } from '../src/real/jets.js';
+import { createJets, transOnTimes, attSelect, torqueOf, authority, select6, F_REF } from '../src/real/jets.js';
 
 const on = (map) => { const a = new Float64Array(JETS.length); for (const [k, v] of Object.entries(map)) a[JET_INDEX[k]] = v; return a; };
 const degps2 = (tau, ax) => (tau / INERTIA[ax]) * 180 / Math.PI;
@@ -64,4 +64,31 @@ test('attitude select: least squares over the mode jets; a pure roll vernier req
   for (const i of v.keys()) if (v[i] > 0) assert.equal(JETS[i].kind, 'V');
   // one full cycle of that select changes the pitch rate by less than the vernier rate deadband (0.01 deg/s)
   assert.ok(Math.abs(degps2(g[2], 2) * CYCLE) < 0.01 && g[0] > 1000, `vernier roll ${g}`);
+});
+
+// the average body force (N) over a cycle of a set of requested on-times, from the module's own force table
+const forceOf = (jets, onTimes) => {
+  const out = [0, 0, 0];
+  for (let i = 0; i < jets.n; i++) {
+    const t = onTimes[i]; if (!(t > 0)) continue;
+    for (let a = 0; a < 3; a++) out[a] += (jets.F[i * 3 + a] * t) / CYCLE;
+  }
+  return out;
+};
+const cosAng = (a, b) => (a[0] * b[0] + a[1] * b[1] + a[2] * b[2]) / (Math.hypot(...a) * Math.hypot(...b));
+
+test('select6: F_REF is the aft pair thrust; a nominal force request tracks with near-zero torque; a failed translation-critical primary still tracks it, firing nothing', () => {
+  assert.equal(F_REF, 2 * 3870);
+
+  const j = createJets(), f = [3870, 0, 0], tau = [0, 0, 0];
+  const u = select6(j, f, tau, new Float64Array(22)), got = forceOf(j, u), T = torqueOf(j, u), auth = authority(j, 'P');
+  assert.ok(cosAng(got, f) > 0.95, `nominal force cosine ${cosAng(got, f)}`);
+  for (let a = 0; a < 3; a++) assert.ok(Math.abs(T[a]) < 0.01 * auth[a], `nominal torque axis ${a}: ${T[a]} vs authority ${auth[a]}`);
+
+  // P2 is one of the two +Y translation primaries (TRANS_SETS); losing it leaves only its unbalanced pair partner,
+  // so select6 must bring in attitude jets to null the torque while a +Y request still tracks its direction
+  const jd = createJets({ failed: [JET_INDEX.P2] }), fy = [0, 3870, 0];
+  const ud = select6(jd, fy, tau, new Float64Array(22));
+  assert.equal(ud[JET_INDEX.P2], 0, 'the failed jet fires nothing');
+  assert.ok(cosAng(forceOf(jd, ud), fy) > 0.9, `degraded force cosine ${cosAng(forceOf(jd, ud), fy)}`);
 });
