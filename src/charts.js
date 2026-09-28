@@ -67,14 +67,14 @@ export class LineChart {
 }
 
 export class HeatGrid {                                  // rows = elevation (top = up), cols = azimuth (left = port), value 0..1
-  constructor(canvas, cols, rows) { this.c = canvas; this.cols = cols; this.rows = rows; this.v = new Float32Array(cols * rows); }
+  constructor(canvas, cols, rows, color = null) { this.c = canvas; this.cols = cols; this.rows = rows; this.color = color; this.v = new Float32Array(cols * rows); }
   set(values) { this.v.set(values); }
   draw() {
     const { ctx, w, h } = fit(this.c), accent = css(document.body, '--accent', '#9fd0ff'), gap = 2, cw = (w - gap * (this.cols - 1)) / this.cols, ch = (h - gap * (this.rows - 1)) / this.rows;
     ctx.clearRect(0, 0, w, h);
     for (let r = 0; r < this.rows; r++) for (let c = 0; c < this.cols; c++) {
       const v = this.v[(this.rows - 1 - r) * this.cols + c], x = c * (cw + gap), y = r * (ch + gap);
-      ctx.globalAlpha = 0.07 + 0.93 * Math.pow(Math.max(0, Math.min(1, v)), 0.8); ctx.fillStyle = accent;
+      ctx.globalAlpha = 0.07 + 0.93 * Math.pow(Math.max(0, Math.min(1, v)), 0.8); ctx.fillStyle = this.color || accent;
       ctx.beginPath(); ctx.roundRect(x, y, cw, ch, 2); ctx.fill();
     }
     ctx.globalAlpha = 1;

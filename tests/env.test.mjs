@@ -107,7 +107,7 @@ test('comets cross the corridor fast, respawn after leaving, never sit on the sh
 });
 
 test('mountains: the beams see the ground ahead-below, ground clearance is reported, and flying into a peak is a crash', () => {
-  const env = new SpaceEnv(31, { count: 0, comets: 0, mountains: true });
+  const env = new SpaceEnv(31, { atmosphere: false, count: 0, comets: 0, mountains: true });
   assert.ok(env.hf && env.hf.peak > ENV.mountains.y0 + 10, 'peaks rise above the floor ' + env.hf.peak);
   env.ship.q.set([0, 0, 0, 1]); qAxes(env.ship.q, env.ship.f, env.ship.u, env.ship.r); env.ship.v.set([14, 0, 0]);
   // put the ship 3 units above the ground: the steep downward beams must see it, the level beams not
@@ -118,18 +118,18 @@ test('mountains: the beams see the ground ahead-below, ground clearance is repor
   // dive: pitch down hard until the ground is hit → terminal with the collision penalty
   let done = false, steps = 0, rew = 0; while (!done && steps < 300) { const r = env.step([-3, 0, 0, 0]); done = r.done; rew = r.reward; steps++; }
   assert.ok(done, 'crashed into the terrain'); assert.ok(rew < -15, 'collision penalty ' + rew);
-  const high = new SpaceEnv(32, { count: 0, comets: 0, mountains: true }); high.ship.p[1] = 30; high.ship.q.set([0, 0, 0, 1]); qAxes(high.ship.q, high.ship.f, high.ship.u, high.ship.r);
+  const high = new SpaceEnv(32, { atmosphere: false, count: 0, comets: 0, mountains: true }); high.ship.p[1] = 30; high.ship.q.set([0, 0, 0, 1]); qAxes(high.ship.q, high.ship.f, high.ship.u, high.ship.r);
   high.sense(); assert.equal(high.obs[Math.floor(ENV.rays.nEl / 2) * ENV.rays.nAz + Math.floor(ENV.rays.nAz / 2)], 0, 'level beams see no ground from high above the peaks');
   high.step([0, 0, 0, 0]); assert.ok(high.ship.p[1] <= ENV.mountains.ceiling, 'thin air holds the ship at the ceiling ' + high.ship.p[1]);
   assert.ok(high.hf.peak > ENV.mountains.ceiling - 2, 'the highest peaks reach the ceiling ' + high.hf.peak);
   // straight level flight at the spawn altitude runs into the range within a few laps: the peaks really do cross the flight band
-  let crashes = 0; for (let seed = 40; seed < 46; seed++) { const e = new SpaceEnv(seed, { count: 0, comets: 0, mountains: true, mountainSeed: 5 + seed % 7 }); assert.ok(e.groundClearance() > 3, 'spawns clear of the ground ' + e.groundClearance()); for (let i = 0; i < 900; i++) { if (e.step([0, 0, 0, 0]).done) { crashes++; break; } } }
+  let crashes = 0; for (let seed = 40; seed < 46; seed++) { const e = new SpaceEnv(seed, { atmosphere: false, count: 0, comets: 0, mountains: true, mountainSeed: 5 + seed % 7 }); assert.ok(e.groundClearance() > 3, 'spawns clear of the ground ' + e.groundClearance()); for (let i = 0; i < 900; i++) { if (e.step([0, 0, 0, 0]).done) { crashes++; break; } } }
   assert.ok(crashes >= 3, 'straight flight hits the mountains in most worlds: ' + crashes + '/6');
 });
 
 test('skylines: towers are rasterised into the height field, walls stop the ship, beams see them, straight flight crashes', () => {
   for (const city of ['dubai', 'newyork', 'moscow']) {
-    const env = new SpaceEnv(50, { count: 0, comets: 0, city }), hf = env.hf;
+    const env = new SpaceEnv(50, { atmosphere: false, count: 0, comets: 0, city }), hf = env.hf;
     assert.ok(hf.buildings.length > 60 || hf.chunks, city + ' has buildings or Meshy districts: ' + hf.buildings.length);
     let tall = null;                                        // the tallest wide ground-level box tower (spires are thinner than a cell); a chunk-only city has none
     if (hf.buildings.length) { tall = hf.buildings.filter((b) => b.w >= 2 && b.d >= 2 && b.y === 0).reduce((a, b) => (b.h > a.h ? b : a));
@@ -152,12 +152,12 @@ test('skylines: towers are rasterised into the height field, walls stop the ship
     env.ship.p[0] = tall.x - tall.w / 2 - 12; env.ship.p[1] = hf.y0 + tall.y + tall.h - 2; env.ship.p[2] = tall.z; env.sense();
     assert.ok(env.obs[Math.floor(ENV.rays.nEl / 2) * ENV.rays.nAz + Math.floor(ENV.rays.nAz / 2)] > 0.5, city + ': the centre beam sees the tower');
   }
-  let crashes = 0; for (const city of ['dubai', 'newyork', 'moscow']) for (let seed = 60; seed < 64; seed++) { const e = new SpaceEnv(seed, { count: 0, comets: 0, city, citySeed: seed % 5 }); for (let i = 0; i < 900; i++) if (e.step([0, 0, 0, 0]).done) { crashes++; break; } }
+  let crashes = 0; for (const city of ['dubai', 'newyork', 'moscow']) for (let seed = 60; seed < 64; seed++) { const e = new SpaceEnv(seed, { atmosphere: false, count: 0, comets: 0, city, citySeed: seed % 5 }); for (let i = 0; i < 900; i++) if (e.step([0, 0, 0, 0]).done) { crashes++; break; } }
   assert.ok(crashes >= 6, 'straight flight runs into the skylines: ' + crashes + '/12');
 });
 
 test('birds: flocks wander above whatever stands below, stay in the corridor, are sensed, and a bird strike ends the episode', () => {
-  const env = new SpaceEnv(70, { count: 0, comets: 0, city: 'newyork', birds: 4 });
+  const env = new SpaceEnv(70, { atmosphere: false, count: 0, comets: 0, city: 'newyork', birds: 4 });
   assert.equal(env.asteroids.filter((a) => a.kind === 4).length, 4, 'four flocks');
   for (let i = 0; i < 300; i++) {
     const r = env.step([0, 0, 0, 0]);
@@ -172,17 +172,17 @@ test('birds: flocks wander above whatever stands below, stay in the corridor, ar
 });
 
 test('pillars: the Zhangjiajie field has its summit at the ceiling, spawns clear of the ground, and straight flight hits the pillars', () => {
-  const env = new SpaceEnv(80, { count: 0, comets: 0, pillars: true });
+  const env = new SpaceEnv(80, { atmosphere: false, count: 0, comets: 0, pillars: true });
   assert.equal(env.world, 'pillars'); assert.equal(env.hf.style, 'pillars');
   assert.ok(Math.abs(env.hf.peak - (ENV.mountains.y0 + ENV.mountains.amplitude)) < 0.01, 'summit at amplitude ' + env.hf.peak); assert.ok(env.groundClearance() > 3, 'spawns clear ' + env.groundClearance());
-  let crashes = 0; for (let seed = 80; seed < 86; seed++) { const e = new SpaceEnv(seed, { count: 0, comets: 0, pillars: true, pillarSeed: 5 + seed % 5 }); for (let i = 0; i < 900; i++) if (e.step([0, 0, 0, 0]).done) { crashes++; break; } }
+  let crashes = 0; for (let seed = 80; seed < 86; seed++) { const e = new SpaceEnv(seed, { atmosphere: false, count: 0, comets: 0, pillars: true, pillarSeed: 5 + seed % 5 }); for (let i = 0; i < 900; i++) if (e.step([0, 0, 0, 0]).done) { crashes++; break; } }
   assert.ok(crashes >= 3, 'straight flight hits the pillars: ' + crashes + '/6');
 });
 
 test('megacity: a long map slides under the corridor lap by lap, continuous across the seam, different each lap', async () => {
   const { registerLongGrid, createCityField } = await import('../src/cityfield.js');
   registerLongGrid('mega', await import('../src/mega_grid.js'));
-  const env = new SpaceEnv(7, { count: 0, comets: 0, city: 'mega' }), hf = env.hf;
+  const env = new SpaceEnv(7, { atmosphere: false, count: 0, comets: 0, city: 'mega' }), hf = env.hf;
   assert.equal(hf.segments, 8, 'eight corridor laps per map'); assert.equal(hf.PERIOD, 960);
   assert.ok(hf.peak - hf.y0 > ENV.mountains.ceiling, 'towers reach the thin air');
   // continuity: the column just ahead of the seam in lap k is the column just behind it in lap k + 1

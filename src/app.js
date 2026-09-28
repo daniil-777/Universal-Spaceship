@@ -7,6 +7,8 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js';
+import { CloudPass, createCloudShadows } from './clouds.js';
+import { createDroplets } from './droplets.js';
 import { createSpace } from './space.js';
 import { createAsteroidField } from './asteroids.js';
 import { createShip } from './ship.js';
@@ -24,7 +26,8 @@ import { createMeshyWorld } from './meshyworld.js';
 import { MESHY_SETS } from './meshylayout.js';
 import { createCameraRig } from './camera.js';
 import { MonoShader } from './post.js';
-import { SpaceEnv, ENV, OBS_DIM, ACT_DIM, N_RAYS } from './env.js';
+import { SpaceEnv, ENV, OBS_DIM, OBS_BASE, ACT_DIM, N_RAYS } from './env.js';
+import { SKIES } from './weather.js';
 import { PPOAgent } from './ppo.js';
 import { evaluatePolicy } from './trainer.js';
 import { createTrainClient } from './train-client.js';
@@ -51,6 +54,10 @@ let board = null, pip = null;
 const envMaps = { space: null, day: null, bake: null, isDay: false };   // image-based light: space, or a daylight sky once the descent is half done                                 // the flight board and its onboard camera
 let atmoAgent = null, atmoLoad = null, singlePilot = false;   // the atmospheric pilot (model/policy_atmo.json) flies the atmosphere; one pilot only once the user trains, loads or resets a policy
 const env = new SpaceEnv(Math.round(num('seed', 11)), { level: 1, count: state.density, speedScale: state.astSpeed, comets: state.comets, cometSpeed: state.cometSpeed });
+const knob = (k, d, lo, hi) => { const v = parseFloat(qs.get(k)); return Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : d; }, sky0 = SKIES[Object.hasOwn(SKIES, qs.get('sky')) ? qs.get('sky') : 'fair'];
+const skyOf = () => Object.keys(SKIES).find((k) => SKIES[k].every((v, i) => Math.abs(v - [env.weatherSeverity, env.weatherWind, env.weatherCover, env.weatherTurb][i]) < 1e-6)) || '', wxSet = (s, o) => { env.setWeather(s, o); ui.setControls({ sky: skyOf() }); };
+env.setWeather(knob('weather', sky0[0], 0, 1), { wind: knob('wind', sky0[1], 0, 2), cover: knob('cover', sky0[2], 0, 2), turb: knob('turb', sky0[3], 0, 3) });   // ?sky=clear|fair|cloudy|storm, then ?weather ?wind ?cover ?turb
+ state.autoThr = qs.get('autothr') !== '0';
 const action = new Float32Array(ACT_DIM), obsN = new Float32Array(OBS_DIM), actTanh = new Float32Array(ACT_DIM);
 
 // ---------- renderer / scene ----------
@@ -61,11 +68,14 @@ renderer.outputColorSpace = THREE.SRGBColorSpace; renderer.toneMapping = THREE.A
 try { const gl = renderer.getContext(), ext = gl.getExtension('WEBGL_debug_renderer_info'); ap.renderer = ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : 'webgl'; } catch (e) { /* ignore */ }
 const scene = new THREE.Scene(); scene.background = new THREE.Color(0x000000);
 const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 9000);
-const composer = new EffectComposer(renderer, new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType }));   // no MSAA target: multisampled HalfFloat targets render black bands on ANGLE/Metal; SMAA below instead
+const sceneTarget = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType }); sceneTarget.depthTexture = new THREE.DepthTexture(1, 1);   // the clouds read the scene's depth
+const composer = new EffectComposer(renderer, sceneTarget); composer.renderTarget2.depthTexture = new THREE.DepthTexture(1, 1);   // its own: the composer's clone shares the first one's image — one GL texture, a feedback loop   // no MSAA target: multisampled HalfFloat targets render black bands on ANGLE/Metal; SMAA below instead
 const bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.55, 0.4, 1.1);   // threshold above sunlit white paint: only the sun, exhaust, comas and accents bloom
 const monoPass = new ShaderPass(MonoShader); monoPass.enabled = false;
 const smaa = new SMAAPass(1, 1); smaa.enabled = qs.get('smaa') !== '0' && renderer.getPixelRatio() < 1.4;   // at 1.5× the supersampling already smooths edges
 composer.addPass(new RenderPass(scene, camera)); composer.addPass(bloom); composer.addPass(new OutputPass()); composer.addPass(smaa); composer.addPass(monoPass);
+const clouds = new CloudPass(camera); clouds.forceOff = qs.get('clouds') === '0'; composer.insertPass(clouds, 1);   // after the scene, before bloom: silver linings glow; atmosphere only
+const droplets = createDroplets(scene);                   // streaks past the camera inside a cloud
 function resize() {
   const w = window.innerWidth, h = window.innerHeight;
   renderer.setSize(w, h, false); composer.setSize(w, h); bloom.resolution.set(w, h);
@@ -76,11 +86,12 @@ window.addEventListener('resize', resize); resize();
 
 // ---------- world ----------
 let space, field, ship, ghost, rig, comets, fill, sats, planes, birds, terrain, mountains, city, chunks, mountainsStyle = null;
-const shadow = createShadowField();                        // the active world's height field on the GPU: towers and ridges cast real shadows
+const shadow = createShadowField(); const cloudShadows = createCloudShadows(shadow.uniforms);                        // the active world's height field on the GPU: towers and ridges cast real shadows
+clouds.setShadow(shadow.uniforms);                         // the valley's walls shade the clouds too
 const LOW_PASS = { orbitSeconds: 45, lowSeconds: 28, satellites: 5, planes: 6, pitch: -3.5 * Math.PI / 180 }, ATMO_BIRDS = 3;   // the atmosphere's hazard density = the pilot's evaluation setting
-const CAM_FOV = { side: 42, chase: 50, orbit: 46 }, CAM_YAW = { side: 0, chase: -Math.PI / 4, orbit: null }, FILL_DIR = { side: [0.35, 0.6, 1.0], chase: [-0.8, 0.55, 0.25], orbit: [-0.3, 0.7, 0.8] };
+const CAM_FOV = { side: 42, chase: 50, orbit: 46, moon: 1.2 }, CAM_YAW = { side: 0, chase: -Math.PI / 4, orbit: null, moon: null }, FILL_DIR = { side: [0.35, 0.6, 1.0], chase: [-0.8, 0.55, 0.25], orbit: [-0.3, 0.7, 0.8], moon: [-0.3, 0.7, 0.8] };   // moon: a 1.2° lens, the Moon (0.52°) fills ~40 % of the frame
 const fillTarget = new THREE.Vector3(0.35, 0.6, 1.0);
-function setCameraMode(c) { state.camera = c; rig.setMode(c); camera.fov = CAM_FOV[c]; camera.updateProjectionMatrix(); if (CAM_YAW[c] !== null) space.setYaw(CAM_YAW[c]); fillTarget.set(...FILL_DIR[c]); }
+function setCameraMode(c) { state.camera = c; rig.setMode(c); camera.fov = CAM_FOV[c]; camera.updateProjectionMatrix(); if (CAM_YAW[c] !== null) space.setYaw(CAM_YAW[c]); fillTarget.set(...FILL_DIR[c]); if (c === 'moon' && ui) { const tl = space.telescope; ui.toast(`the ${tl.name} through a ${tl.fov}° lens — true size and direction, ${Math.round(100 * (tl.lit ?? 0))} % lit (in orbit)`, 4000); } }
 const trailN = 220, trailPos = new Float32Array(trailN * 3); let trailLen = 0, trailHead = 0;
 const trailGeom = new THREE.BufferGeometry(), trailArr = new Float32Array(trailN * 2 * 3), trailCol = new Float32Array(trailN * 2 * 3);
 trailGeom.setAttribute('position', new THREE.BufferAttribute(trailArr, 3)); trailGeom.setAttribute('color', new THREE.BufferAttribute(trailCol, 3));
@@ -89,7 +100,7 @@ const rayGeom = new THREE.BufferGeometry(), rayArr = new Float32Array(N_RAYS * 2
 rayGeom.setAttribute('position', new THREE.BufferAttribute(rayArr, 3)); rayGeom.setAttribute('color', new THREE.BufferAttribute(rayCol, 3));
 const rayLines = new THREE.LineSegments(rayGeom, new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false }));
 rayLines.visible = false; trailLine.frustumCulled = false; rayLines.frustumCulled = false;
-const accent = new THREE.Color(0x8ec5ff), edgeTint = new THREE.Color(1.0, 0.62, 0.22);   // beams that meet a corridor edge turn amber
+const accent = new THREE.Color(0x8ec5ff), edgeTint = new THREE.Color(1.0, 0.62, 0.22), stormTint = new THREE.Color(1.0, 0.42, 0.36);   // beams that meet a corridor edge turn amber
 let fence = null;                                           // the corridor's edges, shown where the ship meets one (src/edgefence.js)
 
 // interpolation buffers
@@ -139,12 +150,14 @@ function manualAction(out) {
   out[1] = (has('KeyA', 'ArrowLeft') ? P : 0) - (has('KeyD', 'ArrowRight') ? P : 0);
   out[2] = (has('KeyE') ? P : 0) - (has('KeyQ') ? P : 0);
   out[3] = (has('ShiftLeft', 'ShiftRight') ? P : 0) - (has('KeyX', 'ControlLeft', 'ControlRight') ? P : 0);
+  if (env.autoThrottle) { env.speedTarget = Math.min(22, Math.max(10, env.speedTarget + out[3] * 0.05)); out[3] = 0; }
 }
 let lastValue = 0;
 function simStep() {
   snapshotPrev();
   if (state.crashTimer > 0) { state.crashTimer -= ENV.dt; action.fill(0); env.step(action); if (state.crashTimer <= 0) { env.reset(); ship.reset(); clearTrail(); snapshotPrev(); } return; }
   const pilot = activeAgent(); pilot.normalize(env.obs, 1, obsN);
+  env.autoThrottle = state.manual && state.autoThr && env.atmosphere;   // a person flying through the air: the throttle holds a speed (Shift / Ctrl change it)
   if (state.manual) manualAction(action); else pilot.actMean(obsN, action);
   lastValue = pilot.value(obsN);
   const lapsBefore = env.laps, res = env.step(action);
@@ -161,7 +174,7 @@ function adaptQuality(fps) {
   if (slowTicks >= 4 && renderScale > 0.6) { renderScale = Math.max(0.6, renderScale - 0.15); slowTicks = 0; applyScale(); }
   else if (fastTicks >= 12 && renderScale < 1) { renderScale = Math.min(1, renderScale + 0.15); fastTicks = 0; applyScale(); }
 }
-function applyScale() { const base = Math.min(1.5, window.devicePixelRatio || 1); renderer.setPixelRatio(base * renderScale); resize(); ap.renderScale = renderScale; }
+function applyScale() { const base = Math.min(1.5, window.devicePixelRatio || 1); renderer.setPixelRatio(base * renderScale); resize(); ap.renderScale = renderScale; clouds.quality(renderScale); }
 
 // ---------- rendering ----------
 const _q1 = new THREE.Quaternion(), _q2 = new THREE.Quaternion();
@@ -220,18 +233,19 @@ function updateVisuals(alpha, dt) {
       const d = env.rayHit[i], k = i * 6, prox = 1 - d / range, len = Math.min(d, range), dx = env.rayDirWorld[i * 3], dy = env.rayDirWorld[i * 3 + 1], dz = env.rayDirWorld[i * 3 + 2];
       rayArr[k] = shipRender.p.x; rayArr[k + 1] = shipRender.p.y; rayArr[k + 2] = shipRender.p.z;
       rayArr[k + 3] = shipRender.p.x + dx * len; rayArr[k + 4] = shipRender.p.y + dy * len; rayArr[k + 5] = shipRender.p.z + dz * len;
-      const c0 = 0.05 + 0.3 * prox, c1 = 0.08 + 0.9 * prox, col = env.rayEdge[i] && state.mode === 0 ? edgeTint : accent;
+      const c0 = 0.05 + 0.3 * prox, c1 = 0.08 + 0.9 * prox, col = env.rayEdge[i] && state.mode === 0 ? edgeTint : env.obs[OBS_BASE + i] > 0.15 && state.mode === 0 ? stormTint : accent;   // rough cloud on the weather radar: red
       rayCol[k] = col.r * c0; rayCol[k + 1] = col.g * c0; rayCol[k + 2] = col.b * c0; rayCol[k + 3] = col.r * c1; rayCol[k + 4] = col.g * c1; rayCol[k + 5] = col.b * c1;
     }
     rayGeom.attributes.position.needsUpdate = true; rayGeom.attributes.color.needsUpdate = true;
   }
   if (fence) fence.update(dt, shipRender.p, shipRender.f, { zHalf: ENV.zHalf, yHalf: ENV.yHalf, top: env.hf ? ENV.mountains.ceiling : ENV.yHalf, guard: env.guard, atmo: !!env.hf, on: state.crashTimer <= 0 && !side });
   fill.position.lerp(_fillPos.copy(fillTarget).multiplyScalar(500), 1 - Math.exp(-dt * 3));
-  rig.pitchExtra = Math.max(space.altitude, 1.6 * space.atmosphere); rig.groundLock = space.atmosphere; rig.terrain = env.hf ? (x, z) => env.hf.height(x, z) : null; rig.ceiling = env.hf && env.hf.ceiling ? env.hf.ceiling : null; env.guideOn = !state.manual; rig.tunnel += ((env.guide || 0) - rig.tunnel) * (1 - Math.exp(-dt * 2)); monoPass.uniforms.contrast.value = space.atmosphere; if (space.atmosphere > 0) shadow.setSun(space.sunDirWorld);
-  const fovNow = CAM_FOV[state.camera] - 9 * space.atmosphere; if (Math.abs(camera.fov - fovNow) > 0.01) { camera.fov = fovNow; camera.updateProjectionMatrix(); }   // a slightly longer lens in the atmosphere: cities read larger
+  rig.pitchExtra = Math.max(space.altitude, 1.6 * space.atmosphere); rig.groundLock = space.atmosphere; rig.shake = env.atmosphere ? Math.min(0.12, env.air.sigmaFelt * 0.1) * space.atmosphere : 0; rig.terrain = env.hf ? (x, z) => env.hf.height(x, z) : null; rig.ceiling = env.hf && env.hf.ceiling ? env.hf.ceiling : null; env.guideOn = !state.manual; rig.tunnel += ((env.guide || 0) - rig.tunnel) * (1 - Math.exp(-dt * 2)); monoPass.uniforms.contrast.value = space.atmosphere; if (space.atmosphere > 0) shadow.setSun(space.sunDirWorld);
+  const fovNow = state.camera === 'moon' && space.atmosphere < 0.5 ? space.telescope.fov : CAM_FOV[state.camera === 'moon' ? 'chase' : state.camera] - 9 * space.atmosphere; if (Math.abs(camera.fov - fovNow) > 0.01) { camera.fov = fovNow; camera.updateProjectionMatrix(); }   // a slightly longer lens in the atmosphere: cities read larger
   rig.update(dt, shipRender, camera.aspect);
   const day = space.atmosphere > 0.5;                      // swap the reflections of every PBR surface (glass, hull, airliners, towers) with the sky
-  if (envMaps.bake && day !== envMaps.isDay) { envMaps.isDay = day; scene.environment = day ? envMaps.bake() : envMaps.space; scene.environmentIntensity = day ? 0.6 : 0.7; }
+  if (envMaps.bake && day !== envMaps.isDay) { envMaps.isDay = day; envMaps.at = -Infinity; envMaps.sun.set(0, 0, 0); scene.environment = day ? envMaps.bake() : envMaps.space.texture; scene.environmentIntensity = day ? 0.6 : 0.7; }
+  else if (envMaps.rebake) envMaps.rebake(day);   // the real Sun circles the ship each orbit and hides behind the Earth; the air's sun turns with the camera mode
 }
 const _fillPos = new THREE.Vector3();
 
@@ -242,10 +256,14 @@ function setLowPass(on) {
   ui.setPhase(on ? 'low pass' : 'orbit'); ui.toast(on ? 'low pass — dropping toward the Earth · satellites ahead' : 'climbing back to orbit', 3000);
   state.phaseTimer = on ? LOW_PASS.lowSeconds : LOW_PASS.orbitSeconds;
 }
+function setBody(b) {                                    // the orbit's body: 'earth' (the ISS's orbit) or 'moon' (a polar lunar orbit, the Earth a far globe); routes fly over the Earth
+  if (b === 'moon') { if (state.atmo) setAtmo(false); setLowPass(false); } space.setBody(b); ui.setControls({ orbit: space.body }); envMaps.at = -Infinity; envMaps.sun.set(0, 0, 0); ui.setPhase(space.body === 'moon' ? 'lunar orbit' : 'orbit');
+  ui.toast(space.body === 'moon' ? `lunar orbit · ${Math.round(space.moonAltitude).toLocaleString('en-US')} km above the Moon · the Earth rising ahead` : 'back in the Earth orbit', 3200);
+}
 function setAtmo(on) {                                    // atmospheric flight: half an airliner's altitude (in this scene's scale) with a bird's-eye view of the planet
   if (state.atmo === on) return;
-  state.atmo = on; if (on && state.lowPass) setLowPass(false); ui.setControls({ atmo: on });
-  space.setAtmosphere(on); scene.fog = on ? new THREE.Fog(0x9fbbd8, 70, 560) : null;
+  state.atmo = on; if (on && state.lowPass) setLowPass(false); if (on && space.body === 'moon') setBody('earth'); ui.setControls({ atmo: on }); env.setAtmosphere(on);   // the air's physics only below the sky
+  if (on) space.setGround(ROUTES[state.route].lat, ROUTES[state.route].lon0); space.setAtmosphere(on); scene.fog = on ? new THREE.Fog(0x9fbbd8, 70, 560) : null;   // the orbit brings the ship over the route first
   if (on) {                                                 // the sky belongs to airliners: no rocks, no comets, real planes to avoid
     state.saved = { density: state.density, comets: state.comets };
     env.setComets(0); env.setCount(0); applyWorld(); loadAtmoPolicy();
@@ -298,10 +316,10 @@ function setRoute(key) {                                  // choose the parallel
   if (!ROUTES[key]) return;
   state.route = key; ui.setRoute(key); state.skyline = !!ROUTES[key].city; ui.setControls({ skyline: state.skyline });
   if (terrain) { terrain.dispose(); terrain = null; }
-  if (!state.atmo) setAtmo(true); else { terrain = createTerrain(scene, renderer, { ...ROUTES[key], shadow }); applyWorld(); ui.toast('route: ' + ROUTES[key].name, 2500); }
+  if (!state.atmo) setAtmo(true); else { space.setGround(ROUTES[key].lat, ROUTES[key].lon0); terrain = createTerrain(scene, renderer, { ...ROUTES[key], shadow }); applyWorld(); ui.toast('route: ' + ROUTES[key].name, 2500); }
 }
 function tickLowPass(dt) {
-  if (!state.lowPasses || !state.playing || state.atmo) return;
+  if (!state.lowPasses || !state.playing || state.atmo || space.body === 'moon') return;
   state.phaseTimer -= dt;
   if (state.phaseTimer <= 0) setLowPass(!state.lowPass);
 }
@@ -359,9 +377,10 @@ function worldLabel() {                                   // the route, and in t
 }
 function drawBoard(dt) {
   const s = env.ship; let near = Infinity, nearEdge = false; for (let i = 0; i < N_RAYS; i++) if (env.rayHit[i] < near) { near = env.rayHit[i]; nearEdge = !!env.rayEdge[i]; }
-  Object.assign(boardData, { q: shipRender.q, f: shipRender.f, u: shipRender.u, v: s.v, y: s.p[1], ground: env.hf ? env.hf.height(s.p[0], s.p[2]) : null, atmo: space.atmosphere, orbitAlt: space.altitude,
+  Object.assign(boardData, { q: shipRender.q, f: shipRender.f, u: shipRender.u, v: s.v, y: s.p[1], ground: env.hf ? env.hf.height(s.p[0], s.p[2]) : null, atmo: space.atmosphere, orbitAlt: space.altitude, orbit: space.orbitInfo,
     throttle: env.cmd[3], prox: near < ENV.rays.range - 1e-3 ? near : Infinity, crashed: state.crashTimer > 0, manual: state.manual, edge: env.guard, proxEdge: nearEdge,
-    world: space.atmosphere > 0.5 ? worldLabel() : state.lowPass ? 'LOW PASS' : 'ORBIT' });
+    world: space.atmosphere > 0.5 ? worldLabel() : space.body === 'moon' ? 'LUNAR ORBIT' : state.lowPass ? 'LOW PASS' : 'ORBIT',
+    airOn: env.atmosphere, ias: env.air.V, aoa: env.air.alpha, g: env.air.n, wind: env.air.wind, turb: env.air.sigma, stall: env.atmosphere && env.air.stalled, over: env.crashCause === 'overstress' });
   board.update(dt, boardData);
   if (pip.active) pip.render(scene, shipRender, dt, { hide: [ship.group, rayLines], hideAlways: [ghost.group],
     style: { mode: monoPass.enabled ? monoPass.uniforms.mode.value : 0, invert: monoPass.uniforms.invert.value, cell: monoPass.uniforms.cell.value, contrast: monoPass.uniforms.contrast.value }, fps: state.fps });
@@ -375,25 +394,25 @@ async function main() {
     camera: (c) => setCameraMode(c), trail: (b) => { state.trail = b; }, sensors: (b) => { state.sensors = b; },
     comets: (n) => { state.comets = n; env.setComets(n); env.spawnAsteroids(); snapshotPrev(); }, cometSpeed: (v) => { const k = v / state.cometSpeed; state.cometSpeed = v; env.setCometSpeed(v); for (const a of env.asteroids) if (a.kind) { a.v[0] *= k; a.v[1] *= k; a.v[2] *= k; } },
     manual: (b) => { state.manual = b; ui.setManual(b); }, invert: setInvert, colorMode: setMode, cycleMode: () => setMode((state.mode + 1) % 3),
-    lowPass: (b) => { state.lowPasses = b; if (!b) setLowPass(false); }, atmo: (b) => setAtmo(b), route: (k) => setRoute(k), skyline: (b) => setSkyline(b),
+    lowPass: (b) => { state.lowPasses = b; if (!b) setLowPass(false); }, orbit: (b) => setBody(b), moonAlt: (km) => space.setMoonAltitude(km), atmo: (b) => setAtmo(b), route: (k) => setRoute(k), warp: (w) => space.setWarp(w), skyline: (b) => setSkyline(b), weather: (v) => wxSet(v), wind: (v) => wxSet(env.weatherSeverity, { wind: v }), cover: (v) => wxSet(env.weatherSeverity, { cover: v }), turb: (v) => wxSet(env.weatherSeverity, { turb: v }), sky: (k) => { const p = SKIES[k]; env.setWeather(p[0], { wind: p[1], cover: p[2], turb: p[3] }); ui.setControls({ weather: p[0], wind: p[1], cover: p[2], turb: p[3] }); }, autoThr: (b) => { state.autoThr = b; },
     hideUI: () => document.body.classList.toggle('nohud'), board: (b) => { board.setVisible(b); },
     train: () => (state.training ? stopTraining() : startTraining()), resetPolicy, save: savePolicy, load: loadPolicyJSON,
     trainSpeed: (s) => { state.trainSpeed = s; if (train) train.setSpeed(s); }, curriculum: (b) => { state.curriculum = b; if (train) train.setCurriculum(b); },
   });
-  ui.setControls({ density: state.density, simSpeed: state.simSpeed, comets: state.comets });
+  ui.setControls({ density: state.density, simSpeed: state.simSpeed, comets: state.comets, weather: env.weatherSeverity, wind: env.weatherWind, cover: env.weatherCover, turb: env.weatherTurb, sky: skyOf(), autoThr: state.autoThr });
   ui.loading('building the solar system…'); await new Promise((r) => setTimeout(r, 30));
   space = createSpace(scene, { seed: 1, texturePath: 'textures/' });
   // Reflection environment for the hull and rocks: a small procedural sky (space, a sun spot, earthshine from below).
   // Baking it from the live scene is not safe: the atmosphere/sun shaders can emit NaN in the cube render, and one NaN
   // texel turns every reflective material black (and bloom then spreads it over the whole frame).
-  const bakeEnv = (day) => {                                // day = false: space (a sun spot, earthshine from below); true: a daylight sky over the city for atmospheric flight
-    const W = 128, H = 64, data = new Float32Array(W * H * 4), sd = space.sunDirWorld;
+  const pm = new THREE.PMREMGenerator(renderer), bakeEnv = (day, target = null) => {                                // day = false: space (a sun spot, earthshine from below); true: a daylight sky over the city for atmospheric flight
+    const W = 128, H = 64, data = new Float32Array(W * H * 4), sd = day ? space.airSunDirWorld : space.sunDirWorld;
     for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
       const th = (0.5 - y / H) * Math.PI, ph = (x / W) * 2 * Math.PI - Math.PI, dx = Math.cos(th) * Math.sin(ph), dy = Math.sin(th), dz = Math.cos(th) * Math.cos(ph);   // equirect direction
       const cosSun = dx * sd.x + dy * sd.y + dz * sd.z, i = (y * W + x) * 4; let r, g, b;
       if (!day) {
-        const sun = Math.exp(-Math.max(0, 1 - cosSun) * 120) * 1.8 + Math.exp(-Math.max(0, 1 - cosSun) * 10) * 0.2;   // soft, not blinding: the hull's clearcoat mirrors it
-        const earth = Math.max(0, -dy - 0.15) * 0.35; r = 0.012 + sun * 1.0 + earth * 0.55; g = 0.016 + sun * 0.95 + earth * 0.72; b = 0.03 + sun * 0.85 + earth * 1.0;
+        const sun = (Math.exp(-Math.max(0, 1 - cosSun) * 120) * 1.8 + Math.exp(-Math.max(0, 1 - cosSun) * 10) * 0.2) * space.sunLit;   // soft, not blinding: the hull's clearcoat mirrors it
+        const earth = Math.max(0, -dy - 0.15) * 0.35, gr = space.body === 'moon' ? 0.6 : 0; r = 0.012 + sun * 1.0 + earth * (gr || 0.55); g = 0.016 + sun * 0.95 + earth * (gr || 0.72); b = 0.03 + sun * 0.85 + earth * (gr || 1.0);   // lunar orbit: grey moonshine
       } else if (dy >= 0) {                                   // sky: deep blue overhead, pale haze at the horizon, a bright sun and its aureole
         const t = Math.pow(1 - dy, 3), sun = Math.exp(-Math.max(0, 1 - cosSun) * 900) * 14 + Math.exp(-Math.max(0, 1 - cosSun) * 18) * 0.45;
         r = 0.08 + 0.36 * t + sun; g = 0.16 + 0.32 * t + sun * 0.92; b = 0.38 + 0.2 * t + sun * 0.78;
@@ -403,17 +422,21 @@ async function main() {
       data[i] = r; data[i + 1] = g; data[i + 2] = b; data[i + 3] = 1;
     }
     const tex = new THREE.DataTexture(data, W, H, THREE.RGBAFormat, THREE.FloatType); tex.mapping = THREE.EquirectangularReflectionMapping; tex.needsUpdate = true;
-    const pmrem = new THREE.PMREMGenerator(renderer), rt = pmrem.fromEquirectangular(tex).texture; pmrem.dispose(); tex.dispose(); return rt;
+    const rt = pm.fromEquirectangular(tex, target); tex.dispose(); return rt;   // one generator for the page: a re-bake reuses its shaders and writes into the same target
   };
-  envMaps.space = bakeEnv(false); scene.environment = envMaps.space; scene.environmentIntensity = 0.7;
-  envMaps.bake = () => { if (!envMaps.day) envMaps.day = bakeEnv(true); return envMaps.day; };
+  envMaps.space = bakeEnv(false); scene.environment = envMaps.space.texture; scene.environmentIntensity = 0.7;
+  envMaps.bake = () => { if (!envMaps.day) envMaps.day = bakeEnv(true); return envMaps.day.texture; };
+  envMaps.sun = new THREE.Vector3(); envMaps.lit = -1; envMaps.at = -Infinity; envMaps.rebake = (day) => {   // in place, when the Sun moved > 3.6° or went into or out of the Earth's shadow; the first frame bakes with the real Sun
+    const dir = day ? space.airSunDirWorld : space.sunDirWorld, lit = day ? 1 : space.sunLit; if ((dir.dot(envMaps.sun) > 0.998 && Math.abs(lit - envMaps.lit) < 0.3) || performance.now() - envMaps.at < 2000 || (day && !envMaps.day)) return;
+    envMaps.sun.copy(dir); envMaps.lit = lit; envMaps.at = performance.now(); bakeEnv(day, day ? envMaps.day : envMaps.space); };
   if (space.ready) space.ready.then(() => { ap.texturesReady = true; }).catch(() => {});
   fill = new THREE.DirectionalLight(0xdfe8ff, 1.15); fill.position.set(0.35, 0.6, 1.0).multiplyScalar(500); scene.add(fill, fill.target);   // camera-side fill light (direction follows the camera mode)
   comets = createComets(scene, { max: 8, sunDir: space.sunDir }); sats = createSatellites(scene, { max: 8 }); planes = createPlanes(scene, { max: 10 }); birds = createBirds(scene, { max: 8 });
   field = createAsteroidField(scene, { nShapes: ENV.belt.nShapes, maxInstances: 80, seed: 7 });
   ship = createShip({ seed: 1 }); ghost = createShip({ seed: 1 }); ghost.setVisible(false);
   scene.add(ship.group, ghost.group, trailLine, rayLines); fence = createEdgeFence(scene, { color: accent });
-  rig = createCameraRig(camera, canvas); setCameraMode(state.camera); ui.setCamera(state.camera);
+  rig = createCameraRig(camera, canvas); Object.defineProperty(rig, 'moon', { get: () => space.telescope.target });   // the Moon, or the Earth from lunar orbit
+  setCameraMode(state.camera); ui.setCamera(state.camera);
   pip = createPipCam(renderer); if (qs.has('cam2')) pip.setMode(qs.get('cam2'));
   board = createBoard(document.getElementById('board'), { onCamera: () => pip.cycle() }); board.setCamera(pip.mode);
   board.onRect((r) => pip.setRect(r)); if (qs.get('board') === '0') { board.setVisible(false); ui.setControls({ board: false }); }
@@ -428,6 +451,7 @@ async function main() {
   snapshotPrev(); resetFlight();
   if (state.lowPass) { state.lowPass = false; setLowPass(true); }
   ui.setRoute(state.route);
+  space.setMoonAltitude(knob('moonalt', 1500, 500, 60000)); ui.setControls({ moonAlt: space.moonAltitude }); if (qs.get('orbit') === 'moon' && qs.get('atmo') !== '1' && !state.skyline) setBody('moon');   // ?orbit=moon&moonalt=km
   if (qs.get('atmo') === '1' || state.skyline) { ui.setControls({ skyline: state.skyline }); if (state.skyline && !ROUTES[state.route].city) state.route = 'dubai'; setAtmo(true); ui.setControls({ atmo: true }); ui.setRoute(state.route); }
   ui.ready(); ap.ready = true;
   if (ap.policyError) ui.toast('no pretrained policy found — press Train', 4000);
@@ -442,6 +466,7 @@ async function main() {
     if (steps === 8) acc = 0;
     tickLowPass(dt); updateVisuals(Math.min(1, acc / ENV.dt), dtReal);
     space.update(t, dt, camera);
+    clouds.update({ env, atmosphere: space.atmosphere, sunDir: space.sunDirWorld, fog: scene.fog, time: state.flightTime }); cloudShadows.update(env, camera.position.x, space.sunDirWorld, space.atmosphere); droplets.update(dtReal, camera, env, space.atmosphere);
     if (state.bypass) renderer.render(scene, camera); else composer.render();
     if (board.visible) { drawBoard(dtReal); }
     ap.frames++;
@@ -449,13 +474,13 @@ async function main() {
     if (hudTimer >= 0.1) {
       hudTimer = 0; const s = env.ship;
       ui.hud({ speed: Math.hypot(s.v[0], s.v[1], s.v[2]), value: lastValue, laps: state.laps, flight: state.flightTime, crashes: ap.crashes, fps: state.fps });
-      ui.sensors(env.rayHit, ENV.rays.range); ui.actions(actTanh);
+      ui.sensors(env.rayHit, ENV.rays.range); ui.radar(env.obs.subarray(OBS_BASE, OBS_BASE + N_RAYS)); ui.actions(actTanh);
     }
   }
   requestAnimationFrame(frame);
 }
 
-Object.defineProperties(ap, { shadow: { get: () => shadow }, board: { get: () => board }, pip: { get: () => pip }, agent: { get: () => agent }, atmoAgent: { get: () => atmoAgent }, pilot: { get: () => activeAgent() }, space: { get: () => space }, mountains: { get: () => mountains }, city: { get: () => city }, chunks: { get: () => chunks }, camera: { get: () => camera }, info: { get: () => renderer.info.render } }); ap.THREE = THREE;   // live getters (Object.assign would copy the values once)
+Object.defineProperties(ap, { clouds: { get: () => clouds }, shadow: { get: () => shadow }, board: { get: () => board }, pip: { get: () => pip }, agent: { get: () => agent }, atmoAgent: { get: () => atmoAgent }, pilot: { get: () => activeAgent() }, space: { get: () => space }, mountains: { get: () => mountains }, city: { get: () => city }, chunks: { get: () => chunks }, camera: { get: () => camera }, info: { get: () => renderer.info.render } }); ap.THREE = THREE;   // live getters (Object.assign would copy the values once)
 Object.assign(ap, { env, setMode, setInvert, setCamera: (c) => { setCameraMode(c); ui.setCamera(c); }, setSensors: (b) => { state.sensors = b; ui.setControls({ sensors: b }); },
   setManual: (b) => { state.manual = b; ui.setManual(b); }, setPlaying: (b) => { state.playing = b; ui.setPlaying(b); }, startTraining, stopTraining, resetPolicy, showTraining: (b) => ui.showPanels(!b, b), setLowPass, setAtmo, setRoute, setSkyline, terrainStats: () => (terrain ? terrain.stats : null),
   exportPolicy: (meta) => agent.toJSON({ trainedIn: ((train && train.view.backend) || 'browser') + ' · ' + (navigator.platform || ''), ...(meta || {}) }), loadPolicyJSON,

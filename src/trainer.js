@@ -11,8 +11,9 @@ const now = () => (typeof performance !== 'undefined' ? performance.now() : Date
 
 const CITIES = ['dubai', 'newyork', 'moscow', 'london'];
 export class Trainer {
-  constructor(agent, { nEnvs = 128, T = 64, seed = 1000, curriculum = true, level = 0, speedScale = 1, mixed = false } = {}) {
+  constructor(agent, { nEnvs = 128, T = 64, seed = 1000, curriculum = true, level = 0, speedScale = 1, mixed = false, weather = 0 } = {}) {
     this.agent = agent; this.N = nEnvs; this.T = T; this.curriculum = curriculum; this.level = level; this.mixed = mixed;
+    this.weatherMax = weather; this.wxRaisedAt = -Infinity;   // the atmospheric envs fly weather up to this severity (raised by the check-ups); 0 = calm air
     // mixed: true → half asteroid belts, a quarter mountain worlds (airliners + flocks), a quarter city skylines (flocks);
   // 'cities' → a quarter belts, a quarter mountains, half cities. One policy learns all of them.
     const cityHeavy = mixed === 'cities';
@@ -23,6 +24,7 @@ export class Trainer {
       const cities = hasLongGrid('mega') ? [...CITIES, 'mega'] : CITIES;   // the megacity joins the mix once its grid is registered
       return new SpaceEnv(seed + i, { level, count: 0, comets: 0, city: cities[(cityHeavy ? (i >> 1) : (i >> 2)) % cities.length], citySeed: 1 + (i % 5), autoBirds: true });
     });
+    for (const e of this.envs) if (e.atmosphere && this.weatherMax > 0) { e.weatherSeverity = this.weatherMax * e.rngSky(); e.reset(); }
     const TN = T * nEnvs, D = OBS_DIM, A = ACT_DIM;
     this.buf = { T, N: nEnvs, obs: new Float32Array(TN * D), act: new Float32Array(TN * A), logp: new Float32Array(TN), rew: new Float32Array(TN),
       done: new Uint8Array(TN), trunc: new Uint8Array(TN), lastObs: new Float32Array(nEnvs * D), bootObs: new Float32Array(nEnvs * D), bootIdx: new Int32Array(nEnvs) };
@@ -69,6 +71,7 @@ export class Trainer {
       if (res.done || res.truncated) {
         if (res.truncated && this.nBoot < N) { ag.normalize(env.obs, 1, buf.bootObs.subarray(this.nBoot * D, (this.nBoot + 1) * D)); buf.bootIdx[this.nBoot++] = k; }
         this.finishEpisode(i, res.done);
+        if (env.atmosphere && this.weatherMax > 0) env.weatherSeverity = this.weatherMax * env.rngSky();   // every episode its own sky
         env.reset(); this.retAcc[i] = 0;
       }
     }
@@ -78,6 +81,10 @@ export class Trainer {
     this.metrics.step += N; ag.steps += N;
   }
 
+  weatherGate(step, calmLen, roughLen) {                  // +0.1 when the weather costs the pilot less than a fifth of its flight time, at most every 2 M steps
+    if (roughLen >= 0.8 * calmLen && step - this.wxRaisedAt >= 2e6) { this.weatherMax = Math.min(1, Math.round((this.weatherMax + 0.1) * 10) / 10); this.wxRaisedAt = step; this.levelChanges.push(step); }
+    return this.weatherMax;
+  }
   finishEpisode(i, collided) {
     const ep = { ret: this.epRet[i], len: this.epLen[i], collided, level: this.level, step: this.metrics.step };
     this.recent.push(ep); if (this.recent.length > 100) this.recent.shift();
@@ -133,7 +140,11 @@ export class Trainer {
         this.sinceLevelChange = 0; this.levelChanges.push(m.step);
       }
     }
-    m.level = this.level;
+    if (m.updates % EVAL_EVERY === 0 && this.weatherMax > 0 && this.weatherMax < 1 - 1e-9) {   // rougher weather once the pilot flies the current maximum as long as calm air (the same Alps episodes)
+      const o = { episodes: 4, seed: 7000, level: this.level, count: 0, comets: 0, mountains: true, planes: 4, birds: 2 };
+      this.weatherGate(m.step, evaluatePolicy(this.agent, { ...o, weather: 0 }).meanLen, evaluatePolicy(this.agent, { ...o, weather: this.weatherMax }).meanLen);
+    }
+    m.level = this.level; m.weather = this.weatherMax;
     for (const k of HIST_KEYS) this.history[k].push(m[k]);
     if (this.onMetrics) this.onMetrics(m);
   }
@@ -147,8 +158,8 @@ export class Trainer {
 }
 
 // Deterministic evaluation (mean action, no exploration noise) for the harness and the README numbers.
-export function evaluatePolicy(agent, { episodes = 20, seed = 999, level = 1, count = null, comets = null, speedScale = 1, maxSteps = ENV.maxSteps, mountains = false, planes = 0, city = null, birds = 0, pillars = false, meshy = false, edgeGuard = true } = {}) {
-  const env = new SpaceEnv(seed, { level, count, comets, speedScale, mountains, planes, city, birds, pillars, meshy, edgeGuard }), obsN = new Float32Array(OBS_DIM), out = new Float32Array(ACT_DIM), prev = new Float32Array(ACT_DIM);
+export function evaluatePolicy(agent, { episodes = 20, seed = 999, level = 1, count = null, comets = null, speedScale = 1, maxSteps = ENV.maxSteps, mountains = false, planes = 0, city = null, birds = 0, pillars = false, meshy = false, edgeGuard = true, weather = 0 } = {}) {
+  const env = new SpaceEnv(seed, { level, count, comets, speedScale, mountains, planes, city, birds, pillars, meshy, edgeGuard, weather }), obsN = new Float32Array(OBS_DIM), out = new Float32Array(ACT_DIM), prev = new Float32Array(ACT_DIM);
   let collisions = 0, totLen = 0, totRet = 0, sumSpeed = 0, sumSpeed2 = 0, sumW = 0, sumJerk = 0, sumProg = 0, minLen = Infinity, spMin = Infinity, spMax = 0, brake = 0, boost = 0, guarded = 0, edge = 0, ceil = 0;
   const lz = ENV.zHalf + ENV.ship.wallClamp - 0.02, top = (mountains || pillars || meshy || city ? ENV.mountains.ceiling : ENV.yHalf) + ENV.ship.wallClamp - 0.02;   // at the clamp = scraping an edge
   for (let e = 0; e < episodes; e++) {

@@ -8,7 +8,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 import { MESHY_SETS } from './meshylayout.js';
-import { SHADOW_GLSL } from './shadowfield.js';
+import { SHADOW_GLSL, SHADOW_KEYS } from './shadowfield.js';
 import { createValleyGround } from './valleyground.js';
 
 const PERIOD = 120, BANDS = [45, 220], RANGE0 = 480;   // detail levels: near within 45 units of the footprint, far to 220, extra-far beyond (a set may bring its own, with a mid level); past 480 the fog has it
@@ -77,7 +77,7 @@ export function meshyMaterial(mat, U, clip = 0, keepLook = false, S = null, cany
   const lit = !keepLook && S;
   mat.onBeforeCompile = (sh) => {                          // aClip: the part of the model an instance keeps (x0, z0, x1, z1 in its own frame) — the tile's square, or half of it in a remix
     sh.uniforms.uApexX = U.uApexX;
-    if (lit) for (const k of ['uHeight', 'uSunDir', 'uY0', 'uShadowsOn', 'uPeriod', 'uShift']) sh.uniforms[k] = S[k];
+    if (lit) for (const k of SHADOW_KEYS) sh.uniforms[k] = S[k];
     sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nuniform float uApexX; attribute vec4 aClip; varying vec2 vTileXZ; varying vec4 vClip; varying vec3 vFlatW;')
       .replace('#include <project_vertex>', 'vTileXZ = transformed.xz;\n#ifdef USE_INSTANCING\n vClip = aClip;\n#else\n vClip = vec4(-1e5, -1e5, 1e5, 1e5);\n#endif\n' + CURVE.replace('FLATW', 'vFlatW = wp.xyz;'));
     let fs = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying vec2 vTileXZ; varying vec4 vClip; varying vec3 vFlatW;' + (lit ? SHADOW_GLSL : ''));

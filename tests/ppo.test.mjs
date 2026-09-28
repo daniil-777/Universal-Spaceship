@@ -65,3 +65,14 @@ test('Trainer runs two PPO updates end to end with finite stats and the mirror i
   ag.dispose();
   assert.equal(tf.memory().numTensors, 0, 'no tensor leak: ' + tf.memory().numTensors);
 });
+
+import { padPolicyInputs } from '../src/ppo.js';
+import { OBS_BASE } from '../src/env.js';   // OBS_DIM is imported above
+test('old policies load padded and act unchanged', () => {
+  const old = new PPOAgent(OBS_BASE, 4, {}, 5), j = old.toJSON();          // a 115-input policy (float32)
+  const ag = PPOAgent.fromJSON(j); assert.equal(ag.obsDim, OBS_DIM);
+  const o115 = Float32Array.from({ length: OBS_BASE }, (_, i) => Math.sin(i)), o180 = new Float32Array(OBS_DIM); o180.set(o115);
+  const a = new Float32Array(4), b = new Float32Array(4); old.actMean(old.normalize(o115, 1), a); ag.actMean(ag.normalize(o180, 1), b);
+  for (let k = 0; k < 4; k++) assert.ok(Math.abs(a[k] - b[k]) < 1e-6);
+  assert.equal(PPOAgent.fromJSON(ag.toJSON()).obsDim, OBS_DIM); assert.equal(padPolicyInputs(ag.toJSON(), OBS_DIM).obsDim, OBS_DIM);
+});

@@ -6,7 +6,7 @@
 import * as THREE from 'three';
 import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
 import { valleySampler, riverZ, riverW } from './avatarlayout.js';
-import { SHADOW_GLSL } from './shadowfield.js';
+import { SHADOW_GLSL, SHADOW_KEYS } from './shadowfield.js';
 
 const P = 960, TILE = 24, STEP = 1.6, R = 62, MAX = 6000;
 const CURVE = `
@@ -18,7 +18,7 @@ const hash = (i, j, s) => { let h = Math.imul(i, 374761393) + Math.imul(j, 66826
 function treeMaterial(U, S) {
   const mat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.92, metalness: 0, envMapIntensity: 0.8 });
   mat.onBeforeCompile = (sh) => {
-    sh.uniforms.uApexX = U.uApexX; if (S) for (const k of ['uHeight', 'uSunDir', 'uY0', 'uShadowsOn', 'uPeriod', 'uShift']) sh.uniforms[k] = S[k];
+    sh.uniforms.uApexX = U.uApexX; if (S) for (const k of SHADOW_KEYS) sh.uniforms[k] = S[k];
     sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nuniform float uApexX; varying vec3 vFlatW, vLeaf; varying float vUpL;')
       .replace('#include <project_vertex>', 'vUpL = position.y; vLeaf = position * 4.5 + instanceMatrix[3].xyz * 1.7;' + CURVE);
     sh.fragmentShader = sh.fragmentShader.replace('#include <common>', `#include <common>

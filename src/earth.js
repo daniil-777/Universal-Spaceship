@@ -95,6 +95,7 @@ const ATMO_FS = /* glsl */`uniform vec3 uC, uL, uSunCol; uniform float uGain, uM
 export function createEarth({ texturePath, R, position, axis, sunDir, sunCol, spin = 0.004, spin0 = 0 }) {
   const H = R * 0.007;                                                                          // scale height (visual: ~0.7 % of R)
   const beta = new THREE.Vector3(0.04, 0.10, 0.25).divideScalar(H);                             // Rayleigh extinction per unit (vertical optical depth 0.04/0.10/0.25)
+  const beta0 = beta.clone(), mie0 = 0.5 / (2 * Math.sqrt(Math.PI * R * H / 2)); let scale = 1;               // setScale() rescales the air's world-space lengths
   const common = () => ({ uR: { value: R }, uH: { value: H }, uBeta: { value: beta }, uL: { value: sunDir }, uSunCol: { value: sunCol } });
   const groundMat = new THREE.ShaderMaterial({
     uniforms: { ...common(), tDay: { value: null }, tNight: { value: null }, tPack: { value: null }, tNormal: { value: null }, tSpec: { value: null },
@@ -104,7 +105,7 @@ export function createEarth({ texturePath, R, position, axis, sunDir, sunCol, sp
   const cloudMat = new THREE.ShaderMaterial({ uniforms: { ...common(), tPack: { value: null }, uHasTex: { value: 0 }, uAlpha: { value: 1 } },
     vertexShader: VS, fragmentShader: CLOUD_FS, transparent: true, depthWrite: false });
   const atmoMat = new THREE.ShaderMaterial({
-    uniforms: { ...common(), uC: { value: new THREE.Vector3() }, uGain: { value: 0.4 }, uMie: { value: 0.5 / (2 * Math.sqrt(Math.PI * R * H / 2)) } },
+    uniforms: { ...common(), uC: { value: new THREE.Vector3() }, uGain: { value: 0.4 }, uMie: { value: mie0 } },
     vertexShader: ATMO_VS, fragmentShader: ATMO_FS, transparent: true, depthWrite: false,
     blending: THREE.CustomBlending, blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor, blendEquation: THREE.AddEquation });
   const ground = new THREE.Mesh(new THREE.SphereGeometry(R, 256, 160), groundMat); ground.renderOrder = -8;      // 256 segments: the limb chord error is < 0.1 px
@@ -139,6 +140,10 @@ export function createEarth({ texturePath, R, position, axis, sunDir, sunCol, sp
     },
     setMono(mode) { groundMat.uniforms.uNight.value = mode === 2 ? 0 : mode === 1 ? 0.5 : 1; },   // ink: no city-light speckle
     setHaze(h) { groundMat.uniforms.uHaze.value = h; cloudMat.uniforms.uAlpha.value = 1 - h; },   // in the atmosphere the tile imagery carries its own clouds
+    setScale(k) {                                                    // the far Earth of a lunar orbit: the globe k× smaller, its atmosphere's lengths with it
+      if (k === scale) return; scale = k; group.scale.setScalar(k); beta.copy(beta0).divideScalar(k); atmoMat.uniforms.uMie.value = mie0 / k;
+      for (const m of [groundMat, cloudMat, atmoMat]) { m.uniforms.uR.value = R * k; m.uniforms.uH.value = H * k; }
+    },
     dispose() { disposed = true; [ground, clouds, atmo].forEach((m) => { m.geometry.dispose(); m.material.dispose(); }); textures.forEach((t) => t.dispose()); },
   };
 }

@@ -77,7 +77,7 @@
   #hud { position: fixed; left: 22px; bottom: 22px; z-index: 4; display: flex; gap: 14px; align-items: stretch; padding: 12px 14px; transition: opacity .3s; }
   #hud.hidden { opacity: 0; pointer-events: none; }
   #hud .block { display: flex; flex-direction: column; gap: 5px; }
-  #sensorGrid { width: 108px; height: 60px; display: block; }
+  #sensorGrid, #radarGrid { width: 108px; height: 60px; display: block; }
   #actionBars { width: 150px; height: 62px; display: block; }
   .reads { display: grid; grid-template-columns: auto auto; gap: 2px 12px; align-content: start; }
   .reads .lbl { align-self: center; }
@@ -134,6 +134,11 @@
   #board .sbar { margin: 7px 0 8px; }
   #board .sbar i, #board .tbar i { position: absolute; inset: 0; border-radius: 2px; background: var(--accent); transform-origin: left center; transform: scaleX(0); transition: transform .12s linear; }
   #board .sbar em { position: absolute; top: -3px; bottom: -3px; left: 63.6%; width: 1px; background: var(--text); opacity: .7; }
+  #board .gbar { display: inline-block; position: relative; width: 46px; height: 4px; margin-right: 7px; vertical-align: middle; border-radius: 2px;   /* g: −1.5 … +3.5, the 1-g mark at 50 % */
+    background: linear-gradient(90deg, transparent calc(50% - 1px), var(--text) calc(50% - 1px) calc(50% + 1px), transparent calc(50% + 1px)), var(--fill-2); }
+  #board .gbar i { position: absolute; left: 0; top: 0; bottom: 0; width: 50%; border-radius: 2px; background: var(--accent); opacity: .8; }
+  #board .gbar.hot i { background: #ff8a6b; opacity: 1; }
+  #board .warr { display: inline-block; font-weight: 600; transition: transform .2s linear; }   /* ↑ = a tailwind; it turns with the wind relative to the nose */
   #board .kv { display: grid; grid-template-columns: auto 1fr; gap: 3px 8px; align-items: center; }
   #board .kv .v, #board .thr .v { font: 500 11px var(--mono); font-variant-numeric: tabular-nums; text-align: right; color: var(--text); white-space: nowrap; }
   #board .thr { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: center; margin-top: auto; }
@@ -164,13 +169,15 @@
 
 <aside id="playbox" class="panel glass">
   <h2>Playbox <span class="lbl" id="pilotTag">autopilot · orbit</span></h2>
-  <div class="btns"><button class="btn primary" id="btnPlay">Pause</button><button class="btn" id="btnReset">Reset flight</button></div>
+  <div class="btns"><button class="btn primary" id="btnPlay">Pause</button><button class="btn" id="btnReset">Reset flight</button><button class="btn" id="btnLanding" title="The autoland scenario: an ILS approach and landing at the spaceport (?scenario=landing)">Land at the airport</button></div>
   <div class="row"><span class="lbl">Sim speed</span><input type="range" id="simSpeed" min="0.25" max="2" step="0.05" value="1"><span class="val" id="simSpeedV">1.00×</span></div>
   <div class="row"><span class="lbl">Asteroids</span><input type="range" id="density" min="0" max="60" step="1" value="25"><span class="val" id="densityV">25</span></div>
   <div class="row"><span class="lbl">Belt speed</span><input type="range" id="astSpeed" min="0" max="2" step="0.05" value="1"><span class="val" id="astSpeedV">1.00×</span></div>
   <div class="row"><span class="lbl">Comets</span><input type="range" id="comets" min="0" max="8" step="1" value="2"><span class="val" id="cometsV">2</span></div>
   <div class="row"><span class="lbl">Comet speed</span><input type="range" id="cometSpeed" min="0.25" max="2" step="0.05" value="1"><span class="val" id="cometSpeedV">1.00×</span></div>
-  <div class="row"><span class="lbl">Camera</span><div class="seg" id="camSeg"><button data-cam="chase" class="on">Chase</button><button data-cam="side">Side</button><button data-cam="orbit">Orbit</button></div></div>
+  <div class="row"><span class="lbl">Camera</span><div class="seg" id="camSeg"><button data-cam="chase" class="on">Chase</button><button data-cam="side">Side</button><button data-cam="orbit">Orbit</button><button data-cam="moon" title="a telescope on the ship aimed at the real Moon (the Earth, in lunar orbit): true size, direction and phase through a 1.2° (3.2°) lens (in orbit)">Moon</button></div></div>
+  <div class="row"><span class="lbl">Orbit</span><div class="seg" id="orbitSeg" title="Earth: the ISS's orbit, 420 km up · Moon: a polar lunar orbit — the Moon fills the sky below, the Earth is a small far globe (?orbit=moon)"><button data-orbit="earth" class="on">Earth</button><button data-orbit="moon">Moon</button></div></div>
+  <div class="row"><span class="lbl">Moon altitude</span><input type="range" id="moonAlt" min="0" max="100" step="1" value="23" title="the lunar orbit's height above the Moon: 500 km to 60,000 km (?moonalt=km)"><span class="val" id="moonAltV">1,500 km</span></div>
   <div class="switches">
     <label class="switch"><input type="checkbox" id="swTrail" checked><span class="track"></span><span class="txt">Trail</span></label>
     <label class="switch"><input type="checkbox" id="swSensors"><span class="track"></span><span class="txt">Sensors</span></label>
@@ -179,8 +186,15 @@
     <label class="switch"><input type="checkbox" id="swLowPass" checked><span class="track"></span><span class="txt">Low passes</span></label>
     <label class="switch"><input type="checkbox" id="swAtmo"><span class="track"></span><span class="txt">Atmospheric flight</span></label>
     <label class="switch"><input type="checkbox" id="swSkyline"><span class="track"></span><span class="txt">Skyline flight</span></label>
+    <label class="switch"><input type="checkbox" id="swAutoThr" checked><span class="track"></span><span class="txt">Auto-throttle (manual)</span></label>
     <label class="switch"><input type="checkbox" id="swBoard" checked><span class="track"></span><span class="txt">Flight board</span></label>
   </div>
+  <div class="row"><span class="lbl">Sky</span><div class="seg" id="skySeg" title="weather presets — it is felt and seen in atmospheric flight (pick a route)"><button data-sky="clear">Clear</button><button data-sky="fair" class="on">Fair</button><button data-sky="cloudy">Cloudy</button><button data-sky="storm">Storm</button></div></div>
+  <div class="row"><span class="lbl">Weather</span><input type="range" id="weather" min="0" max="1" step="0.05" value="0.5"><span class="val" id="weatherV">0.50</span></div>
+  <div class="row"><span class="lbl">Wind</span><input type="range" id="wind" min="0" max="2" step="0.1" value="1"><span class="val" id="windV">1.0×</span></div>
+  <div class="row"><span class="lbl">Clouds</span><input type="range" id="cover" min="0" max="2" step="0.1" value="1"><span class="val" id="coverV">1.0×</span></div>
+  <div class="row"><span class="lbl">Turbulence</span><input type="range" id="turb" min="0" max="3" step="0.1" value="1"><span class="val" id="turbV">1.0×</span></div>
+  <div class="row"><span class="lbl">Time warp</span><input type="range" id="warp" min="0" max="3" step="1" value="0" title="the sky clock: the Earth turns, the Sun and the Moon move at 1×, 10×, 60× or 300× real time"><span class="val" id="warpV">1×</span></div>
   <div class="row"><span class="lbl">Route</span><div class="seg" id="routeSeg"><button data-route="alps" class="on">Alps</button><button data-route="china">China</button><button data-route="newyork">New York</button><button data-route="london">London</button><button data-route="moscow">Moscow</button><button data-route="dubai">Dubai</button><button data-route="mega">Megacity</button></div></div>
   <p class="hint">Manual: <kbd>W</kbd><kbd>S</kbd> pitch · <kbd>A</kbd><kbd>D</kbd> yaw · <kbd>Q</kbd><kbd>E</kbd> roll · <kbd>⇧</kbd> boost · <kbd>X</kbd> brake · <kbd>Space</kbd> pause · <kbd>M</kbd> mode · <kbd>H</kbd> hide UI</p>
 </aside>
@@ -205,6 +219,7 @@
 
 <div id="hud" class="glass">
   <div class="block"><span class="lbl">Forward sensors</span><canvas id="sensorGrid"></canvas></div>
+  <div class="block"><span class="lbl">Weather radar</span><canvas id="radarGrid"></canvas></div>
   <div class="block"><span class="lbl">Policy output</span><canvas id="actionBars"></canvas></div>
   <div class="reads">
     <span class="lbl">Speed</span><span class="v" id="hudSpeed">–</span>
@@ -246,12 +261,18 @@
       <div class="sbar"><i id="bSpdBar"></i><em></em></div>
       <div class="kv"><span class="lbl">Alt</span><span class="v" id="bAlt">–</span><span class="lbl">Radar</span><span class="v" id="bRa">–</span><span class="lbl">V/S</span><span class="v" id="bVs">–</span><span class="lbl">Prox</span><span class="v" id="bProx">–</span></div>
       <div class="thr"><span class="lbl">Thr</span><span class="tbar"><i id="bThr"></i></span><span class="v" id="bThrS">CRUISE</span></div>
+      <div class="kv" id="bAir" style="display:none"><span class="lbl">IAS</span><span class="v" id="bIas">–</span><span class="lbl">AoA</span><span class="v" id="bAoa">–</span><span class="lbl">G</span><span class="v"><span class="gbar"><i id="bGbar"></i></span><span id="bG">–</span></span><span class="lbl">Wind</span><span class="v"><b class="warr" id="bWindArr">↑</b> <span id="bWind">–</span></span><span class="lbl">Turb</span><span class="v" id="bTurb">–</span></div>
     </div>
   </div>
 </div>
 <div id="credit">three.js · TensorFlow.js · Earth imagery NASA Blue Marble · everything else procedural</div>
 <div id="toast" class="glass"></div>
 <div id="loading"><h1>Astro Pilot</h1><p id="loadingMsg">warming up the engines…</p></div>
-<script type="module" src="src/app.js"></script>
+<script type="module">
+  // ?scenario=landing boots the autoland scenario (src/landing/main.js) instead of the corridor game (src/app.js)
+  const q = new URLSearchParams(location.search);
+  if (q.get('scenario') === 'landing') import('./src/landing/main.js').then((m) => m.start());
+  else { import('./src/app.js'); document.getElementById('btnLanding')?.addEventListener('click', () => { location.search = '?scenario=landing'; }); }
+</script>
 </body>
 </html>
