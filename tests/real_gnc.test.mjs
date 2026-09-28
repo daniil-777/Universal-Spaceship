@@ -1,12 +1,14 @@
 // Real spacecraft S1: TRANSFER, Rule P / Rule A, GO and the near starts (spec sections 3, 6 and 10).
-// Task 4 holds the pure planner tests; Task 7 replaces this file with the full one (adds the 6-DOF tests).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { N, T_ORB, DAY, DRAG_B, KOS_R, BREAKOUT_V } from '../src/real/consts.js';
+import { N, T_ORB, DAY, DRAG_B, KOS_R, JET_INDEX, BREAKOUT_V } from '../src/real/consts.js';
 import { propagate } from '../src/real/cw.js';
 import { passiveMin, planTransfer, ruleP, breakoutOk, planBreakout } from '../src/real/passive.js';
+import { createRealSim, drawRun } from '../src/real/sim.js';
+import { PH } from '../src/real/guidance.js';
 
 const START = Float64Array.from([-2000, 0, 250, 0, 0, 0]);
+const nominalRun = (x = START) => ({ ...drawRun(1, { start: 'far', disp: false }), x: Array.from(x), att: [0, 0, 0], rate: [0, 0, 0] });
 
 test('nominal TRANSFER: half-orbit radial hop, 2 x 0.4936 m/s +- 1 %, a -Y burn and a 437.5 m dip', () => {
   const p = planTransfer(START);
@@ -41,9 +43,55 @@ test('breakout criterion: from rho = 10 m on V-bar, v+ = (0.02, 0.10, 0) leaves 
   assert.ok(planBreakout(h1, { inside: false }), 'from H1 a breakout never enters the KOS');
 });
 
+test('6-DOF TRANSFER: arrival within 5 m of (-250, 0, -250); MCCs at T/3 and 2T/3; Rule P holds after every burn', () => {
+  const sim = createRealSim({ seed: 1, run: nominalRun(), nav: 'truth', disp: false });
+  while (!sim.rep.done && sim.guid.st.phase === PH.TRANSFER) sim.step();
+  const x = sim.x, T = sim.guid.st.plan.T, t0 = sim.guid.st.tDep;
+  assert.ok(Math.hypot(x[0] + 250, x[1], x[2] + 250) < 5, `arrival ${Array.from(x.subarray(0, 3))}`);
+  const mcc = sim.events.filter((e) => e.kind === 'MCC' || e.kind === 'MCC skipped');
+  assert.equal(mcc.length, 2);
+  for (let k = 0; k < 2; k++) { const at = mcc[k].t0 ?? mcc[k].t, due = t0 + ((k + 1) * T) / 3; assert.ok(at >= due && at <= due + 1.01, `MCC ${k} at ${at}, due ${due}`); }
+  for (const e of sim.events.filter((e) => e.kind === 'DEPART' || e.kind === 'MCC')) assert.ok(e.truthRMin >= 240, `${e.kind} ${e.truthRMin}`);
+});
+
 test('Rule A: a hold at H1 is not passively safe (drag reaches X = 0 in ~8.0 h), so GO needs a Rule-P breakout', () => {
   const h1 = Float64Array.from([-250, 0, 0, 0, 0, 0]);
   let t = 0; while (propagate(h1, t, -DRAG_B)[0] < 0) t += 60;
   assert.ok(Math.abs(t / 3600 - 8.0) < 0.1, `${t / 3600} h`);
   assert.ok(passiveMin(h1).rMin < KOS_R);
+});
+
+test('GO needs >= 40 % propellant: a near start with 30 % left goes NO-GO at H1 and breaks out safely', () => {
+  const sim = createRealSim({ seed: 5, run: { ...drawRun(5, { start: 'near' }), propUsed: 420 } });
+  sim.run();
+  assert.equal(sim.rep.result, 'breakout', `${sim.rep.result} ${sim.rep.reason}`);
+  assert.ok(sim.events.some((e) => e.kind === 'abort' && /NO-GO/.test(e.why)));
+});
+
+test('8 dispersed near starts all capture', () => {
+  for (let s = 1; s <= 8; s++) {
+    const sim = createRealSim({ seed: 100 + s, run: { ...drawRun(100 + s, { start: 'near' }), failed: [] } });
+    sim.run();
+    assert.equal(sim.rep.result, 'capture', `seed ${100 + s}: ${sim.rep.result} ${sim.rep.reason}`);
+  }
+});
+
+test('review focus: a failed translation-critical primary (P1-P8) ends safe, never in a failure', () => {
+  for (const name of ['P1', 'P7']) {
+    const sim = createRealSim({ seed: 21, run: { ...drawRun(21, { start: 'near' }), failed: [JET_INDEX[name]] } });
+    sim.run();
+    assert.ok(sim.rep.result === 'capture' || sim.rep.result === 'breakout', `${name}: ${sim.rep.result} ${sim.rep.reason}`);
+  }
+});
+
+test('review focus: the same seed flies the same mission (restart, MC reproducibility), step by step or in one run', () => {
+  const a = createRealSim({ seed: 9, start: 'final' }), b = createRealSim({ seed: 9, start: 'final' });
+  a.run(); while (!b.rep.done) b.step();
+  assert.equal(a.rep.result, b.rep.result); assert.equal(a.rep.t, b.rep.t); assert.deepEqual(a.rep.contact, b.rep.contact);
+});
+
+test('review focus: nav=truth flies to capture as well', () => {
+  const sim = createRealSim({ seed: 4, start: 'near', nav: 'truth' });
+  sim.run();
+  assert.equal(sim.rep.result, 'capture', `${sim.rep.result} ${sim.rep.reason}`);
 });
