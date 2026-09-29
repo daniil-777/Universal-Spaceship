@@ -173,7 +173,7 @@
 
 <aside id="playbox" class="panel glass">
   <h2>Playbox <span class="lbl" id="pilotTag">autopilot · orbit</span></h2>
-  <div class="btns"><button class="btn primary" id="btnPlay">Pause</button><button class="btn" id="btnReset">Reset flight</button><button class="btn" id="btnLanding" title="The autoland scenario: an ILS approach and landing at the spaceport (?scenario=landing)">Land at the airport</button></div>
+  <div class="btns"><button class="btn primary" id="btnPlay">Pause</button><button class="btn" id="btnReset">Reset flight</button><button class="btn" id="btnLanding" title="The autoland scenario: an ILS approach and landing at the spaceport (?scenario=landing)">Land at the airport</button><button class="btn" id="btnReal" title="Real spacecraft: rendezvous and docking with a space station, flown by a classical GNC autopilot (?scenario=real)">Real spacecraft</button></div>
   <div class="row"><span class="lbl">Sim speed</span><input type="range" id="simSpeed" min="0.25" max="2" step="0.05" value="1"><span class="val" id="simSpeedV">1.00×</span></div>
   <div class="row"><span class="lbl">Asteroids</span><input type="range" id="density" min="0" max="60" step="1" value="25"><span class="val" id="densityV">25</span></div>
   <div class="row"><span class="lbl">Belt speed</span><input type="range" id="astSpeed" min="0" max="2" step="0.05" value="1"><span class="val" id="astSpeedV">1.00×</span></div>
@@ -280,7 +280,8 @@
   // ?scenario=landing boots the autoland scenario (src/landing/main.js) instead of the corridor game (src/app.js)
   const q = new URLSearchParams(location.search);
   if (q.get('scenario') === 'landing') import('./src/landing/main.js').then((m) => m.start());
-  else { import('./src/app.js'); document.getElementById('btnLanding')?.addEventListener('click', () => { location.search = '?scenario=landing'; }); }
+  else if (q.get('scenario') === 'real' || q.get('real') === '1') import('./src/real/main.js').then((m) => m.start());
+  else { import('./src/app.js'); document.getElementById('btnLanding')?.addEventListener('click', () => { location.search = '?scenario=landing'; }); document.getElementById('btnReal')?.addEventListener('click', () => { location.search = '?scenario=real'; }); }
 </script>
 </body>
 </html>
