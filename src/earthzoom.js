@@ -174,5 +174,6 @@ export function attachEarthZoom({ renderer, space, app = null, host = app ? appH
         aspect: view.camera.aspect, shipMarker: view.marker.visible, settled: view.rings.settled, ...view.rings.info };
     },
     capture() { render(0); return canvas.toDataURL('image/png'); },
+    debugTint(on) { if (view) view.rings.setDebugTint(on); },
   };
 }

@@ -34,6 +34,7 @@ const VERT = /* glsl */`uniform sampler2D tHeight; uniform vec2 uHOff; uniform f
 // with the distance, so a view straight down from orbit stays clear while a low view's horizon fades.
 const FRAG = /* glsl */`uniform sampler2D tColor, tMask, tInner; uniform vec2 uCOff, uVRange, uInnerMin, uInnerCOff; uniform vec3 uSun, uHazeCol;
   uniform float uVis, uHazeK, uHazeL, uInnerOn, uInnerScale, uAirTop; uniform vec3 uSeaCol;
+  uniform vec3 uTint; uniform float uTintOn;
   varying vec2 vUv; varying vec3 vW, vN, vUp; varying float vSea;
   void main() {
     vec3 col = texture2D(tColor, uCOff + vUv).rgb; float m = texture2D(tMask, uCOff + vUv).r;
@@ -48,8 +49,12 @@ const FRAG = /* glsl */`uniform sampler2D tColor, tMask, tInner; uniform vec2 uC
     float dist = length(cameraPosition - vW), air = dist * min(1.0, uAirTop / max(cameraPosition.y - vW.y, uAirTop));
     col = mix(col, uHazeCol * (0.2 + 0.8 * day), uHazeK * (1.0 - exp(-air / uHazeL)));
     vec2 e = smoothstep(vec2(0.0), vec2(0.08), vUv) * smoothstep(vec2(0.0), vec2(0.08), 1.0 - vUv);
+    col = mix(col, uTint, uTintOn);
     gl_FragColor = vec4(col, uVis * e.x * e.y * day); }`;          // the night side fades to the globe's city lights
 
+// Debug false colour for the leak check (diagnosis §1(a)): one tint per ring, keyed off the ring's own level so it
+// tracks a level change and never hard-codes which colour is the finest ring (MAX_LEVEL may change later).
+const DEBUG_TINTS = [0xff0000, 0x0080ff, 0x00c000, 0xffd000, 0xffffff];
 // The atlases start empty and are only ever written on the GPU: all of them share one zero buffer per size.
 const ZEROS = new Map();
 const zeros = (n) => { if (!ZEROS.has(n)) ZEROS.set(n, new Uint8Array(n)); return ZEROS.get(n); };
@@ -57,7 +62,7 @@ const zeros = (n) => { if (!ZEROS.has(n)) ZEROS.set(n, new Uint8Array(n)); retur
 export function createEarthRings(scene, renderer, { loader = createTileLoader() } = {}) {
   const uploads = [], dst = new THREE.Vector2(), cpu = new Map(), _p = [0, 0, 0], _u = [0, 0, 0];
   const zero = new THREE.DataTexture(zeros(T * T * 4), T, T, THREE.RGBAFormat); zero.needsUpdate = true;
-  let frame = null, scratch = null, retryT = 0;
+  let frame = null, scratch = null, retryT = 0, debugTint = false;
   const count = (w, k) => { let c = 0; for (let i = 0; i < w.length; i++) if (w[i] && w[i] === k[i]) c++; return c; };
   function atlas(size, colorSpace, mips) {
     const t = new THREE.DataTexture(zeros(size * size * 4), size, size, THREE.RGBAFormat);
@@ -80,7 +85,7 @@ export function createEarthRings(scene, renderer, { loader = createTileLoader() 
       uniforms: { tColor: { value: color }, tHeight: { value: height }, tMask: { value: mask }, tInner: { value: mask }, uInnerMin: { value: new THREE.Vector2() }, uInnerCOff: { value: new THREE.Vector2() }, uInnerOn: { value: 0 }, uInnerScale: { value: 2 }, uAirTop: { value: 8 }, uSeaCol: { value: new THREE.Color(0.012, 0.035, 0.1) },
         uCOff: { value: new THREE.Vector2() }, uHOff: { value: new THREE.Vector2() },
         uHScale: { value: 1 }, uHSize: { value: HEIGHT_TILES * T }, uHeightK: { value: 0 }, uStepKm: { value: 1 }, uVRange: { value: new THREE.Vector2(0, 1) }, uVis: { value: 0 },
-        uSun: { value: new THREE.Vector3(0, 1, 0) }, uHazeCol: { value: new THREE.Color(0.62, 0.74, 0.9) }, uHazeK: { value: 0 }, uHazeL: { value: 60 } } });
+        uSun: { value: new THREE.Vector3(0, 1, 0) }, uHazeCol: { value: new THREE.Color(0.62, 0.74, 0.9) }, uHazeK: { value: 0 }, uHazeL: { value: 60 }, uTint: { value: new THREE.Color(1, 1, 1) }, uTintOn: { value: 0 } } });
     const mesh = new THREE.Mesh(geo, mat); mesh.frustumCulled = false; mesh.visible = false; scene.add(mesh);
     const S = RING_TILES * RING_TILES, H = HEIGHT_TILES * HEIGHT_TILES;
     return { level: -1, win: null, hwin: null, mesh, mat, color, height, mask, vis: 0, hk: 0, shown: false, hShown: false, valid: 0, hValid: 0, stats: null,
@@ -196,6 +201,7 @@ export function createEarthRings(scene, renderer, { loader = createTileLoader() 
     // A closed view stops fetching; on reopening every ring re-requests what it is still missing.
     suspend() { loader.suspend(); uploads.length = 0; },
     resume() { loader.resume(); for (const r of rings) r.win = null; },
+    setDebugTint(on) { debugTint = !!on; },
     update(dt, view) {
       const want = ringLevels(view.L0);
       for (const L of want) place(rings.find((q) => q.level === L) || rings.find((q) => !want.includes(q.level)), L, view.lat, view.lon);
@@ -211,6 +217,7 @@ export function createEarthRings(scene, renderer, { loader = createTileLoader() 
         r.hShown = used && hHave >= (r.hShown ? HIDE_AT : SHOW_AT) * r.hValid;
         r.vis += ((r.shown ? 1 : 0) - r.vis) * ease; r.hk += ((r.hShown ? 1 : 0) - r.hk) * ease;
         const u = r.mat.uniforms; u.uVis.value = r.vis * view.vis; u.uHeightK.value = r.hk; u.uSun.value.copy(view.sun); u.uHazeK.value = view.hazeK; u.uHazeL.value = view.hazeL;
+        u.uTintOn.value = debugTint ? 1 : 0; if (debugTint) u.uTint.value.setHex(DEBUG_TINTS[(MAX_LEVEL - r.level) % 5]);
         r.mesh.visible = u.uVis.value > 0.003; r.stats = { have, valid: r.valid, hHave, hValid: r.hValid };
       }
       for (const r of rings) {
