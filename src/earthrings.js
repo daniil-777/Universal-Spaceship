@@ -8,7 +8,7 @@
 // coarser in a 4 × 4 atlas, decoded in the vertex shader. Tiles come from src/earthloader.js. Units: km in the view's
 // local frame.
 import * as THREE from 'three';
-import { RING_TILES, RING_COUNT, HEIGHT_TILES, MAX_LEVEL, HEIGHT_SOURCE, sourceForLevel, tileUrl, ringLevels, ringWindow, heightWindow, heightTileFor, windowTiles, tileToLonLat, lonLatToTile, tileSizeKm, decodeTerrarium, mod } from './earthtiles.js';
+import { RING_TILES, RING_COUNT, HEIGHT_TILES, MAX_LEVEL, HEIGHT_SOURCE, sourceForLevel, tileUrl, ringLevels, ringWindow, heightWindow, heightTileFor, windowTiles, innerWindow, innerState, tileToLonLat, lonLatToTile, tileSizeKm, decodeTerrarium, mod } from './earthtiles.js';
 import { createTileLoader } from './earthloader.js';
 
 const T = 256, GRID = 128, SHOW_AT = 0.9, HIDE_AT = 0.5, UPLOADS_PER_FRAME = 6, RETRY_S = 10;
@@ -28,19 +28,24 @@ const VERT = /* glsl */`uniform sampler2D tHeight; uniform vec2 uHOff; uniform f
     vSea = raw < -1.0 && raw > -12000.0 ? 1.0 : 0.0;          // below sea level (an empty atlas slot decodes to -32768: unknown, not sea)
     vec4 w = modelMatrix * vec4(position + vUp * h, 1.0); vW = w.xyz; gl_Position = projectionMatrix * viewMatrix * w; }`;
 
-// A coarser ring leaves a hole where the next finer ring is fully in (its interior, not its fade band): each ring's relief
-// comes from its own height level, so where the rings overlap a coarse ring's smoothed valleys would sit above the fine
-// ring's real ones and hide them from the depth test. Haze grows with the air crossed (the path below uAirTop km), not
-// with the distance, so a view straight down from orbit stays clear while a low view's horizon fades.
+// A coarser ring never competes in depth with the next finer ring (diagnosis 2026-09-29, fix A): each ring's relief comes
+// from its own height level, so where the rings overlap a coarse ring's smoothed valleys would sit above the fine ring's
+// real ones and win the depth test. Under the finer ring's footprint (where its tiles are in) the coarse ring is pushed to
+// the far plane, so it only ever shows THROUGH the finer ring (while that one fades in, and in its edge band), and once
+// the finer ring's imagery and relief are fully in, the coarse ring leaves a hole in its interior. The test wraps in
+// longitude (uInnerWrap): a level-2 ring spans the globe twice, and a copy of it left at its true depth would hide the
+// pushed rings. Haze grows with the air crossed (the path below uAirTop km), not with the distance, so a view straight
+// down from orbit stays clear while a low view's horizon fades.
 const FRAG = /* glsl */`uniform sampler2D tColor, tMask, tInner; uniform vec2 uCOff, uVRange, uInnerMin, uInnerCOff; uniform vec3 uSun, uHazeCol;
-  uniform float uVis, uHazeK, uHazeL, uInnerOn, uInnerScale, uAirTop; uniform vec3 uSeaCol;
+  uniform float uVis, uHazeK, uHazeL, uInnerOn, uInnerDone, uInnerScale, uInnerWrap, uAirTop; uniform vec3 uSeaCol;
   uniform vec3 uTint; uniform float uTintOn;
   varying vec2 vUv; varying vec3 vW, vN, vUp; varying float vSea;
   void main() {
     vec3 col = texture2D(tColor, uCOff + vUv).rgb; float m = texture2D(tMask, uCOff + vUv).r;
-    vec2 iu = (vUv - uInnerMin) * uInnerScale; float inner = texture2D(tInner, uInnerCOff + iu).r;
+    vec2 iu = vec2(mod(vUv.x - uInnerMin.x, uInnerWrap), vUv.y - uInnerMin.y) * uInnerScale; float inner = texture2D(tInner, uInnerCOff + iu).r;
     if (vUv.y < uVRange.x || vUv.y > uVRange.y || m < 0.5) discard;          // beyond ±85° or a tile not (yet) in
-    if (uInnerOn > 0.5 && min(iu.x, iu.y) > 0.1 && max(iu.x, iu.y) < 0.9 && inner > 0.5) discard;
+    bool under = uInnerOn > 0.5 && iu.x > 0.0 && iu.y > 0.0 && iu.x < 1.0 && iu.y < 1.0 && inner > 0.5;
+    if (under && uInnerDone > 0.5 && min(iu.x, iu.y) > 0.1 && max(iu.x, iu.y) < 0.9) discard;
     float lum = dot(col, vec3(0.2126, 0.7152, 0.0722));
     col = mix(col, uSeaCol, vSea * (1.0 - smoothstep(0.004, 0.03, lum)));   // Sentinel-2 cloudless draws the open sea near-black
     float sunUp = dot(vUp, uSun), day = smoothstep(-0.08, 0.12, sunUp);
@@ -49,6 +54,7 @@ const FRAG = /* glsl */`uniform sampler2D tColor, tMask, tInner; uniform vec2 uC
     float dist = length(cameraPosition - vW), air = dist * min(1.0, uAirTop / max(cameraPosition.y - vW.y, uAirTop));
     col = mix(col, uHazeCol * (0.2 + 0.8 * day), uHazeK * (1.0 - exp(-air / uHazeL)));
     vec2 e = smoothstep(vec2(0.0), vec2(0.08), vUv) * smoothstep(vec2(0.0), vec2(0.08), 1.0 - vUv);
+    gl_FragDepth = under ? 0.99999 : gl_FragCoord.z;
     col = mix(col, uTint, uTintOn);
     gl_FragColor = vec4(col, uVis * e.x * e.y * day); }`;          // the night side fades to the globe's city lights
 
@@ -82,7 +88,7 @@ export function createEarthRings(scene, renderer, { loader = createTileLoader() 
     const mask = new THREE.DataTexture(new Uint8Array(RING_TILES * RING_TILES), RING_TILES, RING_TILES, THREE.RedFormat);
     mask.wrapS = mask.wrapT = THREE.RepeatWrapping; mask.minFilter = mask.magFilter = THREE.NearestFilter; mask.needsUpdate = true;
     const mat = new THREE.ShaderMaterial({ vertexShader: VERT, fragmentShader: FRAG, transparent: true, depthWrite: true, polygonOffset: true,
-      uniforms: { tColor: { value: color }, tHeight: { value: height }, tMask: { value: mask }, tInner: { value: mask }, uInnerMin: { value: new THREE.Vector2() }, uInnerCOff: { value: new THREE.Vector2() }, uInnerOn: { value: 0 }, uInnerScale: { value: 2 }, uAirTop: { value: 8 }, uSeaCol: { value: new THREE.Color(0.012, 0.035, 0.1) },
+      uniforms: { tColor: { value: color }, tHeight: { value: height }, tMask: { value: mask }, tInner: { value: mask }, uInnerMin: { value: new THREE.Vector2() }, uInnerCOff: { value: new THREE.Vector2() }, uInnerOn: { value: 0 }, uInnerDone: { value: 0 }, uInnerScale: { value: 2 }, uInnerWrap: { value: 1 }, uAirTop: { value: 8 }, uSeaCol: { value: new THREE.Color(0.012, 0.035, 0.1) },
         uCOff: { value: new THREE.Vector2() }, uHOff: { value: new THREE.Vector2() },
         uHScale: { value: 1 }, uHSize: { value: HEIGHT_TILES * T }, uHeightK: { value: 0 }, uStepKm: { value: 1 }, uVRange: { value: new THREE.Vector2(0, 1) }, uVis: { value: 0 },
         uSun: { value: new THREE.Vector3(0, 1, 0) }, uHazeCol: { value: new THREE.Color(0.62, 0.74, 0.9) }, uHazeK: { value: 0 }, uHazeL: { value: 60 }, uTint: { value: new THREE.Color(1, 1, 1) }, uTintOn: { value: 0 } } });
@@ -220,13 +226,16 @@ export function createEarthRings(scene, renderer, { loader = createTileLoader() 
         u.uTintOn.value = debugTint ? 1 : 0; if (debugTint) u.uTint.value.setHex(DEBUG_TINTS[(MAX_LEVEL - r.level) % 5]);
         r.mesh.visible = u.uVis.value > 0.003; r.stats = { have, valid: r.valid, hHave, hValid: r.hValid };
       }
+      // fix A: every used ring with a finer used ring tracks that ring's window every frame, so it is behind the finer
+      // ring as soon as that one is drawn at all (on) and leaves its hole once the finer ring is fully in (done)
       for (const r of rings) {
         const finer = want.filter((L) => L > r.level), inner = want.includes(r.level) && finer.length && rings.find((q) => q.level === Math.min(...finer)), u = r.mat.uniforms;
-        u.uInnerOn.value = inner && inner.vis > 0.98 ? 1 : 0;
-        if (!u.uInnerOn.value) continue;
-        const s = 2 ** (inner.level - r.level);
-        u.tInner.value = inner.mask; u.uInnerCOff.value.copy(inner.mat.uniforms.uCOff.value); u.uInnerScale.value = s;
-        u.uInnerMin.value.set((inner.win.x0 / s - r.win.x0) / RING_TILES, (inner.win.y0 / s - r.win.y0) / RING_TILES);
+        const st = inner ? innerState(inner) : { on: false, done: false };
+        u.uInnerOn.value = st.on ? 1 : 0; u.uInnerDone.value = st.done ? 1 : 0;
+        if (!inner) continue;
+        const w = innerWindow(inner.win, r.win);
+        u.tInner.value = inner.mask; u.uInnerCOff.value.copy(inner.mat.uniforms.uCOff.value); u.uInnerScale.value = w.scale; u.uInnerMin.value.set(w.min[0], w.min[1]);
+        u.uInnerWrap.value = w.wrap;
       }
     },
     heightAt(latDeg, lonDeg) {

@@ -83,6 +83,16 @@ export function windowTiles(win, size) {
   }
   return out.sort((a, b) => a.d - b.d);
 }
+// Where the next finer ring's window sits in a coarser ring's uv: iu = (uv − min) · scale runs 0..1 across the finer ring.
+// wrap = the world's width in that uv: below level 3 a ring's 8 tiles span the globe more than once, so the x offset is
+// taken modulo wrap and every copy of the coarse ring under the finer ring counts as under it.
+export function innerWindow(inner, outer) {
+  const scale = 2 ** (inner.level - outer.level);
+  return { scale, min: [(inner.x0 / scale - outer.x0) / RING_TILES, (inner.y0 / scale - outer.y0) / RING_TILES], wrap: 2 ** outer.level / RING_TILES };
+}
+// A coarser ring stays behind the next finer ring wherever that one is drawn at all (on), and leaves a hole in its interior
+// only once the finer ring's imagery AND relief have fully faded in (done): flat ground never shows ahead of the relief.
+export const innerState = ({ vis, hk }) => ({ on: vis > 0.003, done: vis > 0.999 && hk > 0.999 });
 
 const wrap180 = (lon) => mod(lon + 180, 360) - 180;
 export const KM_PER_DEG = 40075.016 / 360;
