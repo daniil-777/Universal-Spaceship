@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { corridorSafety, landingSafety, dockingSafety, eyeView, CORRIDOR_ACTIONS, C_NEAR_DEFAULT } from '../vlm/gen/safety.js';
-import { FAMILY_ACTIONS, OUTCOMES } from '../vlm/gen/schema.js';
+import { FAMILY_ACTIONS, OUTCOMES, CAUSES } from '../vlm/gen/schema.js';
 
 const seenCorridor = [], seenL = [], seenD = [];
 const br = (over = {}) => Object.fromEntries(CORRIDOR_ACTIONS.map((a) => [a, { k: 4, crashes: 0, minClr: 10, medClr: 10, causes: [], ...(over[a] || {}) }]));
@@ -81,6 +81,24 @@ test('landing safety_eye removes TAILWIND, every GS-dot rule and LOC-dot rules b
   assert.equal(L({ hRAft: 200, locDots: 1.8, thrNm: 0.8 }, undefined, true).verdict, 'UNSAFE');
   assert.equal(L({ crossKt: 16 }, undefined, true).verdict, 'CAUTION', 'STRONG_CROSSWIND stays (the crab is visible)');
 });
+test('landing dot-threshold boundaries: exactly 1 dot is SAFE, exactly 1.5 dots is CAUTION not UNSAFE, below and above 500 ft', () => {
+  assert.equal(L({ hRAft: 300, locDots: 1.0 }).verdict, 'SAFE', 'exactly 1 dot does not exceed the > 1 CAUTION rule');
+  assert.equal(L({ hRAft: 300, locDots: 1.5 }).verdict, 'CAUTION', 'exactly 1.5 dots does not exceed the > 1.5 UNSAFE rule');
+  assert.equal(L({ hRAft: 300, gsDots: 1.0 }).verdict, 'SAFE');
+  assert.equal(L({ hRAft: 300, gsDots: 1.5 }).verdict, 'CAUTION');
+  assert.equal(L({ hRAft: 700, locDots: 1.0 }).verdict, 'SAFE', 'above 500 ft the > 1.5 UNSAFE rule never applies');
+  assert.equal(L({ hRAft: 700, locDots: 1.5 }).verdict, 'CAUTION');
+  assert.equal(L({ hRAft: 700, gsDots: 1.0 }).verdict, 'SAFE');
+  assert.equal(L({ hRAft: 700, gsDots: 1.5 }).verdict, 'CAUTION');
+});
+test('landing cause maps the reference (CONTINUE) outcome: runway for excursion/overrun, ground for short/crash/hard/tailstrike, null otherwise', () => {
+  for (const bad of ['excursion', 'overrun']) assert.equal(L({}, { CONTINUE: bad, GO_AROUND: 'go_around' }).cause, 'runway');
+  for (const bad of ['short', 'crash', 'hard', 'tailstrike']) assert.equal(L({}, { CONTINUE: bad, GO_AROUND: 'go_around' }).cause, 'ground');
+  assert.equal(L({}).cause, null);
+  assert.equal(L({}, { CONTINUE: 'go_around', GO_AROUND: 'go_around' }).cause, null);
+  const immediate = L({ hRAft: 200, locDots: 1.6 });
+  assert.equal(immediate.verdict, 'UNSAFE'); assert.equal(immediate.cause, null, 'an immediate rule with a safe CONTINUE outcome leaves cause null');
+});
 
 const dnow = (o = {}) => ({ phase: 'CORRIDOR', rho: 60, closing: 0.1, limit: 0.2, inCorridor: true, kosViolation: false, attDeg: 0.5, rateDps: 0.01, fuelFrac: 0.8, failedJets: 0, breakoutAvailable: true, holdPhase: false, outsideHoldBox: false, ttc_s: null, ...o });
 const D = (now, outcome = { CONTINUE: 'capture', BREAKOUT: 'breakout', failReason: null }, eye = false) => { const s = dockingSafety({ now: dnow(now), outcome }, { eye }); seenD.push(s); return s; };
@@ -101,8 +119,21 @@ test('docking safety_eye removes fuel, jets, breakout availability and closing r
   assert.equal(D({ rho: 5, closing: 0.31, limit: 0.2 }, undefined, true).verdict, 'UNSAFE', 'within the eye scope (EYE.closingRhoM may be lowered by Task 4)');
   assert.equal(D({ attDeg: 3 }, undefined, true).verdict, 'CAUTION');
 });
+test('docking closing-speed boundaries: exactly 1.5x the limit is CAUTION not UNSAFE; exactly 20 m stays inside the closing-speed scope', () => {
+  assert.equal(D({ rho: 15, closing: 0.3, limit: 0.2 }).verdict, 'CAUTION', 'exactly 1.5x the limit does not exceed it');
+  assert.equal(D({ rho: 20, closing: 0.31, limit: 0.2 }).verdict, 'UNSAFE', 'rho = 20 m is inside the 20 m scope (inclusive)');
+  assert.equal(D({ rho: 20, closing: 0.25, limit: 0.2 }, undefined, true).verdict, 'CAUTION', 'the eye-scope 20 m cutoff is inclusive too');
+});
+test('docking cause maps a failed CONTINUE to station regardless of failReason; capture and breakout leave it null', () => {
+  assert.equal(D({}, { CONTINUE: 'fail', BREAKOUT: 'breakout', failReason: 'KOS_VIOLATION' }).cause, 'station');
+  assert.equal(D({}, { CONTINUE: 'fail', BREAKOUT: 'breakout', failReason: null }).cause, 'station', 'a fail without a KOS reason is a non-IDSS contact, also station');
+  assert.equal(D({}).cause, null);
+  assert.equal(D({}, { CONTINUE: 'breakout', BREAKOUT: 'breakout', failReason: null }).cause, null);
+  const immediate = D({ kosViolation: true });
+  assert.equal(immediate.verdict, 'UNSAFE'); assert.equal(immediate.cause, null, 'an immediate rule with a safe CONTINUE outcome leaves cause null');
+});
 
-test('safe_actions and best_action stay inside FAMILY_ACTIONS[family] (or NONE_SAFE), and action_outcome stays inside OUTCOMES[family], for every truth-table case', () => {
+test('safe_actions and best_action stay inside FAMILY_ACTIONS[family] (or NONE_SAFE), action_outcome stays inside OUTCOMES[family], and cause stays inside CAUSES, for every truth-table case', () => {
   assert.ok(seenCorridor.length >= 15, `expected many corridor cases, got ${seenCorridor.length}`);
   assert.ok(seenL.length >= 15, `expected many landing cases, got ${seenL.length}`);
   assert.ok(seenD.length >= 10, `expected many docking cases, got ${seenD.length}`);
@@ -111,6 +142,7 @@ test('safe_actions and best_action stay inside FAMILY_ACTIONS[family] (or NONE_S
       for (const a of s.safe_actions) assert.ok(FAMILY_ACTIONS[fam].includes(a), `${label} safe_actions has ${a}, outside FAMILY_ACTIONS.${fam}`);
       assert.ok(s.best_action === 'NONE_SAFE' || FAMILY_ACTIONS[fam].includes(s.best_action), `${label} best_action ${s.best_action}, outside FAMILY_ACTIONS.${fam}`);
       for (const [k, o] of Object.entries(s.action_outcome)) assert.ok(outcomesEnum.includes(o), `${label} action_outcome.${k} = ${o}, outside OUTCOMES.${fam}`);
+      assert.ok(s.cause === null || CAUSES.includes(s.cause), `${label} cause ${s.cause}, outside CAUSES`);
     }
   };
   check('S', OUTCOMES.S, seenCorridor, 'corridor');

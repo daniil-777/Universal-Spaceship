@@ -3,7 +3,10 @@
 // the label modules reduce sim state to the inputs below. Rulings where §4.3 is silent (also written to labels.json):
 // HAZARD_CLOSING_FAST and STORM_CELL only explain non-SAFE verdicts; CORRIDOR_EDGE is added at any verdict; the L dot
 // CAUTION band is |dots| > 1 on GS at hRA >= 50 ft; a go-around outcome adds UNSTABLE_APPROACH; an UNSAFE chain ending
-// at an unsafe CONTINUE becomes NONE_SAFE; the D NO-GO includes breakout availability (guidance.js goOk).
+// at an unsafe CONTINUE becomes NONE_SAFE; the D NO-GO includes breakout availability (guidance.js goOk). cause for L/D
+// maps only the reference branch's (CONTINUE) own outcome: L excursion/overrun -> runway, short/crash/hard/tailstrike
+// -> ground, landed/go_around/else -> null; D fail -> station (either a KOS violation or a non-IDSS contact), else null.
+// An UNSAFE verdict from an immediate rule alone, with a safe CONTINUE outcome, leaves cause null.
 import { REASONS } from './schema.js';
 
 export const C_NEAR_DEFAULT = 2.5;
@@ -16,6 +19,8 @@ const HAZARDS = ['rock', 'comet', 'satellite', 'airliner', 'birds'], L_BAD = ['c
 const CAUSE_REASON = (c) => (HAZARDS.includes(c) ? 'HAZARD_AHEAD' : c === 'terrain' ? 'TERRAIN_CLOSE' : c === 'building' || c === 'roof' ? 'BUILDING_CLOSE' : c === 'overstress' ? 'OVERSTRESS' : null);
 const CLR_REASON = { hazard: 'HAZARD_AHEAD', terrain: 'TERRAIN_CLOSE', building: 'BUILDING_CLOSE' };
 const L_OUTCOME_REASON = { excursion: 'RUNWAY_EDGE', overrun: 'CANNOT_STOP', hard: 'HIGH_SINK_RATE', short: 'UNSTABLE_APPROACH', tailstrike: 'UNSTABLE_APPROACH', crash: 'UNSTABLE_APPROACH' };
+const L_CAUSE = { excursion: 'runway', overrun: 'runway', short: 'ground', crash: 'ground', hard: 'ground', tailstrike: 'ground' };
+const D_CAUSE = { fail: 'station' };
 const GATE_REASON = { lateral: 'LOCALIZER_DEVIATION', loc: 'LOCALIZER_DEVIATION', vertical: 'GLIDESLOPE_DEVIATION', gs: 'GLIDESLOPE_DEVIATION', speed: 'SPEED_OUT_OF_BAND', vs: 'HIGH_SINK_RATE', gear: 'UNSTABLE_APPROACH' };
 export const outcomeRisk = (family, o) => (family === 'L' ? (L_BAD.includes(o) ? 1 : 0) : family === 'D' ? (o === 'fail' ? 1 : 0) : o);
 const sorted = (set) => [...set].filter(Boolean).sort((a, b) => REASONS.indexOf(a) - REASONS.indexOf(b));
@@ -84,7 +89,7 @@ export function landingSafety(inp, { eye = false } = {}) {
   else if (unsafe && !n.airborne) best = edgeNow ? (n.mainGearZ > 0 ? 'TURN_LEFT' : 'TURN_RIGHT') : stopNow ? 'SLOW_DOWN' : 'NONE_SAFE';
   else if (n.vert === 'GS' && dev.length) best = dev.sort((a, b) => b[0] - a[0])[0][1];
   if (unsafe && best === 'CONTINUE' && risk.CONTINUE === 1) best = 'NONE_SAFE';
-  return assemble(verdict, R, risk, outcome, best, { safe: best === 'NONE_SAFE' ? [] : [best], ref: 'AUTOLAND', horizon: null, draws: 1, p_pilot: risk.CONTINUE });
+  return assemble(verdict, R, risk, outcome, best, { cause: L_CAUSE[o.CONTINUE] ?? null, safe: best === 'NONE_SAFE' ? [] : [best], ref: 'AUTOLAND', horizon: null, draws: 1, p_pilot: risk.CONTINUE });
 }
 
 export function dockingSafety(inp, { eye = false } = {}) {
@@ -107,7 +112,7 @@ export function dockingSafety(inp, { eye = false } = {}) {
   if (!eye && n.failedJets > 0) { caution = true; R.add('JET_FAILURE'); }
   const verdict = unsafe ? 'UNSAFE' : caution ? 'CAUTION' : 'SAFE';
   const best = unsafe ? (risk.BREAKOUT === 0 ? 'BREAKOUT' : 'NONE_SAFE') : n.holdPhase && noGo.length ? 'HOLD_POSITION' : tooFast ? 'SLOW_DOWN' : 'CONTINUE';
-  return assemble(verdict, R, risk, outcome, best, { safe: best === 'NONE_SAFE' ? [] : [best], ref: 'GNC', horizon: null, draws: 1, p_pilot: risk.CONTINUE, ttc_s: n.ttc_s });
+  return assemble(verdict, R, risk, outcome, best, { cause: D_CAUSE[o.CONTINUE] ?? null, safe: best === 'NONE_SAFE' ? [] : [best], ref: 'GNC', horizon: null, draws: 1, p_pilot: risk.CONTINUE, ttc_s: n.ttc_s });
 }
 
 export function eyeView(family, inp, opts = {}) {
