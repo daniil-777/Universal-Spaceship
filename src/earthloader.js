@@ -9,7 +9,7 @@ const hex = (buf) => Array.from(new Uint8Array(buf), (b) => b.toString(16).padSt
 const sha1Hex = async (buf) => (globalThis.crypto && crypto.subtle ? hex(await crypto.subtle.digest('SHA-1', buf)) : '');
 const hostOf = (url) => { try { return new URL(url).host; } catch (e) { return url; } };
 
-export function createTileLoader({ maxInFlight = 8, keep = 192, retryMs = 30000, blank = ESRI_BLANK, fetchImpl = (url, opts) => fetch(url, opts),
+export function createTileLoader({ maxInFlight = 8, keep = 192, retryMs = 30000, timeoutMs = 15000, blank = ESRI_BLANK, fetchImpl = (url, opts) => fetch(url, opts),
   decode = (blob, opts) => createImageBitmap(blob, opts), hashHex = sha1Hex, now = () => performance.now() } = {}) {
   const cache = new Map(), failed = new Map(), warned = new Set(), queue = [], recent = [], stats = { requested: 0, loaded: 0, failed: 0, blank: 0 };
   let inFlight = 0, suspended = false;
@@ -18,8 +18,10 @@ export function createTileLoader({ maxInFlight = 8, keep = 192, retryMs = 30000,
   const note = (bad) => { recent.push(bad ? 1 : 0); if (recent.length > 24) recent.shift(); };
   async function run(job) {
     inFlight++; let bmp = null, why = 'failed';
+    // a server that never answers must not hold a slot for ever
+    const ctl = typeof AbortController === 'function' ? new AbortController() : null, timer = ctl && setTimeout(() => ctl.abort(), timeoutMs);
     try {
-      const res = await fetchImpl(job.url, { mode: 'cors' });
+      const res = await fetchImpl(job.url, { mode: 'cors', signal: ctl ? ctl.signal : undefined });
       if (!res.ok) throw new Error('HTTP ' + res.status);
       const buf = await res.arrayBuffer();
       if (await isBlank(buf)) { stats.blank++; failed.set(job.url, Infinity); why = 'blank'; }
@@ -30,6 +32,7 @@ export function createTileLoader({ maxInFlight = 8, keep = 192, retryMs = 30000,
       const host = hostOf(job.url);
       if (!warned.has(host)) { warned.add(host); console.warn(`earth zoom: tiles from ${host} are not loading (${e.message})`); }
     }
+    if (timer) clearTimeout(timer);
     inFlight--;
     if (suspended) job.done(null, 'dropped'); else job.done(bmp, why);
     pump();

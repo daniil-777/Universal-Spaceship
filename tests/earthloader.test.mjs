@@ -52,6 +52,15 @@ test('Esri’s placeholder (its size and hash) counts as no imagery and is never
   L.request(job('b', 0, log)); net.reply('b', { bytes: 8 }); await settle(); assert.deepEqual(log[2], ['b', 'bitmap', 'ok']);
 });
 
+test('a server that never answers times out and frees its slot', async () => {
+  const restore = quiet(), calls = [], log = [];
+  const fetchImpl = (url, opts) => { calls.push(url); return new Promise((resolve, reject) => { if (opts && opts.signal) opts.signal.addEventListener('abort', () => reject(new Error('timed out'))); }); };
+  const L = createTileLoader({ maxInFlight: 1, fetchImpl, decode, timeoutMs: 20 });
+  L.request(job('a', 0, log)); L.request(job('b', 1, log)); assert.deepEqual(calls, ['a']);
+  await new Promise((r) => setTimeout(r, 60)); assert.deepEqual(log[0], ['a', null, 'failed']); assert.deepEqual(calls, ['a', 'b'], 'the next request got the slot');
+  restore();
+});
+
 test('suspend stops a closed view fetching: the queue is dropped, running answers are discarded, nothing new starts until resume', async () => {
   const net = fakeNet(), L = createTileLoader({ maxInFlight: 1, fetchImpl: net.fetchImpl, decode }), log = [];
   L.request(job('a', 0, log)); L.request(job('b', 1, log)); L.suspend();

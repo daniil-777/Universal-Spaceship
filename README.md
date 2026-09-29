@@ -252,11 +252,16 @@ planets sit ahead of the ship in the chase view.
 **Zoom in** in the Playbox (or **Z**) opens a telescope view of the real Earth under the ship: drag to pan, wheel or pinch
 to zoom from 20,000 km down to ~300 m above the ground, right-drag (or Ctrl-drag) to tilt and turn, WASD / arrows / + / −
 / Q / E / R / F from the keyboard, **Z** or **Esc** to come back. The ship keeps flying underneath (the learned pilot takes
-over while you look around) and a blue dot marks where it is. The imagery is open data fetched live, sharper as you go
-down: NASA Blue Marble (≈ 600 m per pixel), Sentinel-2 cloudless by EOX (≈ 10 m), and Esri World Imagery for the closest
-levels (under 1 m in many places); real relief comes from AWS Terrain Tiles (≈ 30 m). It is drawn as five nested rings of
+over while you look around) and a blue dot marks where it is (from lunar orbit it opens over the point on Earth facing
+the Moon). The imagery is fetched live, sharper as you go down: NASA Blue Marble (≈ 600 m per pixel, public domain),
+Sentinel-2 cloudless by EOX (≈ 10 m, open data under CC BY-NC-SA — non-commercial), and for the closest levels Esri World
+Imagery (under 1 m in many places; proprietary, used under Esri's terms with its attribution); real relief comes from
+AWS Terrain Tiles (≈ 30 m, open data). The zoom's own credit line names them while it is open. Z and + / − follow the
+characters on the keys (a Swiss or German keyboard works as labelled). It is drawn as five nested rings of
 tiles around the point you look at (`src/earthrings.js`), each ring a curved mesh with one GPU atlas like the terrain
-strips and each one level coarser than the ring inside it; a ring shows once its tiles are in, so a coarser one — or the
+strips (the inner three one level apart, the outer two on even levels so zooming never retires the horizon ring); a
+ring shows once its tiles are in, the open sea (which the Sentinel-2 mosaic draws near-black) gets an ocean colour
+from the elevation data's bathymetry, missing tiles are asked for again every 10 s, so a coarser one — or the
 Blue Marble globe with its procedural relief — covers whatever is still loading, and a coarse ring leaves a hole where
 the finer one is in (otherwise its smoothed valleys would hide the sharp ones). With no network the view still works,
 just without the sharper imagery. **Always day** lights the view as if it were midday; otherwise the real Sun of the sky
@@ -283,7 +288,7 @@ clock lights it. Known limitation: very low and steeply tilted over cliffs, the 
 | `src/eiffel.js` | the procedural Eiffel Towers (six variants, three levels of detail) |
 | `src/ship.js`, `src/shipsurfaces.js` | the spacecraft and its moving control surfaces (elevons, split rudders / speed brake, body flap, vectored plumes, wingtip vapour) |
 | `src/ephem.js`, `src/orbit.js`, `src/skyorbit.js`, `src/moon.js`, `textures/moon/` | the real sky: UTC clock with time warp, sidereal time, Sun and Moon (Meeus), the 420-km orbit with J2 drift, the sky in the ship's frame, the Moon (NASA SVS CGI Moon Kit) |
-| `src/earthtiles.js`, `src/earthrings.js`, `src/earthzoom.js` | the Earth zoom: tile, level and view maths (pure JS, tested); the nested imagery rings with Terrarium relief and their tile loader; the telescope view (scene, controls, HUD) |
+| `src/earthtiles.js`, `src/earthloader.js`, `src/earthrings.js`, `src/earthzoom.js` | the Earth zoom: tile, level, view and entry maths (pure JS, tested); the tile loader (priorities, retries, timeouts, Esri-placeholder detection, suspend on close — pure JS, tested); the nested imagery rings with Terrarium relief; the telescope view (scene, controls, HUD, credit line). `samples/earthzoom-*.jpg` show imagery © Esri, Maxar, Earthstar Geographics; Sentinel-2 cloudless by EOX; Blue Marble NASA |
 | `src/lunarsky.js` | the lunar orbit's sky (`?orbit=moon`): the polar orbit round the Moon, the Earth, the Sun and the view-composed start |
 | `src/landing/*.js` | the landing scenario (`?scenario=landing`): SI flight model and gear, METAR wind and Dryden turbulence, the ICAO airport as data and in 3D (paint, lights, PAPI, ILS, signs, buildings), cloud decks, the Dubins/L1/TECS autoland with its predictive flare and rollout, Monte Carlo sim, scene, HUD, tower calls and sound |
 | `model/policy.json`, `model/policy_atmo.json` | the pretrained pilots (weights + observation normaliser): the belt pilot, and the atmospheric pilot fetched when atmospheric flight is first switched on |
