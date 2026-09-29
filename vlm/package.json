@@ -1,0 +1,11 @@
+{
+  "name": "astro-pilot-vlm",
+  "private": true,
+  "type": "module",
+  "description": "Astro Pilot Vision: simulator-labelled dataset pipeline and two browser models (spec 2026-09-29). Playwright is not a dependency: vlm/capture imports the LaCie harness shot.mjs (Playwright 1.63.0).",
+  "dependencies": {
+    "sharp": "0.35.5",
+    "onnxruntime-web": "1.30.0",
+    "@huggingface/transformers": "4.3.0"
+  }
+}

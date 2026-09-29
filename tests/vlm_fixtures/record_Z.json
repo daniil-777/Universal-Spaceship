@@ -1,0 +1,12 @@
+{
+  "key": "Z_fix_00001_000000", "family": "Z", "frames": ["Z_fix_00001_000000.f0.png"], "narrator_frame": "Z_fix_00001_000000.f0.png",
+  "frame_dt_steps": null, "frame_dt_s": null,
+  "facts": { "view.lat_deg": { "v": 45.976, "unit": "deg", "obs": "visual" }, "view.range_km": { "v": 50, "unit": "km", "obs": "visual" } },
+  "safety": null, "safety_eye": null,
+  "zoom": { "tags": null, "range_bin": 1, "lighting": { "mode": "always_day", "sun_elev_deg": 66.7, "sun_az_deg": 54.5, "class": "day" } },
+  "cameras": {},
+  "render": { "viewport": [896, 504], "dpr": 1, "renderScale": 1, "toneMapping": "ACESFilmic", "capture_mode": "clock", "view": { "eye": "zoom", "narrator": "zoom" }, "path": null,
+    "imagery": [{ "level": 9, "layer_id": "s2cloudless_3857", "source": "EOX Sentinel-2 cloudless", "year": 2016, "licence": "CC BY 4.0" }], "licence_profile": "open" },
+  "provenance": { "git_sha": "a473c91", "site_dirty": false, "page_url": "/vlm/capture/zoom.html?rs=1", "seed": 7, "render_seed": 1, "episode": 1, "step": 0, "sim_t_s": 0,
+    "utc_ms": 1782043200000, "clock": [], "policy_id": null, "policy_sha": null, "injection": null, "twin_of": null, "sampler_weight": 1, "generator": "vlm/capture@0" }
+}

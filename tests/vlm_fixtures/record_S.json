@@ -1,0 +1,223 @@
+{
+ "key": "S_fix_00001_000123",
+ "family": "S",
+ "frames": [
+  "S_fix_00001_000123.f0.png",
+  "S_fix_00001_000123.f1.png",
+  "S_fix_00001_000123.f2.png"
+ ],
+ "narrator_frame": "S_fix_00001_000123.f2.png",
+ "frame_dt_steps": [
+  3,
+  3
+ ],
+ "frame_dt_s": [
+  0.2,
+  0.2
+ ],
+ "facts": {
+  "ship.speed_u_s": {
+   "v": 14.1,
+   "unit": "u/s",
+   "obs": "context"
+  },
+  "hazard.0.kind": {
+   "v": "rock",
+   "unit": null,
+   "obs": "visual"
+  },
+  "hazard.0.ttc_s": {
+   "v": null,
+   "unit": "s",
+   "obs": "context"
+  },
+  "clearance.ground_u": {
+   "v": null,
+   "unit": "u",
+   "obs": "context"
+  }
+ },
+ "safety": {
+  "verdict": "SAFE",
+  "severity": 0,
+  "escapable": null,
+  "reasons": [],
+  "cause": null,
+  "action_risk": {
+   "CONTINUE": 0,
+   "CLIMB": 0,
+   "DESCEND": 0,
+   "TURN_LEFT": 0,
+   "TURN_RIGHT": 0,
+   "SPEED_UP": 0,
+   "SLOW_DOWN": 0
+  },
+  "action_outcome": {
+   "CONTINUE": "clear",
+   "CLIMB": "clear",
+   "DESCEND": "clear",
+   "TURN_LEFT": "clear",
+   "TURN_RIGHT": "clear",
+   "SPEED_UP": "clear",
+   "SLOW_DOWN": "clear"
+  },
+  "p_ref": 0,
+  "p_best": 0,
+  "regret_ref": 0,
+  "safe_actions": [
+   "CONTINUE",
+   "CLIMB",
+   "DESCEND",
+   "TURN_LEFT",
+   "TURN_RIGHT",
+   "SPEED_UP",
+   "SLOW_DOWN"
+  ],
+  "best_action": "CONTINUE",
+  "ref_policy": "HANDS_OFF",
+  "horizon_s": 3,
+  "draws": 4,
+  "p_pilot": 0,
+  "ttc_s": null,
+  "cpa_m": null,
+  "macro": {
+   "pulse_steps": 8,
+   "then": "hands_off"
+  }
+ },
+ "safety_eye": {
+  "verdict": "SAFE",
+  "severity": 0,
+  "escapable": null,
+  "reasons": [],
+  "cause": null,
+  "action_risk": {
+   "CONTINUE": 0,
+   "CLIMB": 0,
+   "DESCEND": 0,
+   "TURN_LEFT": 0,
+   "TURN_RIGHT": 0,
+   "SPEED_UP": 0,
+   "SLOW_DOWN": 0
+  },
+  "action_outcome": {
+   "CONTINUE": "clear",
+   "CLIMB": "clear",
+   "DESCEND": "clear",
+   "TURN_LEFT": "clear",
+   "TURN_RIGHT": "clear",
+   "SPEED_UP": "clear",
+   "SLOW_DOWN": "clear"
+  },
+  "p_ref": 0,
+  "p_best": 0,
+  "regret_ref": 0,
+  "safe_actions": [
+   "CONTINUE",
+   "CLIMB",
+   "DESCEND",
+   "TURN_LEFT",
+   "TURN_RIGHT",
+   "SPEED_UP",
+   "SLOW_DOWN"
+  ],
+  "best_action": "CONTINUE",
+  "ref_policy": "HANDS_OFF",
+  "horizon_s": 3,
+  "draws": 4,
+  "p_pilot": 0,
+  "ttc_s": null,
+  "cpa_m": null,
+  "macro": {
+   "pulse_steps": 8,
+   "then": "hands_off"
+  }
+ },
+ "zoom": null,
+ "cameras": {
+  "S_fix_00001_000123.f2.png": {
+   "mode": "chase",
+   "fov_deg": 50,
+   "aspect": 1.7778,
+   "near": 0.1,
+   "far": 9000,
+   "matrixWorldInverse": [
+    1,
+    0,
+    0,
+    0,
+    0,
+    1,
+    0,
+    0,
+    0,
+    0,
+    1,
+    0,
+    0,
+    0,
+    0,
+    1
+   ],
+   "projectionMatrix": [
+    1,
+    0,
+    0,
+    0,
+    0,
+    1.8,
+    0,
+    0,
+    0,
+    0,
+    -1,
+    -1,
+    0,
+    0,
+    -0.2,
+    0
+   ]
+  }
+ },
+ "render": {
+  "viewport": [
+   896,
+   504
+  ],
+  "dpr": 1,
+  "renderScale": 1,
+  "toneMapping": "ACESFilmic",
+  "capture_mode": "clock",
+  "view": {
+   "eye": "chase",
+   "narrator": "chase"
+  },
+  "path": null,
+  "imagery": [],
+  "licence_profile": "open"
+ },
+ "provenance": {
+  "git_sha": "a473c91",
+  "site_dirty": false,
+  "page_url": "/index.html?hud=0&lowpass=0&seed=101&density=25&rs=1",
+  "seed": 101,
+  "render_seed": 1,
+  "episode": 1,
+  "step": 123,
+  "sim_t_s": 8.2,
+  "utc_ms": 1782043200000,
+  "clock": [
+   {
+    "date_ms": 1782043208000,
+    "perf_ms": 8000
+   }
+  ],
+  "policy_id": "belt_ppo",
+  "policy_sha": "0",
+  "injection": null,
+  "twin_of": null,
+  "sampler_weight": 3,
+  "t_since_gate_s": 6.7,
+  "generator": "vlm/capture@0"
+ }
+}
