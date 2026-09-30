@@ -189,6 +189,11 @@ class TestTrainExportEvaluate(unittest.TestCase):
         from vlm.train.pilot_eye import export_onnx
         out = tmpdir(self); export_onnx.main(['--untrained', '--no-pretrained', '--size', '224x128', '--out', str(out)])
         p = json.loads((out / 'parity.json').read_text()); self.assertEqual(p['size'], '224x128'); self.assertNotIn('max_abs_diff', p); self.assertLessEqual(p['max_abs_diff_random'], 1e-3)
+    def test_int8_encoder_is_kept_only_within_the_auroc_budget(self):
+        from vlm.train.pilot_eye import export_onnx
+        out = tmpdir(self); export_onnx.main(['--ckpt', str(self.rundir / 'model.pt'), '--data', str(self.root), '--out', str(out), '--int8'])
+        q = json.loads((out / 'parity.json').read_text())['int8']; self.assertEqual(set(q), {'fp32', 'int8', 'kept'}); self.assertIsNotNone(q['fp32'])
+        self.assertEqual(q['kept'], q['int8'] is not None and q['fp32'] - q['int8'] <= 0.01); self.assertEqual((out / 'encoder_int8.onnx').exists(), q['kept'])
     def test_evaluate_metrics_and_val_confusion(self):
         from vlm.train.pilot_eye import evaluate
         out = tmpdir(self); evaluate.main(['--ckpt', str(self.rundir / 'model.pt'), '--data', str(self.root), '--split', 'test', '--out', str(out)])
