@@ -41,3 +41,13 @@ export function assertGroupsDisjoint(recs, splits, byKey = null) {
   const g = new Map();
   recs.forEach((r, i) => { const k = groupOf(r, byKey), s = splits[i]; if (g.has(k) && g.get(k) !== s) throw new Error(`group ${k} is in ${g.get(k)} and ${s}`); g.set(k, s); });
 }
+// A drive writes a page's records, then each episode's .done (an A page's segments e+k in reverse, its first episode e last), so
+// a record is complete when its own episode, its A page's first episode and, for a twin, its original's episode (and the
+// original A page's first episode, page_episode - 50000) have a .done. A twin's own page start (e + 50000) never gets one:
+// only the twin episode e + k0 + 50000 does. Returns the first missing episode index, or null.
+export const episodeOf = (key) => +/_(\d{5})_\d{6}$/.exec(key)[1];
+export function missingDone(rec, done) {
+  const pv = rec.provenance, need = [episodeOf(rec.key)], pe = Number.isInteger(pv.page_episode) ? pv.page_episode : null;
+  if (pv.twin_of) { need.push(episodeOf(pv.twin_of)); if (rec.family === 'A' && pe !== null && pe >= 50000) need.push(pe - 50000); } else if (rec.family === 'A' && pe !== null) need.push(pe);
+  return need.find((e) => !done.has(e)) ?? null;
+}

@@ -12,7 +12,7 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { validateRecord, validateTextFacts, REASONS, ACTIONS, VERDICTS, ZOOM_TAGS } from './gen/schema.js';
 import { imageFacts } from './gen/imagefacts.js';
-import { splitOf, zRecheck, groupOf, assertGroupsDisjoint, queryOf } from './gen/build/split.js';
+import { splitOf, zRecheck, groupOf, assertGroupsDisjoint, queryOf, missingDone } from './gen/build/split.js';
 import { dhash, crossSplitDrops } from './gen/build/dedupe.js';
 import { classWeights } from './gen/build/balance.js';
 import { targetsOf, REG, REASON_SETS } from './gen/build/targets.js';
@@ -40,13 +40,6 @@ async function mapLimit(xs, k, fn) { let i = 0; await Promise.all(Array.from({ l
 fs.rmSync(out, { recursive: true, force: true }); fs.mkdirSync(path.join(out, 'cache'), { recursive: true });
 
 // ---- 1. load: validated records of finished pages only
-const epOf = (key) => +/_(\d{5})_\d{6}$/.exec(key)[1];
-function missingDone(r, done) {
-  const need = [epOf(r.key)], pv = r.provenance;
-  if (r.family === 'A' && Number.isInteger(pv.page_episode)) need.push(pv.page_episode);
-  if (pv.twin_of) { need.push(epOf(pv.twin_of)); if (r.family === 'A' && Number.isInteger(pv.page_episode) && pv.page_episode >= 50000) need.push(pv.page_episode - 50000); }
-  return need.find((e) => !done.has(e)) ?? null;
-}
 const recs = [], invalid = [], incomplete = [], plans = new Map();
 for (const run of runs) for (const f of fams) {
   const d = path.join(L, 'raw', run, f); if (!fs.existsSync(d)) continue;

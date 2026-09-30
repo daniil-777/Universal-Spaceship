@@ -135,3 +135,13 @@ test('the datasheet has the 7 sections and the amendment B records', () => {
   for (let i = 1; i <= 7; i++) assert.match(md, new RegExp(`^## ${i} `, 'm'));
   for (const s of [...EYE.hidden, 'closingRhoM 11', '1600-frame slot', '80,000', '12 u', 'T_VIS 0.1', 'axial < 0.5 m', 'scene.in_cloud']) assert.ok(md.includes(s), s);
 });
+test('a record of a page without .done is left out; an A twin needs its own .done and its original page\'s, not the twin page start', async () => {
+  const { missingDone } = await import('../vlm/gen/build/split.js'), A = (key, pv) => ({ key, family: 'A', provenance: { twin_of: null, ...pv } });
+  const done = new Set([30, 31, 35, 50035]);
+  assert.equal(missingDone(A('A_r_00035_000053', { page_episode: 30 }), done), null);
+  assert.equal(missingDone(A('A_r_50035_000053', { page_episode: 50030, twin_of: 'A_r_00035_000053' }), done), null, 'the twin page start 50030 never gets a .done');
+  assert.equal(missingDone(A('A_r_00033_000010', { page_episode: 30 }), done), 33);
+  assert.equal(missingDone(A('A_r_00031_000010', { page_episode: 29 }), done), 29, 'a segment of a page whose first episode is unfinished');
+  assert.equal(missingDone(A('A_r_50035_000053', { page_episode: 50030, twin_of: 'A_r_00035_000053' }), new Set([35, 50035])), 30);
+  assert.equal(missingDone({ key: 'S_r_50002_000100', family: 'S', provenance: { twin_of: 'S_r_00002_000100' } }, new Set([50002])), 2);
+});
