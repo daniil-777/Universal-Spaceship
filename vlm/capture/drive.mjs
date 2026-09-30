@@ -25,10 +25,13 @@ const freePct = () => +(/free percentage: (\d+)%/.exec(sh('memory_pressure', [])
 // utility helpers carry one), and the memory floor is 35 % free when N > 1.
 export const lanesOf = (env = process.env) => { const n = parseInt(env.APV_BROWSER_LANES || '1', 10); return Number.isInteger(n) && n >= 1 ? n : 1; };
 export const minFreePct = (lanes) => (lanes > 1 ? 35 : 25);
-export const mainBrowsers = (pgrepOut) => String(pgrepOut).split('\n').filter((l) => l.trim() && !l.includes('/.cache/hyperframes/') && !/\s--type=/.test(l));
+// v1 (two lanes started together): another lane's own pgrep carries these patterns on its command line, so two preflights in
+// step would each see the other's and never pass twice in a row; a pgrep line is never a browser, training job or Monte Carlo
+export const notPgrep = (out) => String(out || '').split('\n').filter((l) => l.trim() && !/^\s*\d+\s+pgrep\s/.test(l)).join('\n');
+export const mainBrowsers = (pgrepOut) => notPgrep(pgrepOut).split('\n').filter((l) => l.trim() && !l.includes('/.cache/hyperframes/') && !/\s--type=/.test(l));
 export function resourceVerdict({ free, pgrep, train, mc, lanes }) {
-  const mains = mainBrowsers(pgrep), chrome = mains.length >= lanes ? mains.join('\n') : '';
-  return { free, chrome, train, mc, lanes, ok: free >= minFreePct(lanes) && !chrome && !train && !mc };
+  const mains = mainBrowsers(pgrep), chrome = mains.length >= lanes ? mains.join('\n') : '', tr = notPgrep(train), m = notPgrep(mc);
+  return { free, chrome, train: tr, mc: m, lanes, ok: free >= minFreePct(lanes) && !chrome && !tr && !m };
 }
 function resources(lanes = lanesOf()) {
   const train = sh('pgrep', ['-fl', 'vlm/train/|train\\.py|lora_train|export_onnx|export_decoder']).trim(), mc = sh('pgrep', ['-fl', 'real_mc|landing_mc']).trim();

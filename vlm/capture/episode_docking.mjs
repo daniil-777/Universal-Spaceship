@@ -10,7 +10,7 @@
 // operation is logged in `ops` and a twin replays them with no kick armed (a failed-P6 twin flies the probe-owned clean sim).
 import sharp from 'sharp';
 import { openPage, boot, BOOT, loadProbe, call, frame, waitIdle, Discard } from './session.mjs';
-import { frameStats, saneFrame, straddles, keepProb, dockingW } from './probe/frame.js';
+import { frameStats, saneFrame, straddles, keepProb, freeSlots, dockingW } from './probe/frame.js';
 import { isDroppedDockingOutcome } from '../gen/labels/docking.js';
 export const CYCLE_S = 0.1, PRE = 63, MAX_SAMPLES = 12;
 const chk = (S) => S.page.evaluate(() => window.__apv.check());
@@ -70,7 +70,7 @@ async function sampleRun(S, D, ep, out, ops, c0, T) {
   for (;;) {
     let c = await chk(S); if (c.done) break;
     // one slot stays free for a pending injection; the scheduled times left before the clean run's end share the others
-    const slots = MAX_SAMPLES - out.length - (pending ? 1 : 0), tS = slots > 0 ? ep.schedule[k] : undefined;
+    const slots = freeSlots(MAX_SAMPLES, out.length, pending, ep.preKick ?? MAX_SAMPLES), tS = slots > 0 ? ep.schedule[k] : undefined;
     // a clip spans 1 + 38-42 cycles (4.1 s) after its start; one that would reach the kick yields to the injection clip
     if (pending && (tS === undefined || Math.max(tS, c.t) + 4.5 >= tInj)) {
       pending = false;

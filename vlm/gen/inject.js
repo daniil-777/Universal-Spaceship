@@ -4,7 +4,18 @@
 // swing leaves the cone: an immediate KOS fail); lateral_drift in two bands, 0.05-0.1 m/s at 20-40 m (recovered) and
 // 0.5 m/s at 20-25 m in CORRIDOR (KOS fail ~10 s later); inbound at 1.2-1.6 m/s (above speedLimit) at 300-400 m.
 // A trigger fires when its qty drops to the drawn value (and, with trigger.phase, only in that guidance phase).
-export const INJECT_RATE = Object.freeze({ S: 0.25, A: 0.10, L: 0.35, D: 0.35 });
+// V1-3 (APV v1): L and D inject most episodes and weight up the kinds whose CONTINUE fails (L hflare, lateral_25; D closing_plus_0.2,
+// radial_plus_0.08, lateral_drift:kos), so UNSAFE and CAUTION reach >= 15 % each (v0: L 0.35 / D 0.35 uniform gave D UNSAFE 1 %,
+// L 4 %). One weight per catalogue entry, in catalogue order; S/A keep their single entry and the v0 rates.
+export const INJECT_RATE = Object.freeze({ S: 0.25, A: 0.10, L: 0.8, D: 0.95 });
+export const INJECT_WEIGHTS = Object.freeze({ L: Object.freeze([1, 1, 3, 3, 1, 1, 1]), D: Object.freeze([3, 3, 0.25, 1.5, 1.5, 0.5, 2, 0.25]) });
+// the entry for one uniform draw u: cumulative weights when the family has them, else the v0 uniform index
+export function pickEntry(list, weights, u) {
+  if (!weights) return list[Math.floor(u * list.length)];
+  const sum = weights.reduce((a, b) => a + b, 0); let acc = 0;
+  for (let i = 0; i < list.length; i++) { acc += weights[i] / sum; if (u < acc) return list[i]; }
+  return list[list.length - 1];
+}
 export const INJECTIONS = Object.freeze({
   S: [{ kind: 'collision_course', at: 'runtime', qty: 'hit_s', lo: 1, hi: 4 }],
   A: [{ kind: 'collision_course', at: 'runtime', qty: 'hit_s', lo: 1, hi: 4 }],
@@ -24,7 +35,7 @@ export const P6_SEEDS = Object.freeze([614, 637, 660, 734, 912, 1910, 2590, 2642
   17681, 17762, 18011, 18035, 18164, 18532, 18761, 19393, 19615]);
 export function drawInjection(family, rng) {
   if (rng() >= INJECT_RATE[family]) return null;
-  const list = INJECTIONS[family], e = list[Math.floor(rng() * list.length)], params = { ...(e.params || {}) };
+  const list = INJECTIONS[family], e = pickEntry(list, INJECT_WEIGHTS[family], rng()), params = { ...(e.params || {}) };
   if (e.dv) params.dv = e.dv[0] + rng() * (e.dv[1] - e.dv[0]);
   if (e.band) params.band = e.band;
   if (e.kind === 'attitude_kick') { const a = [rng() - 0.5, rng() - 0.5, rng() - 0.5], l = Math.hypot(...a); params.axis = a.map((v) => v / l); }

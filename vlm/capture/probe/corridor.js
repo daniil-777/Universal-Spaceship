@@ -22,6 +22,7 @@ export function createSearchPilotV2({ every = SEARCH_V2.every, H = SEARCH_V2.H, 
 }
 import { corridorFacts } from '../../gen/labels/corridor_facts.js';
 import { projectSphere } from '../../gen/labels/camera.js';
+import { corridorState } from '../../gen/labels/rawstate.js';
 // real host time for the throughput numbers (§7.6): page.clock replaces performance, but Playwright 1.63 keeps the real object
 // in __pwClock.builtins (pinned internals; freeze mode has no fake clock); only durations are used, never stored in facts
 const rt = () => (globalThis.__pwClock && globalThis.__pwClock.builtins ? globalThis.__pwClock.builtins.performance.now() : performance.now());
@@ -68,8 +69,10 @@ export function capture(st) {
   const rs = ap.renderScale ?? 1, pr = ap.debug().pixelRatio;
   if (rs !== 1 || pr !== 1) return { exact: false, why: `renderScale ${rs} pixelRatio ${pr} at capture` };
   if (Math.hypot(d.x - p[0], d.y - p[1], d.z - p[2]) >= 1e-3) return { exact: false };
-  const t0 = rt(), png = ap.capture(), t1 = rt(), enc = st.p.measure ? (document.getElementById('view').toDataURL('image/png'), rt() - t1) : null;
-  return { exact: true, png, cam: camOf(ap.camera), clock: { date_ms: Date.now(), perf_ms: performance.now() }, step: st.env.steps, ms: { capture: t1 - t0, encode: enc } };
+  const t0 = rt(), png = ap.capture(), t1 = rt(), enc = st.p.measure ? (document.getElementById('view').toDataURL('image/png'), rt() - t1) : null, cam = camOf(ap.camera);
+  // V1-2: the frame's raw world state (ship pose, hazards in frame or nearest), read after the clock reads so they stay as in v0
+  const clock = { date_ms: Date.now(), perf_ms: performance.now() };
+  return { exact: true, png, cam, clock, step: st.env.steps, ms: { capture: t1 - t0, encode: enc }, state: corridorState(st.env, cam, { fog: sceneFog(ap) }) };
 }
 export const trigger = (st, { cNear }) => cpaTrigger(st.env) || clearance(st.env).value < cNear;
 function spaceOf(ap, cam) {
