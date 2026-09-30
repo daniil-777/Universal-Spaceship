@@ -22,3 +22,8 @@ test('the preflight passes while fewer than N main browsers run and memory is ab
   assert.equal(v({ pgrep: PS, lanes: 2, free: 34 }).ok, false); assert.equal(v({ free: 26 }).ok, true); assert.equal(v({ free: 24 }).ok, false);
   assert.equal(v({ train: '999 python -m vlm.train.pilot_eye.train', lanes: 2 }).ok, false); assert.equal(v({ mc: '998 node real_mc.mjs' }).ok, false);
 });
+test('zplan --blocks-from: a second run reuses the first run\'s level-3 blocks, so one place keeps one split across runs', async () => {
+  const { blocksFor } = await import('../vlm/capture/zplan.mjs'), w = new Map([['3/0/0', 1], ['3/1/0', 1], ['3/2/0', 1]]);
+  assert.deepEqual([...blocksFor({ seed: 29, weights: w, from: { blocks: { '3/0/0': 'val', '3/1/0': 'train' } } })], [['3/0/0', 'val'], ['3/1/0', 'train']]);
+  const { assignBlocks } = await import('../vlm/gen/sampler_z.js'); assert.deepEqual([...blocksFor({ seed: 29, weights: w })], [...assignBlocks(29, w)]);
+});
