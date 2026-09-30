@@ -18,7 +18,8 @@ test('V1-3: the kind draw follows INJECT_WEIGHTS (UNSAFE-producing kinds weighte
   assert.ok(INJECT_WEIGHTS.L[INJECTIONS.L.findIndex((e) => e.kind === 'hflare')] >= 3 && INJECT_WEIGHTS.L[INJECTIONS.L.findIndex((e) => e.kind === 'lateral_25')] >= 3);
   const wD = (k, band) => INJECT_WEIGHTS.D[INJECTIONS.D.findIndex((e) => e.kind === k && (!band || e.band === band))];
   assert.ok(wD('inbound') <= 0.75 && wD('abort') <= 1, 'inbound (~24 records, v0) and abort (~11 CAUTION records, v1-smoke) runs dilute UNSAFE');
-  assert.ok(wD('closing_plus_0.2') >= 4.5 && wD('radial_plus_0.08') >= 4.5, 'contact kicks: ~1 UNSAFE + 1 SAFE twin each, the reliable UNSAFE source (v1-smoke 12 of 14 landed)');
+  assert.ok(wD('closing_plus_0.2') >= 4 && wD('radial_plus_0.08') >= 4.5, 'contact kicks: ~1 UNSAFE + 1 SAFE twin each, the reliable UNSAFE source (v1-smoke 12 of 14 landed)');
+  assert.ok(wD('abort') >= 1, 'v1-smoke with abort 0.5 gave D CAUTION 12 %: an abort run is ~8 CAUTION records, the main CAUTION source');
   assert.ok(wD('lateral_drift', 'kos') <= 0.5, 'v1-smoke: 2 of 6 KOS drifts gave an UNSAFE record; 3 never landed, 1 docked');
   // S/A: one entry, the same draw sequence as v0 (rate draw, then the index draw)
   const a = mulberry32(5), b = mulberry32(5); for (let i = 0; i < 200; i++) { const d = drawInjection('S', a); const hit = b() < INJECT_RATE.S; if (hit) b(); assert.equal(!!d, hit); if (d) b(); }

@@ -10,8 +10,9 @@
 // a contact kick (closing, radial) yields ~1 UNSAFE record plus its SAFE twin and landed in 12 of 14 runs; an abort run gives
 // ~10 CAUTION records, a failed-P6 run ~15 (CAUTION + twins), an inbound run ~24 (v0); a KOS drift gave UNSAFE in 2 of 6 runs.
 // So contact kicks dominate and the others are kept thin for variety; a dud kick keeps only PRE_KICK clean samples (frame.js).
+// With abort at 0.5 the smoke gave D UNSAFE 17 % / CAUTION 12 %, so abort (~8 CAUTION records a run) is 1.
 export const INJECT_RATE = Object.freeze({ S: 0.25, A: 0.10, L: 0.8, D: 0.95 });
-export const INJECT_WEIGHTS = Object.freeze({ L: Object.freeze([1, 1, 3, 3, 1, 1, 1]), D: Object.freeze([4.5, 4.5, 0.1, 0.3, 0.3, 0.3, 0.5, 0.1]) });
+export const INJECT_WEIGHTS = Object.freeze({ L: Object.freeze([1, 1, 3, 3, 1, 1, 1]), D: Object.freeze([4, 4.5, 0.1, 0.2, 0.3, 0.3, 1, 0.1]) });
 // the entry for one uniform draw u: cumulative weights when the family has them, else the v0 uniform index
 export function pickEntry(list, weights, u) {
   if (!weights) return list[Math.floor(u * list.length)];
