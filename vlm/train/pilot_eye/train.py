@@ -24,14 +24,19 @@ def lr_factor(step, steps, warmup, sched):
     w = min(1.0, (step + 1) / max(1, warmup))
     return w * (0.1 + 0.9 * 0.5 * (1 + math.cos(math.pi * min(1.0, step / max(1, steps)))))
 
-def mean_loss(m, dl, dev):
+def train_mode(m, freeze=False):
+    """m.train(), but a frozen backbone stays in eval mode (its BatchNorm keeps the ImageNet statistics)."""
+    m.train()
+    if freeze: m.enc.backbone.eval()
+
+def mean_loss(m, dl, dev, freeze=False):
     """The mean per-sample loss over a loader (eval mode, no augmentation); None when the loader is empty."""
     to = lambda d: {k: v.to(dev) for k, v in d.items()}
     m.eval(); tot, n = 0.0, 0
     with torch.no_grad():
         for f, dt, T, M, _ in dl:
             b = f.shape[0]; tot += loss_fn(m(f.to(dev), dt.to(dev)), to(T), to(M)).item() * b; n += b
-    m.train(); return tot / n if n else None
+    train_mode(m, freeze); return tot / n if n else None
 
 def parse(argv):
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
@@ -42,6 +47,7 @@ def parse(argv):
     ap.add_argument('--eval-every', type=int, default=250); ap.add_argument('--val-limit', type=int, default=2048); ap.add_argument('--limit', type=int, default=None)
     ap.add_argument('--sched', default='cosine', choices=['cosine', 'const']); ap.add_argument('--seed', type=int, default=0)
     ap.add_argument('--no-pretrained', action='store_true', help='random backbone init (tests)')
+    ap.add_argument('--freeze-backbone', action='store_true', help='train only the 1x1 reduction and the heads (a CPU run: depthwise-conv backward on the CPU is ~10x the forward)')
     return ap.parse_args(argv)
 
 def main(argv=None):
@@ -53,6 +59,8 @@ def main(argv=None):
     dl = DataLoader(ds, batch_size=bs, sampler=WeightedRandomSampler([r['weight'] for r in ds.rows], num_samples=len(ds), replacement=True), drop_last=True, **kw)
     val = PilotEyeData(a.data, 'val', limit=a.val_limit, H=H, W=W); vdl = DataLoader(val, batch_size=64) if len(val) else None
     m = PilotEye(pretrained=not a.no_pretrained).to(dev)
+    if a.freeze_backbone:
+        for p in m.enc.backbone.parameters(): p.requires_grad_(False)
     opt = torch.optim.AdamW([{'params': m.enc.backbone.parameters(), 'lr': 3e-4}, {'params': list(m.enc.reduce.parameters()) + list(m.heads.parameters()), 'lr': 1e-3}], weight_decay=1e-4)
     base = [g['lr'] for g in opt.param_groups]
     steps = a.steps if a.steps is not None else (200 if a.smoke else 6000); warmup = min(200, max(1, steps // 20))
@@ -60,15 +68,15 @@ def main(argv=None):
     to = lambda d: {k: v.to(dev) for k, v in d.items()}
     log = open(f'{a.out}/train_log.jsonl', 'w')
     def checkpoint(step):
-        vl = mean_loss(m, vdl, dev) if vdl is not None else None
+        vl = mean_loss(m, vdl, dev, a.freeze_backbone) if vdl is not None else None
         crit = vl if vl is not None else (sum(losses[-50:]) / len(losses[-50:]) if losses else float('inf'))
         better = best['crit'] is None or crit < best['crit']
         if better:
             best.update(crit=crit, step=step)
-            torch.save({'state': m.state_dict(), 'size': a.size, 'fold': a.fold, 'step': step, 'best_step': step, 'criterion': crit, 'criterion_kind': 'val_loss' if vl is not None else 'train_loss_avg50',
+            torch.save({'state': m.state_dict(), 'size': a.size, 'fold': a.fold, 'step': step, 'best_step': step, 'criterion': crit, 'criterion_kind': 'val_loss' if vl is not None else 'train_loss_avg50', 'freeze_backbone': a.freeze_backbone,
                         'backbone': BACKBONE, 'data': os.path.basename(str(a.data).rstrip('/'))}, f'{a.out}/model.pt')
         log.write(json.dumps({'step': step, ('val_loss' if vl is not None else 'train_loss_avg50'): crit, 'best': better, 't': round(time.time() - t0, 1)}) + '\n'); log.flush()
-    m.train()
+    train_mode(m, a.freeze_backbone)
     while stopped is None:
         for f, dt, T, M, _ in dl:
             k = lr_factor(step, steps, warmup, a.sched)
