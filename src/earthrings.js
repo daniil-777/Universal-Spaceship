@@ -45,9 +45,11 @@ const VERT = /* glsl */`uniform sampler2D tHeight; uniform vec2 uHOff; uniform f
 // scaled by (1 - cF) / (1 - V cF), cF = F's own cover (its fade-in uInnerVis times its edge fade), V = uFar times
 // day, so the pair composites exactly as V (cF F + (1 - cF) cC C) + (1 - V (cF + (1 - cF) cC)) G. Below 2500 km
 // (uFar = 1) the factor is off, even at dusk: close up, relief parallax shows C's smoother ridges where F has no
-// fragment, and a C faded out there would open holes. Known limitation: cF only knows the next finer ring, so while
-// three rings fade in together (about 1 s after opening or jumping at far range) the error is reduced, not zero: at
-// most 0.06 (C - G) with all three at the same fade-in, against up to 0.24 (C - G) before.
+// fragment, and a C faded out there would open holes. It ramps in over uFar 1 -> 0.95 (2500 -> about 2700 km), so
+// crossing 2500 km never pops: at dusk (day < 1) the full factor stays below 1 even as uFar -> 1, and switching it on
+// at once jumped the coarse ring's alpha in the edge bands. Known limitation: cF only knows the next finer ring, so
+// while three rings fade in together (about 1 s after opening or jumping at far range) the error is reduced, not
+// zero: at most 0.06 (C - G) with all three at the same fade-in, against up to 0.24 (C - G) before.
 const FRAG = /* glsl */`uniform sampler2D tColor, tMask, tInner; uniform vec2 uCOff, uVRange, uInnerMin, uInnerCOff; uniform vec3 uSun, uHazeCol;
   uniform float uVis, uHazeK, uHazeL, uInnerOn, uInnerDone, uInnerScale, uInnerWrap, uAirTop, uInnerVis, uFar; uniform vec3 uSeaCol;
   uniform vec3 uTint; uniform float uTintOn;
@@ -67,7 +69,7 @@ const FRAG = /* glsl */`uniform sampler2D tColor, tMask, tInner; uniform vec2 uC
     float dist = length(cameraPosition - vW), air = dist * min(1.0, uAirTop / max(cameraPosition.y - vW.y, uAirTop));
     col = mix(col, uHazeCol * (0.2 + 0.8 * day), uHazeK * (1.0 - exp(-air / uHazeL)));
     float c = under ? uInnerVis * edge(iu) : 0.0, V = uFar * day;
-    float stack = uFar < 1.0 && V * c < 0.9999 ? (1.0 - c) / (1.0 - V * c) : 1.0;
+    float stack = uFar < 1.0 ? mix(1.0, (1.0 - c) / max(1.0 - V * c, 1e-4), clamp((1.0 - uFar) / 0.05, 0.0, 1.0)) : 1.0;
     gl_FragDepth = !under ? gl_FragCoord.z : (uInnerDone > 0.5 ? mix(gl_FragCoord.z, 1.0, 0.2) : 0.99999);
     col = mix(col, uTint, uTintOn);
     gl_FragColor = vec4(col, uVis * edge(vUv) * day * stack); }`;          // the night side fades to the globe's city lights

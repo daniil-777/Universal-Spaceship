@@ -17,7 +17,8 @@ register('data:text/javascript,' + encodeURIComponent(`export async function res
 // V (1 − V) cF cC (C − G): zero with opaque rings (V = 1), 19 % of the ring/globe difference at 3000 km (V = 0.74).
 // Fix: where uFar < 1, under F, C's alpha is scaled by (1 − cF) / (1 − V cF), cF = F's own cover (its fade-in × its
 // edge fade), so the pair composites as V (cF F + (1 − cF) cC C) + (1 − V (cF + (1 − cF) cC)) G. Below 2500 km the
-// factor is off, even at dusk (relief parallax would open holes there; follow-up round).
+// factor is off, even at dusk (relief parallax would open holes there; follow-up round), and it ramps in over
+// uFar 1 → 1 − W (fix round 2): at dusk the full factor is not 1 as uFar → 1, so switching it on at once popped.
 const SRC = fs.readFileSync(fileURLToPath(new URL('../src/earthrings.js', import.meta.url)), 'utf8');
 const FRAG = (SRC.match(/const FRAG = \/\* glsl \*\/`([\s\S]*?)`;/) || [])[1];
 const grab = (re, what) => { const m = FRAG && FRAG.match(re); assert.ok(m, `FRAG: ${what} not found`); return m.slice(1); };
@@ -30,8 +31,12 @@ function shaderAlpha() {
   const [stackExpr] = grab(/float stack = ([^;]+);/, 'the stack factor');
   const [alphaExpr] = grab(/gl_FragColor = vec4\(col, (.+?)\); \}/, 'the output alpha');
   return new Function('uVis', 'uFar', 'uInnerVis', 'day', 'under', 'eOwn', 'eInner',
-    `const iu = 'iu', vUv = 'vUv', edge = (u) => (u === iu ? eInner : eOwn); const c = ${cExpr}, V = ${vExpr}; const stack = ${stackExpr}; return ${alphaExpr};`);
+    `const iu = 'iu', vUv = 'vUv', edge = (u) => (u === iu ? eInner : eOwn), max = Math.max, clamp = (x, lo, hi) => Math.min(Math.max(x, lo), hi);
+     const mix = (x, y, a) => x * (1 - a) + y * a;   // GLSL's definition
+     const c = ${cExpr}, V = ${vExpr}; const stack = ${stackExpr}; return ${alphaExpr};`);
 }
+// the ramp width W (in uFar) read from the shader: full correction once uFar <= 1 − W
+const ramp = () => +(grab(/clamp\(\(1\.0 - uFar\) \/ ([\d.]+), 0\.0, 1\.0\)/, 'the far-fade ramp')[0]);
 const oldAlpha = (uVis, uFar, uInnerVis, day, under, eOwn) => uVis * eOwn * day;   // HEAD 8d2f54f: uVis * e.x * e.y * day
 
 const over = (dst, src, a) => dst.map((d, i) => d + (src[i] - d) * a);
@@ -58,17 +63,31 @@ test('FRAG: the coarse ring\'s alpha carries the stack factor, from the finer ri
   const [cExpr, vExpr] = grab(/float c = ([^,;]+), V = ([^;]+);/, 'c and V');
   assert.match(cExpr, /^under \? uInnerVis \* edge\(iu\) : 0\.0$/, 'c is the finer ring\'s cover, and only where the ring is under it');
   assert.equal(vExpr, 'uFar * day', 'V is the part of every ring\'s alpha they share: the far fade and the day side');
-  assert.match(grab(/float stack = ([^;]+);/, 'stack')[0], /^uFar < 1\.0 && /, 'the factor acts only in the far fade (uFar < 1); below 2500 km it is off, even at dusk');
+  assert.match(grab(/float stack = ([^;]+);/, 'stack')[0], /^uFar < 1\.0 \? mix\(1\.0, .*\) : 1\.0$/,
+    'the factor acts only in the far fade (uFar < 1), ramped in from the identity; below 2500 km it is off, even at dusk');
+  // 3000 km is uFar = 1 − smoothstep(1/3) = 0.741: it must sit in the full-correction zone (the seam gate's view)
+  const W = ramp();
+  assert.ok(W > 0 && W <= 0.25, `ramp width ${W} keeps 3000 km (1 − uFar = 0.259) fully corrected`);
   const [alphaExpr] = grab(/gl_FragColor = vec4\(col, (.+?)\); \}/, 'alpha');
   assert.match(alphaExpr, /\bstack\b/, 'the output alpha is scaled by the stack factor');
 });
 
-test('stack blend: over 20 000 random pixels (far fade, day, both rings\' fade-ins and edge fades, colours) the pair composites as ONE layer over the globe', () => {
-  const alpha = shaderAlpha();
+test('stack blend: over 20 000 random pixels past the ramp (far fade, day, both rings\' fade-ins and edge fades, colours) the pair composites as ONE layer over the globe', () => {
+  const alpha = shaderAlpha(), W = ramp();
   let worst = 0;
-  for (let k = 0; k < 20000; k++) { const s = sample(); worst = Math.max(worst, maxErr(composite(s, alpha), oneLayer(s))); }
-  // the V·c ≥ 0.9999 branch (a near-opaque stack, factor 1) leaves at most V (1 − V) ≤ 1e-4 of the colour difference
-  assert.ok(worst < 1.1e-4, `worst colour error ${worst}`);
+  for (let k = 0; k < 20000; k++) { const s = sample({ V0: (1 - W) * rnd() }); worst = Math.max(worst, maxErr(composite(s, alpha), oneLayer(s))); }
+  assert.ok(worst < 1e-12, `worst colour error ${worst}`);
+});
+
+test('stack blend: crossing 2500 km is continuous: the coarse ring\'s alpha at uFar = 1 and 1 − ε agree, at dusk too', () => {
+  const alpha = shaderAlpha(), coarse = (uFar, day, c) => alpha(uFar, uFar, 1, day, true, 1, c);   // fully-in rings: uVis = uFar, cF = c
+  for (const day of [0.2, 0.5, 0.8]) for (const c of [0.25, 0.5, 0.9]) {
+    const jump = Math.abs(coarse(1, day, c) - coarse(1 - 1e-4, day, c));
+    assert.ok(jump < 0.01, `day ${day}, c ${c}: alpha jumps by ${jump.toFixed(4)} across uFar = 1`);
+    let steepest = 0;   // and nowhere else in the ramp: no step between neighbouring uFar values larger than a slope allows
+    for (let u = 0.9; u < 1; u += 1e-4) steepest = Math.max(steepest, Math.abs(coarse(Math.min(1, u + 1e-4), day, c) - coarse(u, day, c)));
+    assert.ok(steepest < 0.01, `day ${day}, c ${c}: steepest step ${steepest.toFixed(4)} per 1e-4 of uFar`);
+  }
 });
 
 test('stack blend: the old shader (HEAD 8d2f54f) fails the same check by V (1 − V) cF cC (C − G) (the seam), so the check can tell', () => {
@@ -89,7 +108,7 @@ test('stack blend: below 2500 km (uFar = 1) every ring\'s alpha is exactly the o
 
 test('stack blend: where the finer ring fully covers (its cover c = 1) and the stack is see-through (V < 1), the coarse ring adds nothing', () => {
   const alpha = shaderAlpha();
-  for (const V0 of [0.1, 0.5, 0.741, 0.99]) assert.equal(alpha(0.8 * V0, V0, 1, 1, true, 1, 1), 0, `V0 = ${V0}`);
+  for (const V0 of [0.1, 0.5, 0.741, 1 - 2 * ramp()]) assert.ok(Math.abs(alpha(0.8 * V0, V0, 1, 1, true, 1, 1)) < 1e-12, `V0 = ${V0}`);
   assert.ok(alpha(0.741, 0.741, 1, 1, false, 1, 1) > 0.7, 'not under a finer ring: the coarse ring is drawn as before');
 });
 
