@@ -97,16 +97,21 @@ test('landingFacts: {v, unit, obs} with finite numbers on every sampled frame; a
   }
   assert.equal(sim.rep.result, 'landed'); assert.ok(airborne > 10 && papi > 0, `airborne ${airborne} papi ${papi}`);
 });
-test('PAPI and windsock facts need their pixel box in frame and >= 1 px at 160x96 (the box, not the centre point)', () => {
+test('PAPI and windsock facts need their pixel box in frame with its longest side >= 2 px at 896x504 (the box, not the centre point)', () => {
   const sim = createLandingSim(drawConditions(3, { final: true })), W = 896, H = 504, DEG = Math.PI / 180;
   const pc = PAPI_BOX[0].map((v, i) => (v + PAPI_BOX[1][i]) / 2), sc = SOCK_BOX[0].map((v, i) => (v + SOCK_BOX[1][i]) / 2);
-  const F = (c) => landingFacts(sim, c);
+  const F = (c, o) => landingFacts(sim, c, o);
   assert.equal(typeof F(cam([pc[0] - 150, 8, pc[2]], pc))['papi_whites_cam'].v, 'number', '150 m out, looking at the bar');
-  assert.equal(F(cam([pc[0] - 3000, 160, pc[2]], pc))['papi_whites_cam'].v, null, '3 km out the bar is < 1 px tall at 160x96');
+  assert.equal(typeof F(cam([pc[0] - 3000, 160, pc[2]], pc))['papi_whites_cam'].v, 'number', '3 km out the 29 m bar is about 5 px long (though < 1 px tall)');
+  assert.equal(F(cam([pc[0] - 12000, 630, pc[2]], pc))['papi_whites_cam'].v, null, '12 km out the bar is < 2 px long');
   assert.equal(F(cam([pc[0] - 150, 8, pc[2]], [pc[0] - 300, 8, pc[2]]))['papi_whites_cam'].v, null, 'looking away');
   const e = [pc[0] - 120, 2, pc[2]], side = cam(e, [e[0] + 100 * Math.cos(42 * DEG), 2, e[2] - 100 * Math.sin(42 * DEG)]);
   assert.ok(project(side, pc, W, H).x > W, 'the PAPI centre is right of the frame');
-  assert.equal(typeof F(side)['papi_whites_cam'].v, 'number', 'the near end of the bar is in frame and >= 1 px');
+  assert.equal(typeof F(side)['papi_whites_cam'].v, 'number', 'the near end of the bar is in frame and >= 2 px');
   assert.equal(F(cam([sc[0] - 120, 12, sc[2]], sc))['windsock.from_deg'].v, sim.rep.cond.wind.dir, '120 m from the sock');
-  assert.equal(F(cam([sc[0] - 2000, 60, sc[2]], sc))['windsock.from_deg'].v, null, '2 km out the sock is < 1 px at 160x96');
+  assert.equal(typeof F(cam([sc[0] - 1500, 60, sc[2]], sc))['windsock.from_deg'].v, 'number', '1.5 km out the 9 m sock box is about 3 px');
+  assert.equal(F(cam([sc[0] - 5000, 60, sc[2]], sc))['windsock.from_deg'].v, null, '5 km out it is < 2 px');
+  const far = cam([pc[0] - 6000, 320, pc[2]], pc);
+  assert.equal(typeof F(far)['papi_whites_cam'].v, 'number', '6 km out the bar is about 2.6 px at 896x504');
+  assert.equal(F(far, { W: 448, H: 252 })['papi_whites_cam'].v, F(far)['papi_whites_cam'].v, 'the 2 px rule is measured at the 896x504 capture resolution whatever W, H');
 });

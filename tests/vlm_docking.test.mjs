@@ -178,9 +178,11 @@ export function sensitivities() {
   const r = EYE.closingRhoM; s.D_CLOSING = dClosing(r);
   s.ATTITUDE_2DEG = dpx(project(dcam(r), STATION_PORT, W, H), project(dcam(r, 2), STATION_PORT, W, H));
   s.ATTITUDE_RATE = dpx(project(dcam(r), STATION_PORT, W, H), project(dcam(r, 0.2), STATION_PORT, W, H));
-  s.HOLD_BOX_H2 = dpx(project(dcam(20), STATION_PORT, W, H), project(dcam(20, 0, 0.5), STATION_PORT, W, H));
+  // hold boxes: the lateral components (kept) per hold; the axial component (the larger of H2 0.5 m and H1 3 m, as a size change)
   const rH1 = -H1_POINT[0] - SHIP_PORT[0] + STATION_PORT[0];
+  s.HOLD_BOX_H2 = dpx(project(dcam(20), STATION_PORT, W, H), project(dcam(20, 0, GUID.boxH2), STATION_PORT, W, H));
   s.HOLD_BOX_H1 = dpx(project(dcam(rH1), STATION_PORT, W, H), project(dcam(rH1, 0, GUID.boxH1), STATION_PORT, W, H));
+  s.HOLD_BOX_AXIAL = Math.max(Math.abs(size5(dcam(20)) - size5(dcam(20 - GUID.boxH2))), Math.abs(size5(dcam(rH1)) - size5(dcam(rH1 - GUID.boxH1))));
   // the KOS now-rule leaves the cone (10 deg, 1 m floor) at the far end of the corridor inside the KOS (r = 200 m); its radial
   // KOS-sphere part (0.03 px) never reaches a kept sample: the judge ends the run in the step of the violation (T4-b test)
   const aK = 200 - SHIP_PORT[0] + STATION_PORT[0];
@@ -194,5 +196,16 @@ test('safety_eye: kept criteria >= 1 px at their scope boundary, hidden ones < 1
   assert.deepEqual(hiddenByPx, expectHidden);
   assert.ok(EYE.hidden.includes('GATE_MODES'), 'autoland mode flags (LOC/GS captured) are never visible');
   assert.ok(dClosing(EYE.closingRhoM + 0.5) < 1, `closingRhoM is the largest passing 0.5 m step (${dClosing(EYE.closingRhoM + 0.5).toFixed(3)} px at +0.5 m)`);
-  for (const k of ['SEVERE_TURBULENCE', 'KOS_CONE', 'HOLD_BOX_H1']) assert.ok(k in s, k);
+  for (const k of ['SEVERE_TURBULENCE', 'KOS_CONE', 'HOLD_BOX_H1', 'HOLD_BOX_AXIAL']) assert.ok(k in s, k);
+});
+test('hold box: dockingNow splits the lateral and the axial components; safety_eye drops an axial-only exit, keeps a lateral one', () => {
+  const br = { CONTINUE: 'capture', BREAKOUT: 'breakout', failReason: null, failKind: null };
+  const ax = createRealSim({ seed: 5, start: 'final' }); assert.equal(ax.guid.st.phase, 'H2'); ax.x[0] -= 1.0;
+  const na = dockingNow(ax); assert.equal(na.outsideHoldBox, true); assert.equal(na.outsideHoldBoxLateral, false);
+  const la = dockingLabel(ax, br); assert.ok(la.safety.reasons.includes('LATERAL_MISALIGNMENT')); assert.equal(la.safety.best_action, 'HOLD_POSITION');
+  assert.ok(!la.safety_eye.reasons.includes('LATERAL_MISALIGNMENT'), 'the axial offset is sub-pixel');
+  const lat = createRealSim({ seed: 5, start: 'final' }); lat.x[1] += 1.0;
+  const nl = dockingNow(lat); assert.equal(nl.outsideHoldBox, true); assert.equal(nl.outsideHoldBoxLateral, true);
+  const ll = dockingLabel(lat, br); assert.ok(ll.safety_eye.reasons.includes('LATERAL_MISALIGNMENT')); assert.equal(ll.safety_eye.best_action, 'HOLD_POSITION');
+  assert.equal(dockingNow(createRealSim({ seed: 5, start: 'final' })).outsideHoldBox, false);
 });

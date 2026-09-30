@@ -58,7 +58,8 @@ export function corridorFacts(env, cam, { W = 896, H = 504, sky = null, route = 
   put('weather.preset', sky, null, 'visual'); put('weather.knobs', [env.weatherSeverity, env.weatherWind, env.weatherCover, env.weatherTurb].map(r3), null, 'context');
   put('world', env.world, null, 'visual'); put('route', route, null, 'visual'); put('in_tunnel', !!(env.tunnelZone && env.tunnelZone(s.p[0])), null, 'visual');
   put('warning', boardWarning(env), null, 'context');
-  if (space) { put('sun.lit', r3(space.sunLit), null, 'visual'); put('orbit.body', space.body, null, 'visual'); put('orbit.lat_deg', r3(space.lat), 'deg', 'context'); put('orbit.lon_deg', r3(space.lon), 'deg', 'context');
-    put('earth_in_frame', !!space.earthInFrame, null, 'visual'); put('moon_in_frame', !!space.moonInFrame, null, 'visual'); }
+  // a value the page does not provide stays null (unknown), never false or undefined
+  if (space) { put('sun.lit', r3(space.sunLit), null, 'visual'); put('orbit.body', space.body ?? null, null, 'visual'); put('orbit.lat_deg', r3(space.lat), 'deg', 'context'); put('orbit.lon_deg', r3(space.lon), 'deg', 'context');
+    put('earth_in_frame', space.earthInFrame ?? null, null, 'visual'); put('moon_in_frame', space.moonInFrame ?? null, null, 'visual'); }
   return F;
 }

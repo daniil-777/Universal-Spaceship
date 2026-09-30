@@ -27,11 +27,14 @@ const distBin = (rho) => (rho < 2 ? '<2 m' : rho < 20 ? '2-20 m' : rho < 100 ? '
 export function dockingNow(sim) {
   const x = sim.x, q = sim.q, ph = sim.guid.st.phase, r = Math.hypot(x[0], x[1], x[2]), p = portRel(x, q), axial = -p[0], rho = Math.hypot(p[0], p[1], p[2]);
   const inCorridor = CORRIDOR_PHASES.includes(ph) && inCone(p), e = attError(q, [0, 0, 0, 1]), we = omegaRel(q, sim.w), inward = -(x[0] * x[3] + x[1] * x[4] + x[2] * x[5]) / r;
-  const box = ph === PH.H1 ? Math.max(...[0, 1, 2].map((i) => Math.abs(x[i] - H1_POINT[i]))) > GUID.boxH1 : ph === PH.H2 ? Math.max(Math.abs(axial - H2_RHO), Math.abs(p[1]), Math.abs(p[2])) > GUID.boxH2 : false;
+  // hold boxes as guidance.js keeps them, split into the axial component (along the approach: LVLH x at H1, the port axis at
+  // H2) and the lateral ones; safety_eye drops an axial-only exit (sub-pixel, EYE.hidden HOLD_BOX_AXIAL)
+  const [ax, lat] = ph === PH.H1 ? [Math.abs(x[0] - H1_POINT[0]) > GUID.boxH1, Math.max(Math.abs(x[1] - H1_POINT[1]), Math.abs(x[2] - H1_POINT[2])) > GUID.boxH1]
+    : ph === PH.H2 ? [Math.abs(axial - H2_RHO) > GUID.boxH2, Math.max(Math.abs(p[1]), Math.abs(p[2])) > GUID.boxH2] : [false, false];
   return { phase: ph, rho, axial, closing: inCorridor ? x[3] : inward, limit: inCorridor ? axialLimit(Math.max(axial, 0)) : speedLimit(r), inCorridor,
     kosViolation: r < KOS_R && !inCorridor && ph !== PH.BREAKOUT && ph !== PH.DEPART, attDeg: Math.hypot(...e) / DEG, rateDps: Math.hypot(...we) / DEG,
     fuelFrac: (sim.mass - (MASS0 - PROP0)) / PROP0, failedJets: sim.R.failed.length, breakoutAvailable: breakoutAvailable(x, ph),
-    holdPhase: ph === PH.H1 || ph === PH.H2, outsideHoldBox: box, ttc_s: inCorridor && x[3] > 1e-4 ? axial / x[3] : null };
+    holdPhase: ph === PH.H1 || ph === PH.H2, outsideHoldBox: ax || lat, outsideHoldBoxLateral: lat, ttc_s: inCorridor && x[3] > 1e-4 ? axial / x[3] : null };
 }
 
 export function dockingFacts(sim, { space = null } = {}) {

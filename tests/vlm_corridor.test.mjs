@@ -119,6 +119,15 @@ test('clock is screen-relative and bearing_clock is ship-body relative: a 90-deg
   assert.equal(behind['hazard.0.clock'].v, null);
   assert.equal(behind['hazard.0.in_frame'].v, false);
 });
+test('space visual facts: a value the page does not provide stays null (never false); a known one is kept', () => {
+  const e = emptySpace(), cam = chaseCam(e);
+  const u = corridorFacts(e, cam, { sky: 'space', route: null, space: {} });
+  for (const id of ['earth_in_frame', 'moon_in_frame', 'sun.lit', 'orbit.body']) { assert.ok(id in u, id); assert.equal(u[id].v, null, id); }
+  const n = corridorFacts(e, cam, { sky: 'space', route: null, space: { earthInFrame: null, moonInFrame: null } });
+  assert.equal(n.earth_in_frame.v, null); assert.equal(n.moon_in_frame.v, null);
+  const k = corridorFacts(e, cam, { sky: 'space', route: null, space: { sunLit: 1, body: 'earth', lat: 10, lon: 20, earthInFrame: false, moonInFrame: true } });
+  assert.equal(k.earth_in_frame.v, false); assert.equal(k.moon_in_frame.v, true); assert.equal(k['orbit.body'].v, 'earth'); assert.equal(k['sun.lit'].v, 1);
+});
 test('worlds.js ROUTES equals src/terrain.js ROUTES (parsed as text: terrain.js imports three)', () => {
   const src = fs.readFileSync(new URL('../src/terrain.js', import.meta.url), 'utf8'), body = /export const ROUTES = \{([\s\S]*?)\n\};/.exec(src)[1].replace(/\/\/[^\n]*/g, '');
   assert.deepEqual(JSON.parse(JSON.stringify(ROUTES)), new Function(`return {${body}};`)());

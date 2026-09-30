@@ -104,7 +104,7 @@ test('landing cause maps the reference (CONTINUE) outcome: runway for excursion/
   assert.equal(immediate.verdict, 'UNSAFE'); assert.equal(immediate.cause, null, 'an immediate rule with a safe CONTINUE outcome leaves cause null');
 });
 
-const dnow = (o = {}) => ({ phase: 'CORRIDOR', rho: 60, closing: 0.1, limit: 0.2, inCorridor: true, kosViolation: false, attDeg: 0.5, rateDps: 0.01, fuelFrac: 0.8, failedJets: 0, breakoutAvailable: true, holdPhase: false, outsideHoldBox: false, ttc_s: null, ...o });
+const dnow = (o = {}) => ({ phase: 'CORRIDOR', rho: 60, closing: 0.1, limit: 0.2, inCorridor: true, kosViolation: false, attDeg: 0.5, rateDps: 0.01, fuelFrac: 0.8, failedJets: 0, breakoutAvailable: true, holdPhase: false, outsideHoldBox: false, outsideHoldBoxLateral: false, ttc_s: null, ...o });
 const D = (now, outcome = { CONTINUE: 'capture', BREAKOUT: 'breakout', failReason: null }, eye = false) => { const s = dockingSafety({ now: dnow(now), outcome }, { eye }); seenD.push(s); return s; };
 test('docking truth table', () => {
   assert.equal(D({}).verdict, 'SAFE');
@@ -122,6 +122,13 @@ test('docking safety_eye removes fuel, jets, breakout availability and closing r
   for (const o of [{ fuelFrac: 0.3 }, { failedJets: 1 }, { breakoutAvailable: false }, { rho: 60, closing: 0.5, limit: 0.2 }]) assert.equal(D(o, undefined, true).verdict, 'SAFE');
   assert.equal(D({ rho: 5, closing: 0.31, limit: 0.2 }, undefined, true).verdict, 'UNSAFE', 'within the eye scope (EYE.closingRhoM may be lowered by Task 4)');
   assert.equal(D({ attDeg: 3 }, undefined, true).verdict, 'CAUTION');
+});
+test('docking safety_eye hides an axial-only hold-box exit (sub-pixel, EYE.hidden HOLD_BOX_AXIAL) and keeps a lateral one; safety keeps both', () => {
+  const axial = { phase: 'H2', holdPhase: true, outsideHoldBox: true, outsideHoldBoxLateral: false }, lateral = { ...axial, outsideHoldBoxLateral: true };
+  assert.equal(D(axial).verdict, 'CAUTION'); assert.equal(D(axial).best_action, 'HOLD_POSITION');
+  assert.equal(D(axial, undefined, true).verdict, 'SAFE'); assert.equal(D(axial, undefined, true).best_action, 'CONTINUE');
+  assert.equal(D(lateral, undefined, true).verdict, 'CAUTION'); assert.equal(D(lateral, undefined, true).best_action, 'HOLD_POSITION');
+  assert.ok(EYE.hidden.includes('HOLD_BOX_AXIAL'));
 });
 test('docking closing-speed boundaries: exactly 1.5x the limit is CAUTION not UNSAFE; exactly 20 m stays inside the closing-speed scope', () => {
   assert.equal(D({ rho: 15, closing: 0.3, limit: 0.2 }).verdict, 'CAUTION', 'exactly 1.5x the limit does not exceed it');

@@ -27,8 +27,10 @@ export function pixelBox(cam, [lo, hi], W, H) {
   const x0 = Math.max(0, Math.min(...c.map((q) => q.x))), x1 = Math.min(W, Math.max(...c.map((q) => q.x))), y0 = Math.max(0, Math.min(...c.map((q) => q.y))), y1 = Math.min(H, Math.max(...c.map((q) => q.y)));
   return x1 > x0 && y1 > y0 ? [x0, y0, x1, y1] : null;
 }
-// a visual fact counts only when its in-frame box is at least 1 px wide and 1 px tall at Pilot Eye's 160x96
-export const eyeVisible = (cam, box, W, H) => { const b = pixelBox(cam, box, W, H); return !!b && (b[2] - b[0]) * 160 / W >= 1 && (b[3] - b[1]) * 96 / H >= 1; };
+// a visual fact counts (non-null) only when its box is in frame with its longest side >= 2 px at the 896x504 capture
+// resolution (controller ruling: these facts feed Narrator's 512^2 input; Pilot Eye's scope is safety_eye/EYE)
+export const CAPTURE_W = 896, CAPTURE_H = 504, MIN_SIDE_PX = 2;
+export const boxVisible = (cam, box, W, H) => { const b = pixelBox(cam, box, W, H); return !!b && Math.max((b[2] - b[0]) * CAPTURE_W / W, (b[3] - b[1]) * CAPTURE_H / H) >= MIN_SIDE_PX; };
 const sameBits = (a, b) => a.every((v, i) => Object.is(v, b[i]));
 
 export function landingNow(sim) {
@@ -50,8 +52,8 @@ export function landingFacts(sim, cam, { W = 896, H = 504, scene = {} } = {}) {
   put('att.pitch_deg', r2(A.theta / DEG), 'deg', 'context'); put('att.bank_deg', r2(A.phi / DEG), 'deg', 'context'); put('att.heading_deg', Math.round(((A.psi / DEG) + RWY.heading + 360) % 360), 'deg', 'context');
   put('att.alpha_deg', r2(A.alpha / DEG), 'deg', 'context'); put('att.beta_deg', r2(A.beta / DEG), 'deg', 'context'); put('att.fpa_deg', r2(A.gamma / DEG), 'deg', 'context');
   put('ils.loc_dots', d.locValid ? r2(d.loc) : null, 'dots', 'context'); put('ils.gs_dots', d.gsValid ? r2(d.gs) : null, 'dots', 'context');
-  put('papi_whites_cam', eyeVisible(cam, PAPI_BOX, W, H) ? papiWhites(cameraPosition(cam)) : null, 'count', 'visual');
-  put('windsock.from_deg', eyeVisible(cam, SOCK_BOX, W, H) ? w.dir : null, 'deg', 'visual');
+  put('papi_whites_cam', boxVisible(cam, PAPI_BOX, W, H) ? papiWhites(cameraPosition(cam)) : null, 'count', 'visual');
+  put('windsock.from_deg', boxVisible(cam, SOCK_BOX, W, H) ? w.dir : null, 'deg', 'visual');
   put('cfg.gear', f.gear > 0.99 ? 'down' : f.gear > 0.01 ? 'transit' : 'up', null, 'visual'); put('cfg.spoilers', r2(f.spoil), null, 'visual');
   put('thrust', r2(f.spool), null, 'context'); put('wow', f.wow, null, 'context');
   put('wind.metar', `${String(w.dir).padStart(3, '0')}${String(w.kt).padStart(2, '0')}${w.gust ? 'G' + w.gust : ''}KT`, null, 'context');

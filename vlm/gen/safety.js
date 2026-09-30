@@ -18,7 +18,7 @@ export const CORRIDOR_ACTIONS = Object.freeze(['CONTINUE', 'CLIMB', 'DESCEND', '
 export const TIE_ORDER = Object.freeze(['CLIMB', 'TURN_LEFT', 'TURN_RIGHT', 'SLOW_DOWN', 'SPEED_UP', 'DESCEND']);
 export const EYE_REMOVED = Object.freeze({ L: Object.freeze(['TAILWIND', 'GS_DOTS', 'LOC_DOTS_BEYOND_1NM']), D: Object.freeze(['LOW_FUEL', 'JET_FAILURE', 'NO_BREAKOUT_AVAILABLE', 'CLOSING_BEYOND_EYE_CLOSING_RHO']) });
 // safety_eye scope boundaries and extra hidden criteria; Task 4's >= 1 px sensitivity test sets these (spec §4.3 last table)
-export const EYE = Object.freeze({ locNm: 1, closingRhoM: 11, hidden: Object.freeze(['GATE_MODES', 'SPEED_BAND', 'SINK_RATE', 'CANNOT_STOP', 'RUNWAY_EDGE', 'SEVERE_TURBULENCE', 'ATTITUDE_RATE']) });
+export const EYE = Object.freeze({ locNm: 1, closingRhoM: 11, hidden: Object.freeze(['GATE_MODES', 'SPEED_BAND', 'SINK_RATE', 'CANNOT_STOP', 'RUNWAY_EDGE', 'SEVERE_TURBULENCE', 'ATTITUDE_RATE', 'HOLD_BOX_AXIAL']) });
 const HAZARDS = ['rock', 'comet', 'satellite', 'airliner', 'birds'], L_BAD = ['crash', 'excursion', 'overrun', 'short', 'tailstrike', 'hard'];
 const CAUSE_REASON = (c) => (HAZARDS.includes(c) ? 'HAZARD_AHEAD' : c === 'terrain' ? 'TERRAIN_CLOSE' : c === 'building' || c === 'roof' ? 'BUILDING_CLOSE' : c === 'overstress' ? 'OVERSTRESS' : null);
 const CLR_REASON = { hazard: 'HAZARD_AHEAD', terrain: 'TERRAIN_CLOSE', building: 'BUILDING_CLOSE' };
@@ -108,7 +108,7 @@ export function dockingSafety(inp, { eye = false } = {}) {
   const noGo = [];
   if (n.attDeg > 2 || (n.rateDps > 0.1 && !hid('ATTITUDE_RATE'))) noGo.push('ATTITUDE_ERROR');
   if (!eye && n.fuelFrac < 0.4) noGo.push('LOW_FUEL');
-  if (n.holdPhase && n.outsideHoldBox) noGo.push('LATERAL_MISALIGNMENT');
+  if (n.holdPhase && (hid('HOLD_BOX_AXIAL') ? n.outsideHoldBoxLateral : n.outsideHoldBox)) noGo.push('LATERAL_MISALIGNMENT');
   if (!eye && n.breakoutAvailable === false) noGo.push('NO_BREAKOUT_AVAILABLE');
   for (const r of noGo) { caution = true; R.add(r); }
   const tooFast = closingSeen && n.closing > n.limit;
