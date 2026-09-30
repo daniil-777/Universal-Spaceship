@@ -1,6 +1,6 @@
 import os
 os.environ.setdefault('HF_HOME', '/Volumes/LaCie/astro-pilot/vlm/hf')
-import json, tempfile, unittest
+import contextlib, io, unittest
 from pathlib import Path
 import torch
 from torch import nn
@@ -63,8 +63,9 @@ class TestArgs(unittest.TestCase):
         a = parse_args(['--data', 'd', '--out', 'o', '--processor-dir', 'p', '--smoke', '--steps', '20', '--max-rows', '40', '--max-minutes', '4.5', '--device', 'cpu'])
         self.assertEqual((a.steps, a.max_rows, a.max_minutes, a.device), (20, 40, 4.5, 'cpu'))
         a = parse_args(['--data', 'd', '--out', 'o', '--processor-dir', 'p']); self.assertEqual((a.steps, a.max_rows), (3000, None))
-        with self.assertRaises(SystemExit): parse_args(['--data', 'd', '--out', 'o', '--processor-dir', 'p', '--device', 'cuda'])
-        with self.assertRaises(SystemExit): parse_args(['--data', 'd', '--out', 'o', '--processor-dir', 'p', '--batch', '3'])
+        with contextlib.redirect_stderr(io.StringIO()):   # argparse prints its usage on the rejected values
+            with self.assertRaises(SystemExit): parse_args(['--data', 'd', '--out', 'o', '--processor-dir', 'p', '--device', 'cuda'])
+            with self.assertRaises(SystemExit): parse_args(['--data', 'd', '--out', 'o', '--processor-dir', 'p', '--batch', '3'])
 
 class Toy(nn.Module):
     def __init__(self): super().__init__(); self.w = nn.Linear(2, 1)
