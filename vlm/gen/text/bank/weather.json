@@ -1,0 +1,122 @@
+{
+  "sky_q": { "kind": "vqa_q", "families": ["A"], "slots": [], "forms": [
+    "What is the weather like?",
+    "How is the sky?",
+    "What sky conditions does this frame show?",
+    "Is the sky clear, fair, cloudy or stormy?",
+    "Describe the sky.",
+    "What weather is the ship flying in?",
+    "What are the sky conditions here?",
+    "How would you describe the weather?",
+    "What is the state of the sky?",
+    "Which weather preset is this?"
+  ] },
+  "sky_a": { "kind": "vqa_a", "families": ["A"], "slots": ["sky"], "forms": [
+    "The sky is {sky}.",
+    "The weather is {sky}.",
+    "It is {sky} weather.",
+    "Skies are {sky}.",
+    "The ship flies in {sky} weather.",
+    "The sky looks {sky}.",
+    "Conditions are {sky}.",
+    "The sky preset is {sky}.",
+    "The weather here is {sky}.",
+    "We have {sky} skies."
+  ] },
+  "turb_q": { "kind": "vqa_q", "families": ["A"], "slots": [], "forms": [
+    "How rough is the air?",
+    "What is the turbulence like?",
+    "How strong is the turbulence?",
+    "Is the air smooth or bumpy?",
+    "What turbulence class is the ship in?",
+    "How bumpy is the ride?",
+    "What level of turbulence is the ship feeling?",
+    "Is there turbulence, and how strong?",
+    "Rate the turbulence.",
+    "How turbulent is the air around the ship?"
+  ] },
+  "turb_a": { "kind": "vqa_a", "families": ["A"], "slots": ["turb"], "forms": [
+    "The turbulence is {turb}.",
+    "The ship feels {turb} turbulence.",
+    "Turbulence: {turb}.",
+    "The bumps are {turb}.",
+    "Turbulence here is {turb}.",
+    "It is {turb} turbulence.",
+    "The ship is in {turb} turbulence.",
+    "The turbulence class is {turb}.",
+    "Air: {turb} turbulence.",
+    "The air gives {turb} turbulence."
+  ] },
+  "storm_q": { "kind": "vqa_q", "families": ["A"], "slots": [], "forms": [
+    "Is there a storm cell nearby?",
+    "Is a storm cell close to the ship?",
+    "Are there any thunderstorm cells near the ship?",
+    "Is the ship near a storm?",
+    "Any towering storm clouds nearby?",
+    "Is a storm cell within range?",
+    "Does the weather include a storm cell close by?",
+    "Is there a thunderstorm around?",
+    "Are storm cells near the flight path?",
+    "Is a storm cell anywhere near us?"
+  ] },
+  "storm_yes_a": { "kind": "vqa_a", "families": ["A"], "slots": ["cell_dist"], "forms": [
+    "Yes, the nearest storm cell is {cell_dist} away.",
+    "Yes, a storm cell lies {cell_dist} from the ship.",
+    "Yes. There is a storm cell {cell_dist} away.",
+    "Yes, a thunderstorm cell sits {cell_dist} off.",
+    "Yes, the closest storm cell is {cell_dist} from the ship.",
+    "Yes, one is {cell_dist} away.",
+    "Yes: a storm cell, {cell_dist} away.",
+    "Yes, a towering storm cloud stands {cell_dist} away.",
+    "Yes, there is a storm cell {cell_dist} from here.",
+    "Yes, the storm cell nearest to the ship is {cell_dist} off."
+  ] },
+  "storm_no_a": { "kind": "vqa_a", "families": ["A"], "slots": [], "forms": [
+    "No, there is no storm cell nearby.",
+    "No, no storm cell is close to the ship.",
+    "No. There are no thunderstorm cells near the ship.",
+    "No, the ship is not near a storm.",
+    "No, no towering storm clouds are nearby.",
+    "No, no storm cell is within range.",
+    "No storm cell is close by.",
+    "No, there is no thunderstorm around.",
+    "No, the flight path is clear of storm cells.",
+    "No, there are no storm cells nearby."
+  ] },
+  "cloud_q": { "kind": "vqa_q", "families": ["A"], "slots": [], "forms": [
+    "Is the ship inside a cloud?",
+    "Is the ship flying through cloud?",
+    "Is the view obscured by cloud around the ship?",
+    "Are we in cloud?",
+    "Is the ship flying in cloud rather than clear air?",
+    "Is there cloud all around the ship?",
+    "Is the ship in the clouds right now?",
+    "Is this frame taken from inside cloud?",
+    "Is the ship enveloped in cloud?",
+    "Is the ship in cloud at this moment?"
+  ] },
+  "cloud_yes_a": { "kind": "vqa_a", "families": ["A"], "slots": [], "forms": [
+    "Yes, the ship is inside cloud.",
+    "Yes, it is flying through cloud.",
+    "Yes. Cloud surrounds the ship.",
+    "Yes, we are in cloud.",
+    "In cloud, yes.",
+    "Yes, there is cloud all around.",
+    "Yes, the ship is in the clouds.",
+    "Yes, this is from inside cloud.",
+    "Yes, the ship is enveloped in cloud.",
+    "Yes: the ship is flying in cloud."
+  ] },
+  "cloud_no_a": { "kind": "vqa_a", "families": ["A"], "slots": [], "forms": [
+    "No, the ship is in clear air.",
+    "No, it is not flying through cloud.",
+    "No. There is no cloud around the ship.",
+    "No, we are clear of cloud.",
+    "Clear air, not cloud.",
+    "No, the air around the ship is clear.",
+    "No, the ship is out of the clouds.",
+    "No, this frame is not taken from inside cloud.",
+    "No, the ship is not in cloud.",
+    "No: the ship flies in clear air."
+  ] }
+}
