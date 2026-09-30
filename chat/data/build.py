@@ -23,7 +23,13 @@ WITHHOLD_P, VAL_PCT, MUST_N, NGRAM, MAX_GENERAL_CHARS = 0.2, 3, 5, 8, 6000
 NO_FACT_KINDS = {'unknown', 'off_topic', 'chit_chat', 'adversarial'}
 DEFAULT_STATE = {'scene': 'belt', 'seen': []}
 
+EMOJI = re.compile('[\U0001F000-\U0001FAFF☀-➿️]')
+
 def frac(key): return (zlib.crc32(key.encode()) % 10000) / 10000
+
+def plain(text):
+    """CAPCOM speaks plain text: emoji a writer slipped in are removed."""
+    return re.sub(r'\s{2,}', ' ', EMOJI.sub('', text)).strip()
 
 def read_jsonl(p):
     p = Path(p)
@@ -45,16 +51,17 @@ def turn_rows(d, facts, bm, min_score):
     out, t = [], d['turns']
     for i, turn in enumerate(t):
         if turn['role'] != 'assistant' or i == 0: continue
-        history, user = [{'role': x['role'], 'content': x['content']} for x in t[:i - 1]], t[i - 1]['content']
+        history = [{'role': x['role'], 'content': plain(x['content']) if x['role'] == 'assistant' else x['content']} for x in t[:i - 1]]
+        user = t[i - 1]['content']
         key, oracle = f"{d['id']}:{i}", [f for f in turn.get('facts', []) if f in facts][:4]
         hits = [h for h, _ in bm.search(user, prev_user(history), k=MAX_NOTES, min_score=min_score)]
         if oracle and turn.get('abstain') and frac(key) < WITHHOLD_P:
-            ids, target, kind = [h for h in hits if h not in oracle][:MAX_NOTES], turn['abstain'], 'abstain'
+            ids, target, kind = [h for h in hits if h not in oracle][:MAX_NOTES], plain(turn['abstain']), 'abstain'
         elif oracle:
             ids = (oracle + [h for h in hits if h not in oracle])[:max(MAX_NOTES, len(oracle))]
-            random.Random(key).shuffle(ids); target, kind = turn['content'], 'answer'
+            random.Random(key).shuffle(ids); target, kind = plain(turn['content']), 'answer'
         else:
-            ids, target = hits, turn['content']
+            ids, target = hits, plain(turn['content'])
             kind = d['archetype'] if d['archetype'] in NO_FACT_KINDS else 'chat'
         notes = [facts[x]['text'] for x in ids]
         abstain = kind == 'abstain' or (not oracle and bool(ABSTAIN.search(target)))
