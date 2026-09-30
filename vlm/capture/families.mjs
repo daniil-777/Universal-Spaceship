@@ -79,13 +79,14 @@ export const sameHistory = (t, o) => !!o && t.step === o.step && t.frames.length
 // original's candidate loop with no collision course (episode_corridor.mjs); L/D twins replay the original's page-time ops with
 // no kick armed (L: the twin URL has no wind injection and hFlare is off; D failed-P6: the probe-owned sim with no failed jet).
 // A twin that is discarded yields no records; the injected records stay (the build counts unpaired ones).
-export async function nextFlightEpisode(D, e, { seed0, rsOverride, forceWhen = null }) {
-  const ep = plan(D, D.family, e, seed0, rsOverride, forceWhen), res = await runFamily(D, ep), eye = ep.family === 'D' ? 'centreline' : 'chase', seg = (s) => s.seg ?? 0;
+export async function nextFlightEpisode(D, e, { seed0, rsOverride, forceWhen = null, maxSpan = 1 }) {
+  const ep = { ...plan(D, D.family, e, seed0, rsOverride, forceWhen), maxSegments: Math.max(1, maxSpan) }, res = await runFamily(D, ep), eye = ep.family === 'D' ? 'centreline' : 'chase', seg = (s) => s.seg ?? 0;
   if (ep.inject && ep.inject.at !== 'runtime') for (const s of res.samples) s.injection = { kind: ep.inject.kind, params: ep.inject.params || {}, step: null, sim_t_s: null };
   const span = (res.resets ?? 0) + 1, recOf = (s) => assemble(D, { ...ep, episode: e + seg(s), pageEpisode: e }, s, { eyeView: eye });
   const episodes = Array.from({ length: span }, (_, k) => ({ episode: e + k, records: res.samples.filter((s) => seg(s) === k).map(recOf) })), recs = episodes.flatMap((x) => x.records);
   const stats = { crashed: res.crashed, resets: res.resets ?? 0, policy: ep.policyId, cell: ep.cell ? `${ep.cell.route}|${ep.cell.sky}` : null, inject: ep.inject ? ep.inject.kind : null, ...res.stats };
-  if (ep.family === 'A') for (const r of recs) if (!r.error) D.cellCounts[`${ep.cell.route}|${ep.cell.sky}`] = (D.cellCounts[`${ep.cell.route}|${ep.cell.sky}`] || 0) + 1;
+  // only records not on disk yet count toward the cell (M-a: aCounts has already counted the finished ones)
+  if (ep.family === 'A') for (const r of recs) if (!r.error && !fs.existsSync(path.join(D.dir, `${r.rec.key}.json`))) D.cellCounts[`${ep.cell.route}|${ep.cell.sky}`] = (D.cellCounts[`${ep.cell.route}|${ep.cell.sky}`] || 0) + 1;
   const injected = res.samples.filter((s) => s.injection);
   if (!ep.inject || !injected.length) return { episodes, records: recs, wallMs: res.wallMs, stats };
   const flight = ep.family === 'L' || ep.family === 'D', k0 = seg(injected[0]);
@@ -94,6 +95,8 @@ export async function nextFlightEpisode(D, e, { seed0, rsOverride, forceWhen = n
   let tr; try { tr = await runFamily(D, tw); } catch (err) { if (!(err instanceof Discard)) throw err; D.log({ discard: 'twin', episode: e, why: err.message }); tr = { samples: [], wallMs: 0, stats: {} }; }
   const orig = (s) => (flight ? res.samples.find((o) => o.idx === s.idx) : res.samples.find((o) => o.ci === s.ci && seg(o) === seg(s)));
   const good = tr.samples.filter((s) => { const ok = sameHistory(s, orig(s)); if (!ok) D.log({ drop: `twin sample ${s.step}`, episode: e, why: 'the twin page-time history differs from the original' }); return ok; });
+  // M-c: a twin's sampler_weight is its original's (the original's may carry the severity-4 cap factor of its own segment)
+  for (const s of good) s.weight = orig(s).weight;
   const twinRecs = good.map((s) => assemble(D, tw, s, { eyeView: eye }));
   return { episodes, records: recs, twin: { episode: tw.episode, records: twinRecs }, wallMs: res.wallMs + tr.wallMs, stats: { ...stats, twin: twinRecs.length, twin_dropped: tr.samples.length - good.length, twin_wall_s: tr.wallMs / 1000, twin_stats: tr.stats } };
 }
@@ -136,7 +139,7 @@ function zStats(res, kept) {
   return { views: n, dropped: res.drops, split_dropped: kept.splitDropped, boot_ms: res.bootMs, frames: res.frames, frame_ms: res.frameMs, settle_s: res.views.map((x) => x.settle_s), settle_frames: res.views.map((x) => x.settle_frames), gate_frames: res.views.map((x) => x.gate_frames), steady_frames: res.views.map((x) => x.steady_frames),
     tiles: res.views.map((x) => x.tiles), cap_host_ms: n ? sum((x) => x.capHostMs) / n : null, png_bytes: n ? sum(png) / n : null, ground_src: res.views.map((x) => x.label.ground.src) };
 }
-export async function nextEpisode(D, { episode, seed0, rsOverride, forceWhen = null }) {
+export async function nextEpisode(D, { episode, seed0, rsOverride, forceWhen = null, maxSpan = 1 }) {
   try {
     if (D.family === 'Z') {
       if (!D.zplan) D.zplan = JSON.parse(fs.readFileSync(`${LACIE}/raw/${D.run}/Z/plan.json`, 'utf8'));
@@ -149,6 +152,6 @@ export async function nextEpisode(D, { episode, seed0, rsOverride, forceWhen = n
       return { records: recs, wallMs: res.wallMs, stats: zStats(res, kept) };
     }
     // the await keeps a rejected Discard inside this try, so a discarded episode returns null instead of ending the drive
-    return await nextFlightEpisode(D, episode, { seed0, rsOverride, forceWhen });
+    return await nextFlightEpisode(D, episode, { seed0, rsOverride, forceWhen, maxSpan });
   } catch (err) { if (err instanceof Discard) { D.log({ discard: episode, why: err.message, ...(D.lastCell ? { cell: D.lastCell } : {}) }); return null; } throw err; }
 }

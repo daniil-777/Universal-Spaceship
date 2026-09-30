@@ -53,8 +53,17 @@ export async function aWarmup(S, D, ep) {
 export const MAX_RESETS = 10;
 // One segment: candidates every 23 steps from the segment's start; returns 'crash' or 'end' (60 s, 12 samples, the injected
 // sample). The original applies the collision course at f0 - 1 of candidate injCi; a twin steps to the same f0 - 1 and does not.
+// A phase lock (review check 8): each A segment's candidate grid starts at a random offset (ep.rng, uniform 0-45 steps, so a
+// twin replays it), and within the first EARLY_STEPS (4.6 s) after a reset a candidate is taken with p = 1/3 (weight 3)
+// whatever the trigger says, at most once per segment: the first seconds after a respawn are otherwise oversampled.
+export const EARLY_STEPS = 69, MAX_OFFSET = 45;
+export function segmentPlan(rng, family, gateStep) {
+  const off = family === 'A' ? rng.int(0, MAX_OFFSET) : 0;
+  return Array.from({ length: 40 }, (_, k) => ({ cand: gateStep + 23 + off + 23 * k, n: [rng.int(2, 4), rng.int(2, 4)] }));
+}
 async function segment(S, D, ep, { c, seg, injCi, seen, out, ring, T, ready, ledger0 }) {
-  const gateStep = c.steps, plan = Array.from({ length: 40 }, (_, k) => ({ cand: gateStep + 23 * (k + 1), n: [ep.rng.int(2, 4), ep.rng.int(2, 4)] }));
+  const gateStep = c.steps, plan = segmentPlan(ep.rng, ep.family, gateStep);
+  let earlyTaken = false;
   try {
     for (const { cand, n: [n01, n12] } of plan) {
       if (cand > gateStep + 900 || out.length >= 12) return 'end';
@@ -66,11 +75,13 @@ async function segment(S, D, ep, { c, seg, injCi, seen, out, ring, T, ready, led
       if (ring.size !== 3) continue;
       if (fr[2].step !== cand) throw new Discard(`f2 captured at step ${fr[2].step}, not the candidate ${cand}`);
       if (ep.force === 'cloud' && !((await call(S, 'camInCloud')) > 0)) continue;
-      const trig = await call(S, 'trigger', { cNear: D.cNear }), forced = isInj && (ep.twin || !!applied);
-      if (!trig && !forced && ep.rng.float() >= 1 / 3) continue;
+      const trig = await call(S, 'trigger', { cNear: D.cNear }), forced = isInj && (ep.twin || !!applied), early = seg > 0 && cand - gateStep < EARLY_STEPS;
+      if (!forced && early && (earlyTaken || ep.rng.float() >= 1 / 3)) continue;
+      if (!forced && !early && !trig && ep.rng.float() >= 1 / 3) continue;
+      if (!forced && early) earlyTaken = true;
       const tl = performance.now(), label = await call(S, 'label', { cNear: D.cNear });
       T.labels++; T.labelHostMs += performance.now() - tl; T.rolloutMs += label.ms.rollout; T.factsMs += label.ms.facts;
-      out.push({ step: cand, n: [n01, n12], ci, seg, weight: trig || forced ? 1 : 3, label, frames: fr, ledger0, gate_step: gateStep, atmosphere: (await chk(S)).atmosphere, injection: forced && !ep.twin ? applied : null });
+      out.push({ step: cand, n: [n01, n12], ci, seg, weight: forced ? 1 : early ? 3 : trig ? 1 : 3, label, frames: fr, ledger0, gate_step: gateStep, atmosphere: (await chk(S)).atmosphere, injection: forced && !ep.twin ? applied : null });
       if (forced) return 'end';
     }
     return 'end';
@@ -104,13 +115,17 @@ export async function runCorridorEpisode(D, ep) {
       const end = await segment(S, D, ep, { c, seg, injCi, seen, out, ring, T, ready, ledger0 });
       if (end !== 'crash') break;
       crashed = true;
-      if (!across || out.length >= 12 || T.resets >= MAX_RESETS) break;
+      // N-1: a page spans only the free episode indices the drive gave it (ep.maxSegments), so it stops before a finished one
+      if (!across || out.length >= 12 || T.resets >= MAX_RESETS || seg + 1 >= (ep.maxSegments ?? MAX_RESETS + 1)) break;
       // the page resets the env 1.6 s after a crash (app.js:158; for a crash in the descent it has already happened); wait for
       // that reset, then clear the sticky crash flag
       const reset = (x) => x.resetsAtCrash !== null && x.resets > x.resetsAtCrash && x.crashTimer <= 0;
       for (let k = 0; k < 400; k++) { c = await chk(S); if (reset(c)) break; await waitIdle(S, ready, { stop: D.stop }); await frame(S, D.mode); }
       if (!reset(c)) break;
-      await call(S, 'clearCrash'); c = await chk(S); T.resets++;
+      await call(S, 'clearCrash'); c = await chk(S);
+      // M-d: after the reset the A gate conditions must still hold, else the page ends here
+      if (!(c.atmo && c.route === ep.params.route && c.world !== 'space' && c.atmosphere > 0.99)) { T.gateLost = `after reset ${T.resets + 1}: atmo ${c.atmo}, route ${c.route}, world ${c.world}, atmosphere ${c.atmosphere}`; break; }
+      T.resets++;
     }
     // a twin (§8) runs this same loop, so its page-time history (frames, no-ops, captures, label calls) is the original's up to
     // the injected candidate; it keeps only that sample (families.mjs asserts equal steps and clocks)

@@ -1,7 +1,25 @@
 // vlm/capture/probe/corridor.js — S/A in the page: env.step wrapped as an own property (delete restores the prototype
 // method), the prev=cur no-op that makes a drawn frame exact, the exactness check against the drawn ship, capture through
 // __ap.capture() (composer + toDataURL, no HUD, no pip), and labels on the rendered env (R3).
-import { corridorLabel, ppoPilot, cpaTrigger, clearance, createSearchPilot, hazardGeometry } from '../../gen/labels/corridor.js';
+import { corridorLabel, ppoPilot, cpaTrigger, clearance, createSearchPilot, hazardGeometry, rollout, macroAction, atanhClamp } from '../../gen/labels/corridor.js';
+import { CORRIDOR_ACTIONS } from '../../gen/safety.js';
+// search_v2 (ruling T10-a): the 7 macro actions rolled out H = 30 steps with K = 2 noise draws each through T3's rollout(), one
+// decision every 4 steps (0.27 s at 15 Hz, the nearest whole step to 0.25 s), ranked by crash rate (crashed draws / K), then by
+// the largest minimum clearance over the draws; the winner's macro is flown from its start until the next decision
+export const SEARCH_V2 = Object.freeze({ every: 4, H: 30, K: 2 });
+export function createSearchPilotV2({ every = SEARCH_V2.every, H = SEARCH_V2.H, K = SEARCH_V2.K } = {}) {
+  let plan = null, i = 0;
+  function replan(env) {
+    let best = null;
+    for (const a of CORRIDOR_ACTIONS) {
+      let crash = 0, m = Infinity;
+      for (let k = 0; k < K; k++) { const r = rollout(env, a, { H, noiseSeed: 1000 + k }); if (r.crashed) crash++; m = Math.min(m, r.minClr); }
+      if (!best || crash < best.crash || (crash === best.crash && m > best.m)) best = { a, crash, m };
+    }
+    return { a: best.a, fn: macroAction(best.a, { air: !!env.atmosphere, uThr: atanhClamp(env.cmd[3]) }) };
+  }
+  return { act(env) { if (!plan || i >= every) { plan = replan(env); i = 0; } return Float32Array.from(plan.fn(i++)); }, get action() { return plan ? plan.a : null; } };
+}
 import { corridorFacts } from '../../gen/labels/corridor_facts.js';
 import { projectSphere } from '../../gen/labels/camera.js';
 // real host time for the throughput numbers (§7.6): page.clock replaces performance, but Playwright 1.63 keeps the real object
@@ -24,7 +42,7 @@ export async function setup(family, p) {
   // A (§3.2): atmospheric flight on the planned route before the first step, else the drive discards the episode (check().bad)
   if (family === 'A' && !(ap.state.atmo === true && env.atmosphere && ap.state.route === p.route)) st.bad = `A page is not in atmospheric flight on ${p.route}: atmo ${ap.state.atmo}, env.atmosphere ${env.atmosphere}, route ${ap.state.route}`;
   // the search pilot (§3.2 A behaviour, search_v1) flies through the env.step wrapper; cloneEnv never copies the wrapper
-  if (p.policy === 'search_v1') { const sp = createSearchPilot(); st.override = (e) => sp.act(e); }
+  if (p.policy === 'search_v1' || p.policy === 'search_v2') { const sp = p.policy === 'search_v2' ? createSearchPilotV2() : createSearchPilot(); st.override = (e) => sp.act(e); }
   env.step = function (a) {
     if (st.noop > 0) { st.noop--; st.noopDone++; return { reward: 0, done: false, truncated: false, progress: 0 }; }
     const act = st.override ? st.override(env) : a; st.lastRaw = Array.from(act);

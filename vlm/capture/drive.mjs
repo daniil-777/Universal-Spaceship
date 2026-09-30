@@ -9,7 +9,8 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { scanRun, writeEpisode, startGate, stopOf, writeStop, exitCodeOf, pickStop, STOP_EXIT, RESOURCE_EXIT } from './records.mjs';
+import { scanRun, writeEpisode, startGate, stopOf, writeStop, exitCodeOf, pickStop, freeSpan, freshRecords, STOP_EXIT, RESOURCE_EXIT } from './records.mjs';
+import { MAX_RESETS } from './episode_corridor.mjs';
 import { nextEpisode, closeEpisode } from './families.mjs';
 import { ledgerCounts } from './routes.mjs';
 export { fnv1a32, renderSeed, scanRun, writeEpisode, assemble, startGate, stopOf, writeStop, readStop, exitCodeOf, STOP_EXIT } from './records.mjs';
@@ -71,11 +72,17 @@ if (process.argv[1] && process.argv[1].endsWith('drive.mjs')) {
       if (scan.episodes.has(e)) continue;
       const free = freePct();
       if (free < 25) { D.log({ stop: `memory_pressure shows ${free} % free (< 25 %) before episode ${e}`, kind: 'resources' }); code = RESOURCE_EXIT; break; }
-      const res = await nextEpisode(D, { episode: e, seed0: +arg('seed0', 1), rsOverride: arg('rs-override', null), forceWhen: arg('force-when', null) });
+      // an A page samples across crash resets over at most the free indices from e (N-1): it stops before a finished episode
+      const span = freeSpan(scan.episodes, e, MAX_RESETS + 1);
+      const res = await nextEpisode(D, { episode: e, seed0: +arg('seed0', 1), rsOverride: arg('rs-override', null), forceWhen: arg('force-when', null), maxSpan: span });
       if (res && res.exhausted) { D.log({ exhausted: e }); break; }
-      if (!res) { D.ledger.length = 0; saveBudget(); if (D.stop.error) throw D.stop.error; if (family === 'Z') closeEpisode(D, e, [], {}, { why: 'discarded' }); continue; }
+      // a discarded page of any family is closed with a 0-record .done (N-1), so a resume never reruns it and the next page
+      // starts at the same index (and seed) as in the original run
+      if (!res) { D.ledger.length = 0; saveBudget(); if (D.stop.error) throw D.stop.error; closeEpisode(D, e, [], {}, { why: 'discarded' }); continue; }
       // an A page that sampled across crash resets spans episodes e .. e + resets (families.mjs); every other page is episode e
       const eps = res.episodes || [{ episode: e, records: res.records }], ok = (x) => !x.error, kept = eps.flatMap((x) => x.records).filter(ok), tw = res.twin ? res.twin.records.filter(ok) : [];
+      if (eps.length > span || eps.some((x) => scan.episodes.has(x.episode))) throw new Error(`page ${e} spans ${eps.length} episodes; only ${span} are free (refusing to overwrite a finished episode)`);
+      const fresh = freshRecords(dir, kept).length + freshRecords(dir, tw).length;
       for (const r of eps.flatMap((x) => x.records).concat(res.twin ? res.twin.records : []).filter((x) => x.error)) D.log({ drop: r.rec.key, why: r.error });
       // the twin is written before its original's .done (M-1), and a page's first episode's .done last: a resume that finds it
       // finds the whole page (a partial page is rerun from its first episode and rewrites the same files)
@@ -85,7 +92,8 @@ if (process.argv[1] && process.argv[1].endsWith('drive.mjs')) {
       fs.writeFileSync(path.join(dir, `ledger_${String(e).padStart(5, '0')}.jsonl`), D.ledger.map((x) => JSON.stringify(x)).join('\n')); D.ledger.length = 0;
       // measure_extra_s: a --measure run's encode-only passes, which report.mjs takes off the wall time
       fs.appendFileSync(path.join(dir, 'throughput.jsonl'), JSON.stringify({ episode: e, samples: kept.length + tw.length, twins: tw.length, wall_s: res.wallMs / 1000, measure_extra_s: D.measure ? (res.stats.encMs || 0) / 1000 : 0, ...res.stats, ledger: counts }) + '\n');
-      samples += kept.length + tw.length; since += kept.length + tw.length; saveBudget(); if (since >= 50) { ckpt(e); since = 0; }
+      // M-a: only newly written records count toward --n (a rerun that rewrites a twin written before a crash adds nothing)
+      samples += fresh; since += fresh; saveBudget(); if (since >= 50) { ckpt(e); since = 0; }
       console.log(`episode ${e}${eps.length > 1 ? `-${e + eps.length - 1}` : ''}: ${kept.length} kept, ${res.records.length - kept.length} dropped, ${(res.wallMs / 1000).toFixed(1)} s; ${samples}/${n} samples`);
       e = eps[eps.length - 1].episode;
       // a stop latched during a kept episode (its failed requests already dropped their records) ends the drive here

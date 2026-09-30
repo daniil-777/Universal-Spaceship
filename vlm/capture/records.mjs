@@ -38,6 +38,11 @@ export function startGate(runDir) {
 export const exitCodeOf = (err) => (stopOf(err).kind === 'http' ? STOP_EXIT : 0);
 // the stop the drive classifies at its end: a latched 403/429 (routes.latchStop) wins over the error that was thrown
 export const pickStop = (thrown, latched) => (latched && stopOf(latched).kind === 'http' ? latched : thrown);
+// N-1: how many consecutive episode indices from e are free (no .done), up to cap: an A page that samples across crash resets
+// may span only those, so a resumed rerun never reaches, let alone overwrites, a finished page's episodes
+export function freeSpan(done, e, cap) { let k = 0; while (k < cap && !done.has(e + k)) k++; return k; }
+// M-a: the records of a list that are not on disk yet (a resumed rerun rewrites a page's twin; only new files count)
+export const freshRecords = (dir, recs) => recs.filter((r) => !fs.existsSync(path.join(dir, `${r.rec.key}.json`)));
 export function scanRun(dir) {
   const out = { samples: 0, episodes: new Set(), removed: [] }; if (!fs.existsSync(dir)) return out;
   const names = fs.readdirSync(dir).filter((n) => !n.startsWith('._'));
@@ -67,7 +72,7 @@ export function assemble(D, ep, s, extra = {}) {
     render: { viewport: [896, 504], dpr: 1, renderScale: 1, toneMapping: 'ACESFilmic', capture_mode: D.mode, view: { eye: extra.eyeView ?? (fam === 'Z' ? 'zoom' : 'chase'), narrator: fam === 'Z' ? 'zoom' : 'chase' }, path: fam === 'L' ? false : null, imagery, licence_profile: D.licence },
     provenance: { git_sha: D.gitSha, site_dirty: !!D.siteDirty, page_url: ep.url, seed: ep.seed, render_seed: ep.renderSeed, episode: ep.episode, step: s.step, sim_t_s: +(s.step * (STEP_S[fam] ?? 0)).toFixed(4), utc_ms: ep.utcMs,
       clock: frames.map((f) => f.clock), policy_id: ep.policyId ?? null, policy_sha: ep.policySha ?? null, injection: s.injection ?? null, twin_of: ep.twinOf !== undefined && ep.twinOf !== null ? recordKey(fam, D.run, ep.twinOf, s.srcStep ?? s.step) : null,
-      sampler_weight: s.weight ?? 1, ...(fam === 'A' ? { atmosphere: s.atmosphere, page_episode: ep.pageEpisode ?? ep.episode, page_segment: s.seg ?? 0 } : {}), ...(fam === 'S' || fam === 'A' ? { t_since_gate_s: +((s.step - (s.gate_step ?? 0)) / 15).toFixed(3) } : {}), generator: `vlm/capture@${D.gitSha}` } };
+      sampler_weight: s.weight ?? 1, ...(fam === 'A' ? { atmosphere: s.atmosphere, page_episode: ep.pageEpisode ?? ep.episode, page_segment: s.seg ?? 0, t_since_reset_s: (s.seg ?? 0) > 0 ? +((s.step - (s.gate_step ?? 0)) / 15).toFixed(3) : null } : {}), ...(fam === 'S' || fam === 'A' ? { t_since_gate_s: +((s.step - (s.gate_step ?? 0)) / 15).toFixed(3) } : {}), generator: `vlm/capture@${D.gitSha}` } };
   const bad = discardReason(D.ledger, i0, i1, D.licence), v = validateRecord(rec);
   return { rec, files: Object.fromEntries(names.map((n, k) => [n, png(frames[k].png)]).concat(extra.files || [])), error: bad || (v.ok ? null : v.errors.join('; ')) };
 }

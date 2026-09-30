@@ -4,6 +4,11 @@ import { planEpisode, aCells, SKIES, landingSchedule, dockingSchedule, rngOf } f
 import { frameStats, saneFrame, straddles, keepProb, landingW, dockingW } from '../vlm/capture/probe/frame.js';
 import { P6_SEEDS, drawInjection } from '../vlm/gen/inject.js';
 import { pickCell, DEAD_TRIES, sameHistory } from '../vlm/capture/families.mjs';
+import { segmentPlan, EARLY_STEPS, MAX_OFFSET, MAX_RESETS } from '../vlm/capture/episode_corridor.mjs';
+import { freeSpan, freshRecords, writeEpisode } from '../vlm/capture/records.mjs';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { armLanding, landingTriggerStep, landingTrig, landingOracle, inCloudOf } from '../vlm/capture/probe/landing.js';
 import { armDocking, dockingTriggerStep, dockingTrig, stepArmed, centrelinePose, dockingOracle, CENTRELINE_NEAR } from '../vlm/capture/probe/docking.js';
 import { createLandingSim, drawConditions } from '../src/landing/sim.js';
@@ -142,4 +147,20 @@ test('A cell pick: the cell furthest from its quota first; a cell with no record
   const all = Object.fromEntries(aCells(1600).map((c) => [`${c.route}|${c.sky}`, 1])); all['moscow|storm'] = 0; assert.equal(`${pickCell(all).route}|${pickCell(all).sky}`, 'moscow|storm');
   assert.notEqual(`${pickCell(all, { 'moscow|storm': DEAD_TRIES }).route}`, 'moscow', 'the dead cell is skipped'); assert.equal(pickCell(all, { 'moscow|storm': DEAD_TRIES - 1 }).route, 'moscow');
   const dead = Object.fromEntries(aCells(1600).map((c) => [`${c.route}|${c.sky}`, DEAD_TRIES])); assert.equal(pickCell({}, dead), null);
+});
+test('N-1: a page spans only the free indices from its first episode; only records not yet on disk count (M-a)', () => {
+  const done = new Set([0, 1, 2, 5, 50003]);
+  assert.equal(freeSpan(done, 3, MAX_RESETS + 1), 2, 'episodes 3 and 4 are free; 5 is finished'); assert.equal(freeSpan(done, 6, MAX_RESETS + 1), MAX_RESETS + 1); assert.equal(freeSpan(done, 5, 11), 0);
+  const tmp = fs.existsSync('/Volumes/LaCie/astro-pilot/vlm/tmp') ? '/Volumes/LaCie/astro-pilot/vlm/tmp' : os.tmpdir(), d = fs.mkdtempSync(path.join(tmp, 'apv-fresh-'));
+  try {
+    const rec = (k) => ({ rec: { key: k, frames: [] }, files: {} }); writeEpisode(d, [rec('A_r_50003_000023').rec], {}, 50003);
+    assert.deepEqual(freshRecords(d, [rec('A_r_50003_000023'), rec('A_r_00003_000046')]).map((r) => r.rec.key), ['A_r_00003_000046'], 'a rewritten twin does not count again');
+  } finally { fs.rmSync(d, { recursive: true, force: true }); }
+});
+test('check 8: an A segment starts its candidate grid at a random offset (0-45 steps), so the first candidate is not phase-locked to the reset', () => {
+  const firsts = new Set();
+  for (let seed = 1; seed <= 300; seed++) { const p = segmentPlan(rngOf(seed), 'A', 7); firsts.add(p[0].cand - 7); assert.ok(p[0].cand - 7 >= 23 && p[0].cand - 7 <= 23 + MAX_OFFSET); assert.equal(p[1].cand - p[0].cand, 23); }
+  assert.ok(firsts.size > 30, `${firsts.size} distinct first offsets`); assert.equal(EARLY_STEPS, 69, '4.6 s at 15 Hz');
+  assert.equal(segmentPlan(rngOf(3), 'S', 100)[0].cand, 123, 'S keeps its grid');
+  const a = rngOf(9), b = rngOf(9); assert.deepEqual(segmentPlan(a, 'A', 0), segmentPlan(b, 'A', 0), 'a twin (same rng) replays the plan');
 });
