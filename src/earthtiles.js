@@ -2,9 +2,10 @@
 // imagery source serves which level, Terrarium elevation decoding, the level of detail for a viewing distance and the
 // rings' tile windows; then the local frame, the Sun in it, the telescope camera's pose, panning and the clip planes.
 import { julianDay, gmst, sunEci, moonEci } from './ephem.js';
-export const R_KM = 6371, MAX_LAT = 85.0511287798066, MIN_LEVEL = 4, MAX_LEVEL = 18, RING_TILES = 8, HEIGHT_TILES = 4, MAX_HEIGHT_LEVEL = 13;
-// From test/probe_earthtiles.mjs (2026-09-28): the newest Sentinel-2 cloudless mosaic, and Esri's placeholder for
-// missing deep imagery (the same 2521-byte JPEG over every open-ocean tile at levels 17-18).
+export const R_KM = 6371, MAX_LAT = 85.0511287798066, MIN_LEVEL = 4, MAX_LEVEL = 19, RING_TILES = 8, HEIGHT_TILES = 4, MAX_HEIGHT_LEVEL = 13;
+// From test/probe_earthtiles.mjs (2026-09-28, confirmed at z19 on 2026-09-29): the newest Sentinel-2 cloudless
+// mosaic, and Esri's placeholder for missing deep imagery (the same 2521-byte JPEG over every open-ocean tile at
+// levels 17-19).
 export const EOX_YEAR = 2025;
 export const ESRI_BLANK = { bytes: 2521, sha1: '1660d86a87f57ef0ff580822e0e62f0feb48deee' };
 const DEG = Math.PI / 180, KM_PER_PX0 = 156.54303392804097, EQUATOR_KM = 40075.016686;

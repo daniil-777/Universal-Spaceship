@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { lonLatToTile, tileToLonLat, tileSizeKm, SOURCES, EOX_YEAR, sourceForLevel, tileUrl, tileLevelOf, HEIGHT_SOURCE, heightLevel, decodeTerrarium, levelFloat, pickInnerLevel, ringLevels, ringWindow, heightWindow, windowTiles, RING_TILES, RING_COUNT, HEIGHT_TILES, MAX_LAT, R_KM, createLocalFrame, globeAxes, sunLocal, cameraPose, panTarget, clipPlanes, heightTileFor, entryPoint, KM_PER_DEG } from '../src/earthtiles.js';
+import { lonLatToTile, tileToLonLat, tileSizeKm, SOURCES, EOX_YEAR, sourceForLevel, tileUrl, tileLevelOf, HEIGHT_SOURCE, heightLevel, decodeTerrarium, levelFloat, pickInnerLevel, ringLevels, ringWindow, heightWindow, windowTiles, RING_TILES, RING_COUNT, HEIGHT_TILES, MAX_LAT, MAX_LEVEL, R_KM, createLocalFrame, globeAxes, sunLocal, cameraPose, panTarget, clipPlanes, heightTileFor, entryPoint, KM_PER_DEG } from '../src/earthtiles.js';
 import { julianDay, gmst, moonEci } from '../src/ephem.js';
 
 const close = (a, b, eps, msg = '') => assert.ok(Math.abs(a - b) <= eps, `${msg} ${a} vs ${b}`);
@@ -43,14 +43,23 @@ test('level of detail: the screen pixel footprint picks the level; the inner rin
   assert.ok(levelFloat(1, 45, 45, 900) > levelFloat(10, 45, 45, 900));
   assert.equal(pickInnerLevel(15.4), 16); assert.equal(pickInnerLevel(16.2, 16), 16); assert.equal(pickInnerLevel(16.4, 16), 17);
   assert.equal(pickInnerLevel(14.8, 16), 16); assert.equal(pickInnerLevel(14.6, 16), 15);
-  assert.equal(pickInnerLevel(30), 18); assert.equal(pickInnerLevel(-5), 4); assert.equal(pickInnerLevel(30, 16), 18);
+  assert.equal(pickInnerLevel(30), MAX_LEVEL); assert.equal(pickInnerLevel(-5), 4); assert.equal(pickInnerLevel(30, 16), MAX_LEVEL);
   assert.equal(RING_COUNT, 5);
   assert.deepEqual(ringLevels(16), [16, 15, 14, 12, 10]); assert.deepEqual(ringLevels(17), [17, 16, 15, 14, 12]); assert.deepEqual(ringLevels(5), [5, 4, 3, 2]); assert.deepEqual(ringLevels(4), [4, 3, 2]);
-  for (let L = 4; L < 18; L++) {
+  for (let L = 4; L < MAX_LEVEL; L++) {
     const a = ringLevels(L), b = ringLevels(L + 1), fresh = b.filter((x) => !a.includes(x));
     assert.ok(fresh.length <= 1, `a one-level step from ${L} brings at most one new ring: ${fresh}`);
     assert.ok(Math.min(...b) <= L + 1 - 5 || Math.min(...b) === 2, `the outer ring still reaches the horizon at ${L + 1}: ${b}`);
   }
+});
+
+test('Esri z19 (2026-09-29 zoom diagnosis, MAX_LEVEL 18 -> 19): closest views get real extra detail', () => {
+  assert.equal(MAX_LEVEL, 19);
+  assert.equal(sourceForLevel(19).name, 'Esri World Imagery');
+  const zf = levelFloat(0.4, 46, 45, 900 * 2);
+  assert.ok(zf >= 18.5, `Retina (pixelRatio 2) at 0.4 km asks for at least level 18.5: ${zf}`);
+  assert.equal(pickInnerLevel(zf, null), 19, 'a fresh state opens straight at 19 when the screen footprint calls for it');
+  assert.deepEqual(ringLevels(19), [19, 18, 17, 16, 14], 'one level finer than ringLevels(18), same shape (per the existing one-new-ring rule)');
 });
 
 test('ring windows: 8 × 8 tiles on even indices around the point, 64 distinct toroidal slots, inner tiles first, poles and the antimeridian', () => {
@@ -63,7 +72,7 @@ test('ring windows: 8 × 8 tiles on even indices around the point, 64 distinct t
 });
 
 test('height windows: 4 × 4 Terrarium tiles one level up cover the ring (more than cover it where heights stop at 13)', () => {
-  for (const [lon, lat] of [[7.658, 45.976], [-74, 40.7], [139.7, 35.7], [-150, -60]]) for (let L = 2; L <= 18; L += 1) {
+  for (const [lon, lat] of [[7.658, 45.976], [-74, 40.7], [139.7, 35.7], [-150, -60]]) for (let L = 2; L <= MAX_LEVEL; L += 1) {
     const w = ringWindow(lon, lat, L), h = heightWindow(w), s = 2 ** (h.level - L);
     close(h.x0 + h.off[0] * HEIGHT_TILES, w.x0 * s, 1e-9, 'ring start x'); close(h.y0 + h.off[1] * HEIGHT_TILES, w.y0 * s, 1e-9, 'ring start y');
     close(h.scale * HEIGHT_TILES, RING_TILES * s, 1e-12, 'ring width');
@@ -127,7 +136,7 @@ test('entry point: over the ship in Earth orbit; over the route moved on by the 
 });
 
 test('each colour tile of a ring finds its height tile in the ring’s height window', () => {
-  for (const [lon, lat] of [[7.658, 45.976], [-74, 40.7], [179.9, 0], [0, 84]]) for (let L = 2; L <= 18; L++) {
+  for (const [lon, lat] of [[7.658, 45.976], [-74, 40.7], [179.9, 0], [0, 84]]) for (let L = 2; L <= MAX_LEVEL; L++) {
     const w = ringWindow(lon, lat, L), hw = heightWindow(w), keys = new Map(windowTiles({ level: hw.level, x0: hw.x0, y0: hw.y0 }, HEIGHT_TILES).map((t) => [t.slot, t.key]));
     for (const t of windowTiles(w, RING_TILES)) { const h = heightTileFor(t.x, t.y, L, hw); assert.equal(keys.get(h.slot), h.key, `L${L} ${t.key}`); }
   }
