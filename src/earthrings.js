@@ -31,8 +31,10 @@ const VERT = /* glsl */`uniform sampler2D tHeight; uniform vec2 uHOff; uniform f
 // A coarser ring never competes in depth with the next finer ring (diagnosis 2026-09-29, fix A): each ring's relief comes
 // from its own height level, so where the rings overlap a coarse ring's smoothed valleys would sit above the fine ring's
 // real ones and win the depth test. Under the finer ring's footprint (where its tiles are in) the coarse ring is pushed to
-// the far plane, so it only ever shows THROUGH the finer ring (while that one fades in, and in its edge band), and once
-// the finer ring's imagery and relief are fully in, the coarse ring leaves a hole in its interior. The test wraps in
+// the far plane while the finer ring fades in, so it only ever shows THROUGH it. Once the finer ring's imagery and relief
+// are fully in, the coarse ring leaves a hole in its interior and is pushed only a fifth of the way to the far plane in
+// the finer ring's edge band: enough to stay behind the finer ring, yet still in front of more distant, coarser terrain
+// (with the full push that terrain showed through the band on grazing ridges as a pale "sail"). The test wraps in
 // longitude (uInnerWrap): a level-2 ring spans the globe twice, and a copy of it left at its true depth would hide the
 // pushed rings. Haze grows with the air crossed (the path below uAirTop km), not with the distance, so a view straight
 // down from orbit stays clear while a low view's horizon fades.
@@ -54,7 +56,7 @@ const FRAG = /* glsl */`uniform sampler2D tColor, tMask, tInner; uniform vec2 uC
     float dist = length(cameraPosition - vW), air = dist * min(1.0, uAirTop / max(cameraPosition.y - vW.y, uAirTop));
     col = mix(col, uHazeCol * (0.2 + 0.8 * day), uHazeK * (1.0 - exp(-air / uHazeL)));
     vec2 e = smoothstep(vec2(0.0), vec2(0.08), vUv) * smoothstep(vec2(0.0), vec2(0.08), 1.0 - vUv);
-    gl_FragDepth = under ? 0.99999 : gl_FragCoord.z;
+    gl_FragDepth = !under ? gl_FragCoord.z : (uInnerDone > 0.5 ? mix(gl_FragCoord.z, 1.0, 0.2) : 0.99999);
     col = mix(col, uTint, uTintOn);
     gl_FragColor = vec4(col, uVis * e.x * e.y * day); }`;          // the night side fades to the globe's city lights
 
