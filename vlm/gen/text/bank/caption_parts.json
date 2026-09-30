@@ -1,14 +1,14 @@
 {
   "cap_part_hazard": { "kind": "caption_part", "families": ["S", "A"], "slots": ["a_kind", "clock", "size"], "part": "hazard", "forms": [
     "The nearest hazard in view is {a_kind}, {size} in the frame, at {clock}.",
-    "Closest among them is {a_kind} at {clock}, looking {size}.",
-    "The nearest one, {a_kind}, sits at {clock} and looks {size}.",
+    "Closest among them is {a_kind} at {clock} in the image, looking {size}.",
+    "The nearest one, {a_kind}, sits at {clock} in the frame and looks {size}.",
     "At {clock} there is {a_kind}, the nearest hazard, {size} on screen.",
-    "{a_kind} at {clock} is the nearest hazard and appears {size}.",
-    "The closest visible hazard is {a_kind}; it is {size} and sits at {clock}.",
+    "{a_kind} at {clock} in the image is the nearest hazard and appears {size}.",
+    "The closest visible hazard is {a_kind}; it is {size} and sits at {clock} on the image.",
     "Nearest in view is {a_kind} at {clock}, {size} in the image.",
     "The hazard closest to the ship is {a_kind}, at {clock} and {size} in the frame.",
-    "{a_kind} sits at {clock}; it is the nearest hazard and looks {size}.",
+    "{a_kind} sits at {clock} in the picture; it is the nearest hazard and looks {size}.",
     "Of the hazards in view, the nearest is {a_kind} at {clock}, {size} in the picture."
   ] },
   "cap_part_side": { "kind": "caption_part", "families": ["S", "A"], "slots": ["side_at"], "part": "side", "forms": [

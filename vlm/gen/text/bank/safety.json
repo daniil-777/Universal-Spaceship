@@ -271,7 +271,7 @@
     "The frame shows {a_kind} at {clock}.",
     "There is {a_kind} at {clock} in the frame.",
     "At {clock} in the image there is {a_kind}.",
-    "{a_kind} appears at {clock}.",
+    "{a_kind} appears at {clock} in the image.",
     "In view: {a_kind} at {clock}.",
     "The nearest hazard in view is {a_kind} at {clock}.",
     "{a_kind} sits at {clock} in the frame.",

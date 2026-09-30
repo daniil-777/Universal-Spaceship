@@ -121,14 +121,14 @@
   ] },
   "nearest_clock_a": { "kind": "vqa_a", "families": ["S", "A"], "slots": ["clock"], "forms": [
     "It sits at {clock} in the image.",
-    "The nearest one is at {clock}.",
+    "The nearest one is at {clock} in the frame.",
     "At {clock} in the frame.",
     "It appears at {clock} on the image.",
-    "You can find it at {clock}.",
+    "You can find it at {clock} in the image.",
     "It is at the {clock} position in the picture.",
-    "Look at {clock}; it is there.",
+    "Look at {clock} on the image; it is there.",
     "It lies at {clock} in the frame.",
-    "The closest one shows at {clock}.",
+    "The closest one shows at {clock} in the picture.",
     "On the image clock it is at {clock}."
   ] },
   "size_q": { "kind": "vqa_q", "families": ["S", "A"], "slots": ["kind"], "forms": [

@@ -163,6 +163,7 @@ test('verify_cli: stdin {text, record, context, names} gives {verified, errors}'
 test('bank rules: Z detail leads carry {range} and {terrain}; monitor answers name the monitor; caption, safety and family minimums', () => {
   const T = Object.entries(bank);
   for (const [id, t] of T) if (t.kind === 'caption_detail' && t.families.includes('Z')) assert.ok(t.slots.includes('range') && t.slots.includes('terrain'), id);
+  for (const [id, t] of T) if (t.slots.includes('clock')) for (const f of t.forms) assert.match(f, /image|frame|picture|screen|view/i, `${id}: the image clock is screen-relative: ${f}`);
   for (const [id, t] of T) if (/^(is_safe|why|what_to_do)(_\w+)?_a$/.test(id) || t.kind === 'safety') for (const f of t.forms) assert.match(f, /monitor/i, `${id}: ${f}`);
   for (const fam of ['S', 'A', 'L', 'D', 'Z']) {
     assert.ok(T.filter(([, t]) => t.families.includes(fam) && t.kind.startsWith('caption_') && t.kind !== 'caption_part').length >= 2, fam);
