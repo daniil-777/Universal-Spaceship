@@ -67,7 +67,7 @@ export function assemble(D, ep, s, extra = {}) {
     render: { viewport: [896, 504], dpr: 1, renderScale: 1, toneMapping: 'ACESFilmic', capture_mode: D.mode, view: { eye: extra.eyeView ?? (fam === 'Z' ? 'zoom' : 'chase'), narrator: fam === 'Z' ? 'zoom' : 'chase' }, path: fam === 'L' ? false : null, imagery, licence_profile: D.licence },
     provenance: { git_sha: D.gitSha, site_dirty: !!D.siteDirty, page_url: ep.url, seed: ep.seed, render_seed: ep.renderSeed, episode: ep.episode, step: s.step, sim_t_s: +(s.step * (STEP_S[fam] ?? 0)).toFixed(4), utc_ms: ep.utcMs,
       clock: frames.map((f) => f.clock), policy_id: ep.policyId ?? null, policy_sha: ep.policySha ?? null, injection: s.injection ?? null, twin_of: ep.twinOf !== undefined && ep.twinOf !== null ? recordKey(fam, D.run, ep.twinOf, s.srcStep ?? s.step) : null,
-      sampler_weight: s.weight ?? 1, ...(fam === 'A' ? { atmosphere: s.atmosphere } : {}), ...(fam === 'S' || fam === 'A' ? { t_since_gate_s: +((s.step - (s.gate_step ?? 0)) / 15).toFixed(3) } : {}), generator: `vlm/capture@${D.gitSha}` } };
+      sampler_weight: s.weight ?? 1, ...(fam === 'A' ? { atmosphere: s.atmosphere, page_episode: ep.pageEpisode ?? ep.episode, page_segment: s.seg ?? 0 } : {}), ...(fam === 'S' || fam === 'A' ? { t_since_gate_s: +((s.step - (s.gate_step ?? 0)) / 15).toFixed(3) } : {}), generator: `vlm/capture@${D.gitSha}` } };
   const bad = discardReason(D.ledger, i0, i1, D.licence), v = validateRecord(rec);
   return { rec, files: Object.fromEntries(names.map((n, k) => [n, png(frames[k].png)]).concat(extra.files || [])), error: bad || (v.ok ? null : v.errors.join('; ')) };
 }

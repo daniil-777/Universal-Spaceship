@@ -1,14 +1,15 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { planEpisode, aCells, SKIES, landingSchedule, dockingSchedule, rngOf } from '../vlm/gen/sampler.js';
-import { frameStats, saneFrame, straddles, keepProb } from '../vlm/capture/probe/frame.js';
+import { frameStats, saneFrame, straddles, keepProb, landingW, dockingW } from '../vlm/capture/probe/frame.js';
 import { P6_SEEDS, drawInjection } from '../vlm/gen/inject.js';
-import { pickCell, DEAD_TRIES } from '../vlm/capture/families.mjs';
-import { armLanding, landingTriggerStep, landingTrig, landingOracle } from '../vlm/capture/probe/landing.js';
-import { armDocking, dockingTriggerStep, dockingTrig, stepArmed, centrelinePose, dockingOracle } from '../vlm/capture/probe/docking.js';
+import { pickCell, DEAD_TRIES, sameHistory } from '../vlm/capture/families.mjs';
+import { armLanding, landingTriggerStep, landingTrig, landingOracle, inCloudOf } from '../vlm/capture/probe/landing.js';
+import { armDocking, dockingTriggerStep, dockingTrig, stepArmed, centrelinePose, dockingOracle, CENTRELINE_NEAR } from '../vlm/capture/probe/docking.js';
 import { createLandingSim, drawConditions } from '../src/landing/sim.js';
 import { replayLanding, stepOf } from '../vlm/gen/labels/landing.js';
-import { createRealSim, replayDocking, cycleOf, SHIP_PORT, portRel } from '../vlm/gen/labels/docking.js';
+import { createRealSim, replayDocking, cycleOf, SHIP_PORT, STATION_PORT, portRel } from '../vlm/gen/labels/docking.js';
+import { qRotate } from '../src/mathx.js';
 
 const q = (u) => new URLSearchParams(u.split('?')[1]);
 test('L never uses seed 0, always view=chase and path=0; S uses lowpass=0; every URL carries rs', () => {
@@ -74,13 +75,40 @@ test('D armed kick: fires in cycles and skips at its trigger (and phase), the or
   while (!s2.rep.done && !dockingTrig(s2, kos.trigger)) s2.step();
   assert.equal(s2.rep.done, false, 'the KOS band triggers in the near run'); assert.equal(s2.guid.st.phase, 'CORRIDOR'); assert.ok(Math.hypot(...portRel(s2.x, s2.q)) <= 25);
 });
-test('D centreline camera: at SHIP_PORT + 0.5 m along body +X, looking 100 m down that axis, up = body +Y', () => {
+test('D centreline camera: at SHIP_PORT, looking 100 m down body +X, up = body +Y', () => {
   const calls = [], vec = () => ({ v: null, set(...a) { this.v = a; return this; } }), cam = { position: vec(), up: vec() };
   const half = Math.SQRT1_2, s = { x: [-40, 1, 2], q: [0, 0, half, half] };
   centrelinePose(cam, s, (x, y, z) => calls.push([x, y, z]));
   const port = [s.x[0] + 0.99, s.x[1] + 18.9, s.x[2]], near = (a, b) => a.every((v, i) => Math.abs(v - b[i]) < 1e-9);
-  assert.ok(near(cam.position.v, [port[0], port[1] + 0.5, port[2]]), `${cam.position.v}`); assert.ok(near(cam.up.v, [-1, 0, 0]));
+  assert.ok(near(cam.position.v, port), `${cam.position.v}`); assert.ok(near(cam.up.v, [-1, 0, 0]));
   assert.ok(near(calls[0], [port[0], port[1] + 100, port[2]])); assert.deepEqual(SHIP_PORT, [18.9, -0.99, 0]);
+});
+test('I-1: below 1 m axial, down to 1 s before contact, the station port face stays in front of the 0.05 m near plane', () => {
+  for (const seed of [5, 11, 503]) {
+    const args = { seed, start: 'final', nav: 'noisy', filter: true }, end = dockingOracle(args).endT, sim = createRealSim(args), vec = () => ({ v: null, set(...a) { this.v = a; return this; } });
+    let seen = 0, minAx = Infinity;
+    while (!sim.rep.done && sim.t <= end - 1) {
+      const ax = -portRel(sim.x, sim.q)[0];
+      if (ax < 1) {
+        const cam = { position: vec(), up: vec() }; centrelinePose(cam, sim, () => {}); const f = qRotate(sim.q, [1, 0, 0]), d = [0, 1, 2].reduce((a, i) => a + (STATION_PORT[i] - cam.position.v[i]) * f[i], 0);
+        assert.ok(d > CENTRELINE_NEAR, `seed ${seed} axial ${ax.toFixed(3)} m: port face at ${d.toFixed(3)} m, near ${CENTRELINE_NEAR}`); assert.ok(Math.abs(d - ax) < 0.05, 'depth ~ axial'); seen++; minAx = Math.min(minAx, ax);
+      }
+      sim.step();
+    }
+    assert.ok(seen > 5 && minAx < 0.15, `seed ${seed}: ${seen} states below 1 m, min axial ${minAx}`);
+  }
+});
+test('T10-b in cloud: the fog closed in at least halfway over the visibility fog (k >= 0.5); the phase weights', () => {
+  assert.equal(inCloudOf(0.0016, 0.0016), false); assert.equal(inCloudOf(0.0016 + 0.5 * (0.012 - 0.0016), 0.0016), true); assert.equal(inCloudOf(0.012, 0.00008), true);
+  assert.equal(inCloudOf(0.004, 0.0016), false); assert.equal(inCloudOf(0.02, null), false);
+  assert.equal(landingW({ hRAft: 1200, wow: false }), 0.35); assert.equal(landingW({ hRAft: 0, wow: true }), 0.35, 'M-6: the ground roll'); assert.equal(landingW({ hRAft: 400, wow: false }), 1);
+  assert.equal(dockingW({ rho: 31 }), 0.4); assert.equal(dockingW({ rho: 12 }), 1);
+});
+test('I-2: a twin sample counts only with its original\'s step and, per frame, step and page clock', () => {
+  const fr = (k) => [0, 1, 2].map((i) => ({ step: 10 + i * 3 + k, clock: { perf_ms: 1000 + 48 * i, date_ms: 5 + 48 * i } })), o = { step: 16, frames: fr(0) };
+  assert.equal(sameHistory({ step: 16, frames: fr(0) }, o), true); assert.equal(sameHistory({ step: 16, frames: fr(0) }, null), false);
+  assert.equal(sameHistory({ step: 17, frames: fr(0) }, o), false); assert.equal(sameHistory({ step: 16, frames: fr(1) }, o), false);
+  const late = fr(0); late[2] = { ...late[2], clock: { perf_ms: 1112, date_ms: 101 } }; assert.equal(sameHistory({ step: 16, frames: late }, o), false);
 });
 test('ring rule: a clip straddles an injection when f0 <= injection step <= f2', () => {
   const fr = [{ step: 10 }, { step: 30 }, { step: 50 }];

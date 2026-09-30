@@ -20,7 +20,7 @@ export function assertBeltPilot(ap, p) {
 export async function setup(family, p) {
   const ap = window.__ap, env = ap.env, step = Object.getPrototypeOf(env).step;
   if (family === 'S') assertBeltPilot(ap, p);
-  const st = { family, p, ap, env, noop: 0, noopDone: 0, crashed: false, override: null, lastRaw: null, bad: null };
+  const st = { family, p, ap, env, noop: 0, noopDone: 0, crashed: false, override: null, lastRaw: null, bad: null, resets: 0, resetsAtCrash: null };
   // A (§3.2): atmospheric flight on the planned route before the first step, else the drive discards the episode (check().bad)
   if (family === 'A' && !(ap.state.atmo === true && env.atmosphere && ap.state.route === p.route)) st.bad = `A page is not in atmospheric flight on ${p.route}: atmo ${ap.state.atmo}, env.atmosphere ${env.atmosphere}, route ${ap.state.route}`;
   // the search pilot (§3.2 A behaviour, search_v1) flies through the env.step wrapper; cloneEnv never copies the wrapper
@@ -28,15 +28,18 @@ export async function setup(family, p) {
   env.step = function (a) {
     if (st.noop > 0) { st.noop--; st.noopDone++; return { reward: 0, done: false, truncated: false, progress: 0 }; }
     const act = st.override ? st.override(env) : a; st.lastRaw = Array.from(act);
-    const r = step.call(env, act); if (r.done) st.crashed = true; return r;
+    const r = step.call(env, act); if (r.done) { if (!st.crashed) st.resetsAtCrash = st.resets; st.crashed = true; } return r;
   };
+  // the page's own resets (app.js:158, 1.6 s after a crash; applyWorld) are counted, so A can sample across them (ruling T10-a)
+  const reset0 = Object.getPrototypeOf(env).reset;
+  env.reset = function (...a) { st.resets++; return reset0.apply(env, a); };
   return st;
 }
 export function check(st) {
   const ap = st.ap, t = ap.terrainStats ? ap.terrainStats() : null;
   const strips = !t || ['far', 'near', 'city'].every((k) => !t[k] || (t[k].loads === t[k].copies + t[k].fails && t[k].fails === 0));
   const meshy = [ap.mountains, ap.chunks].every((m) => !m || typeof m.stats !== 'string' || !m.stats.includes('L'));
-  return { ok: strips && meshy, bad: st.bad, steps: st.env.steps, crashed: st.crashed || ap.state.crashTimer > 0, noopDone: st.noopDone, textures: !!ap.texturesReady,
+  return { ok: strips && meshy, bad: st.bad, steps: st.env.steps, crashed: st.crashed || ap.state.crashTimer > 0, crashTimer: ap.state.crashTimer, resets: st.resets, resetsAtCrash: st.resetsAtCrash, noopDone: st.noopDone, textures: !!ap.texturesReady,
     atmosphere: ap.space ? ap.space.atmosphere : 0, atmo: ap.state.atmo, route: ap.state.route, world: st.env.world, lap: !!(st.env.hf && st.env.hf.lap), policyAtmo: !!ap.policyAtmo, policyError: ap.policyError || null,
     renderScale: ap.renderScale ?? 1, pixelRatio: ap.debug().pixelRatio };
 }
@@ -61,7 +64,9 @@ export function label(st, { cNear }) {
   const facts = corridorFacts(st.env, cam, { sky: st.p.sky ?? null, route: st.p.route ?? null, space: spaceOf(ap, cam) });
   return { facts, safety, safety_eye, cam, ms: { rollout: t1 - t0, facts: rt() - t1 } };
 }
-export function restore(st) { delete st.env.step; return true; }
+export function restore(st) { delete st.env.step; delete st.env.reset; return true; }
+// after the page's reset that follows a crash, the sticky crash flag is cleared so the next segment can sample
+export function clearCrash(st) { st.crashed = false; st.resetsAtCrash = null; return true; }
 export const camInCloud = (st) => { const c = st.ap.camera.position, w = st.env.weather; return w ? w.cloudAt(c.x, c.y, c.z) : 0; };
 // S/A collision course (§3.3): the nearest hazard is moved so that, at constant velocity, it meets the ship's extrapolated
 // position hit_s after f2 (applied leadSteps before f2); its CPA from f2 is then ~0 (< r + 1.2) within 1-4 s

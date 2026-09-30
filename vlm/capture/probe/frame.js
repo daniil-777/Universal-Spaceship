@@ -14,3 +14,7 @@ export const straddles = (inj, fr) => !!inj && inj.step >= fr[0].step && inj.ste
 // the probe's oracle run), w = 0.35 above 1000 ft (L) or 0.4 beyond 30 m (D), else 1; with w = 1 this is selection sampling,
 // which keeps exactly the free slots, spread uniformly over the run
 export const keepProb = (w, slots, m) => (slots <= 0 ? 0 : Math.min(1, (w * slots) / Math.max(1, m)));
+// the phase weights w: L 0.35 above 1000 ft and on the ground roll (WOW, ruling M-6), else 1; D 0.4 beyond 30 m, else 1. A kept
+// sample stores sampler_weight = 1 / keepProb (ruling I-3); an injection clip is forced (weight 1)
+export const landingW = (c) => (c.hRAft > 1000 || c.wow ? 0.35 : 1);
+export const dockingW = (c) => (c.rho > 30 ? 0.4 : 1);

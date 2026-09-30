@@ -10,16 +10,19 @@
 // and frames before the fault shows are byte-identical (build.mjs flags them pixel_identical_pair).
 import sharp from 'sharp';
 import { openPage, boot, BOOT, loadProbe, call, frame, waitIdle, Discard } from './session.mjs';
-import { frameStats, saneFrame, straddles, keepProb } from './probe/frame.js';
+import { frameStats, saneFrame, straddles, keepProb, landingW } from './probe/frame.js';
 export const H = 1 / 120, PRE = 63, MAX_SAMPLES = 12;
 const chk = (S) => S.page.evaluate(() => window.__apv.check());
 async function step1(S, D, ops) { await waitIdle(S, null, { stop: D.stop }); await frame(S, D.mode); if (ops) ops.push(['frame']); }
 async function framesUntil(S, D, ops, pred, max = 20000) { for (let i = 0; i < max; i++) { const c = await chk(S); if (pred(c)) return c; await step1(S, D, ops); } throw new Discard('landing target not reached'); }
-// a frame failing the blank-buffer guard (alpha 0 or luminance variance <= 4: a blank buffer, or a uniform frame inside a
-// cloud deck) is returned as null and drops its clip only (counted in stats.drops.blank)
+// a frame failing the blank-buffer guard (alpha 0 or luminance variance <= 4) is returned as null and drops its clip only
+// (stats.drops.blank), unless the page says the camera is inside the cloud deck (ruling T10-b: kept, scene.in_cloud)
 async function grab(S, D, T) {
   const t = performance.now(), f = await call(S, 'capture'), px = await sharp(Buffer.from(f.png.split(',')[1], 'base64')).ensureAlpha().raw().toBuffer();
-  if (!saneFrame(frameStats(px))) { if (T) T.drops.blank = (T.drops.blank || 0) + 1; return null; }
+  if (!saneFrame(frameStats(px))) {
+    if (!f.inCloud || frameStats(px).alphaMax === 0) { if (T) T.drops.blank = (T.drops.blank || 0) + 1; return null; }
+    if (T) T.inCloudKept = (T.inCloudKept || 0) + 1;
+  }
   f.ledger = [D.ledger.length, D.ledger.length];
   if (T) { T.grabs++; T.grabMs += performance.now() - t; T.pngBytes += Math.floor(((f.png.length - f.png.indexOf(',') - 1) * 3) / 4); }
   return f;
@@ -32,7 +35,12 @@ async function replay(S, D, ep, out, T) {
     else if (!ep.keep.has(op[1])) continue;
     else if (op[0] === 'clip') buf[op[1]] = [];
     else if (op[0] === 'grab') buf[op[1]].push(await grab(S, D, T));
-    else if (op[0] === 'snap') { const fr = buf[op[1]]; if (!clean(fr, T)) continue; out.push({ idx: op[1], step: await call(S, 'snap'), srcStep: op[2], n: [fr[1].step - fr[0].step, fr[2].step - fr[1].step], frames: fr, injection: null }); }
+    else if (op[0] === 'snap') {
+      const fr = buf[op[1]]; if (!clean(fr, T)) continue;
+      // M-4: a twin sample sits at its original's step (the replayed ops keep the page time and the 120 Hz step count)
+      const st = await call(S, 'snap'); if (st !== op[2] || st !== fr[2].step) { T.drops.twin_step = (T.drops.twin_step || 0) + 1; continue; }
+      out.push({ idx: op[1], step: st, srcStep: op[2], n: [fr[1].step - fr[0].step, fr[2].step - fr[1].step], frames: fr, weight: op[4] ?? 1, injection: null });
+    }
   }
 }
 // a clip is usable when its 3 frames passed the blank guard and their steps increase (a run that ended stops the counter)
@@ -42,7 +50,7 @@ function clean(fr, T) {
   return true;
 }
 // one clip from the state c: f0 8 steps on, then n01 and n12 steps (22-38 each once a frame's 1-2 steps round up)
-async function clip(S, D, ep, out, ops, c, T) {
+async function clip(S, D, ep, out, ops, c, T, weight = 1) {
   const n01 = ep.rng.int(23, 37), n12 = ep.rng.int(23, 37), fr = [], idx = out.length; ops.push(['clip', idx]);
   for (const k of [0, n01, n01 + n12]) {
     const target = c.step + 8 + k, x = await framesUntil(S, D, ops, (y) => y.step >= target || y.done);
@@ -52,8 +60,10 @@ async function clip(S, D, ep, out, ops, c, T) {
   if (!clean(fr, T)) return;
   const inj = (await chk(S)).injected;
   if (straddles(inj, fr)) { T.drops.straddle = (T.drops.straddle || 0) + 1; return; }
-  const st = await call(S, 'snap'), n = [fr[1].step - fr[0].step, fr[2].step - fr[1].step]; ops.push(['snap', idx, st, n]);
-  out.push({ idx, step: st, n, frames: fr, injection: inj && inj.step < fr[0].step ? inj : null });
+  const st = await call(S, 'snap'), n = [fr[1].step - fr[0].step, fr[2].step - fr[1].step];
+  if (st !== fr[2].step) { T.drops.snap_step = (T.drops.snap_step || 0) + 1; return; }
+  ops.push(['snap', idx, st, n, weight]);
+  out.push({ idx, step: st, n, frames: fr, weight, injection: inj && inj.step < fr[0].step ? inj : null });
 }
 async function sampleRun(S, D, ep, out, ops, c0, T) {
   const tInj = c0.injAt === null || c0.injAt === undefined ? null : c0.injAt * H, endT = c0.endT ?? 900;
@@ -78,10 +88,11 @@ async function sampleRun(S, D, ep, out, ops, c0, T) {
     if (tS < c.t) continue;
     const m = ep.schedule.slice(k - 1).filter((t) => t < endT - 1).length;
     if (tS - 1 > c.t + 2) { await adv(tS - 1 - c.t); c = await chk(S); if (c.done) break; }
-    if (ep.rng.float() >= keepProb(c.hRAft > 1000 ? 0.35 : 1, slots, m)) continue;
+    const p = keepProb(landingW(c), slots, m);
+    if (ep.rng.float() >= p) continue;
     if (ep.force === 'below_base' && c.hRAft >= 280) continue;
     await preroll(); c = await framesUntil(S, D, ops, (x) => x.t >= tS || x.done, 400); if (c.done) break;
-    await clip(S, D, ep, out, ops, c, T);
+    await clip(S, D, ep, out, ops, c, T, 1 / p);
   }
 }
 export async function runLanding(D, ep) {

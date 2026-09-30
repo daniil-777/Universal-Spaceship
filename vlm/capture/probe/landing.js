@@ -8,9 +8,16 @@
 // the kick and take the injection clip right after it.
 import { landingFacts, landingNow, landingBranches, stepOf, applyLandingKick } from '../../gen/labels/landing.js';
 import { createLandingSim } from '../../../src/landing/sim.js';
+import { fact } from '../../gen/schema.js';
 const FT = 0.3048, r2 = (x) => +x.toFixed(2);
 const camOf = (c) => ({ mode: 'chase', fov_deg: c.fov, aspect: c.aspect, near: c.near, far: c.far, matrixWorldInverse: Array.from(c.matrixWorldInverse.elements), projectionMatrix: Array.from(c.projectionMatrix.elements) });
 export const landingTrig = (sim, trig) => !sim.flight.wow && sim.flight.air.hRA / FT <= trig.value;
+// In cloud (ruling T10-b), from the page's own visibility state: before any frame the scene's fog density is the visibility's
+// fogD (scene.js:42); each frame it is fogD + (0.012 - fogD) * k, k = how far the camera is inside a BKN/OVC deck (0 outside,
+// 1 about 12 m in; scene.js:93). The camera is in cloud when k >= 0.5, i.e. between the deck's base and top.
+export const IN_CLOUD_FOG = 0.012;
+export const inCloudOf = (density, fogD) => fogD !== null && fogD < IN_CLOUD_FOG && (density - fogD) / (IN_CLOUD_FOG - fogD) >= 0.5;
+const inCloud = (st) => { const f = st.L.scene.scene && st.L.scene.scene.fog; return !!f && inCloudOf(f.density, st.fogD); };
 // the injection record (provenance.injection): step = steps run when the kick lands, as replayLanding counts them
 export function armLanding(sim, inj, onFire) {
   const step0 = sim.step; let fired = false;
@@ -37,7 +44,7 @@ export async function setup(family, p) {
   if (JSON.stringify(cond) !== JSON.stringify(sim.rep.cond)) throw new Error('__landing.conditions(seed) differs from the page run');
   if (p.hflare) sim.gnc.params.hFlare = 0.3;
   const armed = p.inject && p.inject.at === 'runtime' ? p.inject : null, o = landingOracle(cond, p.hflare ? { hFlare: 0.3 } : {}, armed);
-  const st = { L, sim, p, cond, params: p.hflare ? { hFlare: 0.3 } : {}, injection: null, injAt: o.injAt, endT: o.endT, snaps: [], fin: null };
+  const fog = L.scene.scene && L.scene.scene.fog, st = { L, sim, p, cond, params: p.hflare ? { hFlare: 0.3 } : {}, injection: null, injAt: o.injAt, endT: o.endT, snaps: [], fin: null, fogD: fog ? fog.density : null };
   if (armed) armLanding(sim, armed, (r) => { st.injection = r; });
   return st;
 }
@@ -46,11 +53,14 @@ export function capture(st) {
   if (st.L.scene.view !== 'chase') throw new Error(`landing view is ${st.L.scene.view} at capture`);
   const cv = document.getElementById('view'), gl = cv.getContext('webgl2') || cv.getContext('webgl');
   if (!gl.getContextAttributes().preserveDrawingBuffer) throw new Error('preserveDrawingBuffer is off');
-  return { png: cv.toDataURL('image/png'), cam: camOf(st.L.scene.camera), clock: { date_ms: Date.now(), perf_ms: performance.now() }, step: stepOf(st.sim) };
+  return { png: cv.toDataURL('image/png'), cam: camOf(st.L.scene.camera), clock: { date_ms: Date.now(), perf_ms: performance.now() }, step: stepOf(st.sim), inCloud: inCloud(st) };
 }
 export function snap(st) {
-  const sim = st.sim, f = sim.flight, cam = camOf(st.L.scene.camera), sc = { time: st.p.time, vis: st.p.vis, clouds: st.p.clouds, rain: st.p.rain };
-  const s = { step: stepOf(sim), now: landingNow(sim), facts: landingFacts(sim, cam, { scene: sc }), airborne: !f.wow, retard: !!sim.gnc.st.retard, p: Array.from(f.p), v: Array.from(f.v) };
+  // scene.clouds is the page's METAR cloud group (conditions(): "-RA " + FEW|SCT|BKN|OVC with the base, or NSC), the form the
+  // text layer's TEXT_FACTS 'clouds' shape reads; scene.in_cloud (visual, T10-b) says the f2 camera is inside the deck
+  const sim = st.sim, f = sim.flight, cam = camOf(st.L.scene.camera), sc = { time: st.p.time, vis: st.p.vis, clouds: st.cond.clouds ?? null, rain: st.p.rain };
+  const facts = { ...landingFacts(sim, cam, { scene: sc }), 'scene.in_cloud': fact(inCloud(st), null, 'visual') };
+  const s = { step: stepOf(sim), now: landingNow(sim), facts, airborne: !f.wow, retard: !!sim.gnc.st.retard, p: Array.from(f.p), v: Array.from(f.v) };
   st.snaps.push(s); return s.step;
 }
 // sim.run() steps the sim's own closure: an armed kick that has not fired by now stays unfired, as in the samples' labels
@@ -58,6 +68,7 @@ export function finish(st) { const rep = st.sim.run(); st.fin = { result: rep.re
 // a branch replay that ends in timeout is a sample-level discard (schema Discard, e.discard), returned instead of thrown
 export function branches(st, { step }) {
   const s = st.snaps.find((x) => x.step === step);
+  if (st.injection && st.injection.step === step) return { discard: `the ${st.injection.kind} kick landed at the sample step ${step}` };
   try { return { now: s.now, facts: s.facts, outcome: landingBranches({ cond: st.cond, params: st.params, injection: st.injection, step, liveResult: st.fin.result, airborne: s.airborne, retard: s.retard, liveP: s.p, liveV: s.v }) }; }
   catch (e) { if (e && e.discard) return { discard: e.message }; throw e; }
 }

@@ -74,16 +74,20 @@ if (process.argv[1] && process.argv[1].endsWith('drive.mjs')) {
       const res = await nextEpisode(D, { episode: e, seed0: +arg('seed0', 1), rsOverride: arg('rs-override', null), forceWhen: arg('force-when', null) });
       if (res && res.exhausted) { D.log({ exhausted: e }); break; }
       if (!res) { D.ledger.length = 0; saveBudget(); if (D.stop.error) throw D.stop.error; if (family === 'Z') closeEpisode(D, e, [], {}, { why: 'discarded' }); continue; }
-      const kept = res.records.filter((r) => !r.error), tw = res.twin ? res.twin.records.filter((r) => !r.error) : [];
-      for (const r of res.records.concat(res.twin ? res.twin.records : []).filter((x) => x.error)) D.log({ drop: r.rec.key, why: r.error });
-      closeEpisode(D, e, kept.map((r) => r.rec), Object.assign({}, ...kept.map((r) => r.files)), { why: 'no view kept' });
+      // an A page that sampled across crash resets spans episodes e .. e + resets (families.mjs); every other page is episode e
+      const eps = res.episodes || [{ episode: e, records: res.records }], ok = (x) => !x.error, kept = eps.flatMap((x) => x.records).filter(ok), tw = res.twin ? res.twin.records.filter(ok) : [];
+      for (const r of eps.flatMap((x) => x.records).concat(res.twin ? res.twin.records : []).filter((x) => x.error)) D.log({ drop: r.rec.key, why: r.error });
+      // the twin is written before its original's .done (M-1), and a page's first episode's .done last: a resume that finds it
+      // finds the whole page (a partial page is rerun from its first episode and rewrites the same files)
       if (res.twin) writeEpisode(dir, tw.map((r) => r.rec), Object.assign({}, ...tw.map((r) => r.files)), res.twin.episode);
+      for (const x of eps.slice().reverse()) { const k = x.records.filter(ok); closeEpisode(D, x.episode, k.map((r) => r.rec), Object.assign({}, ...k.map((r) => r.files)), { why: 'no view kept' }); }
       const counts = ledgerCounts(D.ledger);
       fs.writeFileSync(path.join(dir, `ledger_${String(e).padStart(5, '0')}.jsonl`), D.ledger.map((x) => JSON.stringify(x)).join('\n')); D.ledger.length = 0;
       // measure_extra_s: a --measure run's encode-only passes, which report.mjs takes off the wall time
       fs.appendFileSync(path.join(dir, 'throughput.jsonl'), JSON.stringify({ episode: e, samples: kept.length + tw.length, twins: tw.length, wall_s: res.wallMs / 1000, measure_extra_s: D.measure ? (res.stats.encMs || 0) / 1000 : 0, ...res.stats, ledger: counts }) + '\n');
       samples += kept.length + tw.length; since += kept.length + tw.length; saveBudget(); if (since >= 50) { ckpt(e); since = 0; }
-      console.log(`episode ${e}: ${kept.length} kept, ${res.records.length - kept.length} dropped, ${(res.wallMs / 1000).toFixed(1)} s; ${samples}/${n} samples`);
+      console.log(`episode ${e}${eps.length > 1 ? `-${e + eps.length - 1}` : ''}: ${kept.length} kept, ${res.records.length - kept.length} dropped, ${(res.wallMs / 1000).toFixed(1)} s; ${samples}/${n} samples`);
+      e = eps[eps.length - 1].episode;
       // a stop latched during a kept episode (its failed requests already dropped their records) ends the drive here
       if (D.stop.error) throw D.stop.error;
     }
