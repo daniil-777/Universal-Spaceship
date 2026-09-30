@@ -8,7 +8,7 @@
 // coarser in a 4 × 4 atlas, decoded in the vertex shader. Tiles come from src/earthloader.js. Units: km in the view's
 // local frame.
 import * as THREE from 'three';
-import { RING_TILES, RING_COUNT, HEIGHT_TILES, MAX_LEVEL, HEIGHT_SOURCE, sourceForLevel, tileUrl, ringLevels, ringWindow, heightWindow, heightTileFor, windowTiles, tileToLonLat, lonLatToTile, tileSizeKm, decodeTerrarium, mod } from './earthtiles.js';
+import { RING_TILES, RING_COUNT, HEIGHT_TILES, MAX_LEVEL, HEIGHT_SOURCE, sourceForLevel, tileUrl, tileLevelOf, ringLevels, ringWindow, heightWindow, heightTileFor, windowTiles, innerWindow, innerState, tileToLonLat, lonLatToTile, tileSizeKm, decodeTerrarium, mod } from './earthtiles.js';
 import { createTileLoader } from './earthloader.js';
 
 const T = 256, GRID = 128, SHOW_AT = 0.9, HIDE_AT = 0.5, UPLOADS_PER_FRAME = 6, RETRY_S = 10;
@@ -28,18 +28,39 @@ const VERT = /* glsl */`uniform sampler2D tHeight; uniform vec2 uHOff; uniform f
     vSea = raw < -1.0 && raw > -12000.0 ? 1.0 : 0.0;          // below sea level (an empty atlas slot decodes to -32768: unknown, not sea)
     vec4 w = modelMatrix * vec4(position + vUp * h, 1.0); vW = w.xyz; gl_Position = projectionMatrix * viewMatrix * w; }`;
 
-// A coarser ring leaves a hole where the next finer ring is fully in (its interior, not its fade band): each ring's relief
-// comes from its own height level, so where the rings overlap a coarse ring's smoothed valleys would sit above the fine
-// ring's real ones and hide them from the depth test. Haze grows with the air crossed (the path below uAirTop km), not
-// with the distance, so a view straight down from orbit stays clear while a low view's horizon fades.
+// A coarser ring never competes in depth with a finer ring (diagnosis 2026-09-29, fix A): each ring's relief comes
+// from its own height level, so where the rings overlap a coarse ring's smoothed valleys would sit above the fine ring's
+// real ones and win the depth test. Under the finer ring's footprint (where its tiles are in) the coarse ring is pushed to
+// the far plane while the finer ring fades in, so it only ever shows THROUGH it. Once the finer ring's imagery and relief
+// are fully in, the coarse ring leaves a hole in its interior and is pushed only a fifth of the way to the far plane in
+// the finer ring's edge band: enough to stay behind the finer ring, yet still in front of more distant, coarser terrain
+// (with the full push that terrain showed through the band on grazing ridges as a pale "sail"). The test wraps in
+// longitude (uInnerWrap): a level-2 ring spans the globe twice, and a copy of it left at its true depth would hide the
+// pushed rings. Haze grows with the air crossed (the path below uAirTop km), not with the distance, so a view straight
+// down from orbit stays clear while a low view's horizon fades.
+// The rings are ONE layer over the globe (Task 7, 2026-09-30). Above 2500 km every ring's alpha carries the view's far
+// fade uFar (1 at 2500 km -> 0 at 4000 km) and the day side, so where a coarse ring C is still drawn under the finer
+// ring F it defers to (F's edge band, and F's whole footprint until F is fully in) two "over" blends let the globe G
+// through (1 - V)^2 instead of (1 - V): a soft box around every finer ring at 2500-4000 km. There, under F, C's alpha
+// is scaled by (1 - cF) / (1 - V cF), cF = F's own cover (its fade-in uInnerVis times its edge fade), V = uFar times
+// day, so the pair composites exactly as V (cF F + (1 - cF) cC C) + (1 - V (cF + (1 - cF) cC)) G. Below 2500 km (uFar =
+// 1) the factor is off, even at dusk: close up, relief parallax shows C's smoother ridges where F has no fragment, and
+// a C faded out there would open holes. It ramps in over uFar 1 -> 0.95 (2500 -> about 2700 km), so crossing 2500 km
+// never pops: at dusk (day < 1) the full factor stays below 1 even as uFar -> 1, and switching it on at once jumped the
+// coarse ring's alpha in the edge bands. Known limitation: cF only knows the one finer ring C defers to, so while three
+// rings fade in together (about 1 s after opening or jumping at far range) the error is reduced, not zero: at most 0.06
+// (C - G) with all three at the same fade-in, against up to 0.24 (C - G) before.
 const FRAG = /* glsl */`uniform sampler2D tColor, tMask, tInner; uniform vec2 uCOff, uVRange, uInnerMin, uInnerCOff; uniform vec3 uSun, uHazeCol;
-  uniform float uVis, uHazeK, uHazeL, uInnerOn, uInnerScale, uAirTop; uniform vec3 uSeaCol;
+  uniform float uVis, uHazeK, uHazeL, uInnerOn, uInnerDone, uInnerScale, uInnerWrap, uAirTop, uInnerVis, uFar; uniform vec3 uSeaCol;
+  uniform vec3 uTint; uniform float uTintOn;
   varying vec2 vUv; varying vec3 vW, vN, vUp; varying float vSea;
+  float edge(vec2 u) { vec2 e = smoothstep(vec2(0.0), vec2(0.08), u) * smoothstep(vec2(0.0), vec2(0.08), 1.0 - u); return e.x * e.y; }
   void main() {
     vec3 col = texture2D(tColor, uCOff + vUv).rgb; float m = texture2D(tMask, uCOff + vUv).r;
-    vec2 iu = (vUv - uInnerMin) * uInnerScale; float inner = texture2D(tInner, uInnerCOff + iu).r;
+    vec2 iu = vec2(mod(vUv.x - uInnerMin.x, uInnerWrap), vUv.y - uInnerMin.y) * uInnerScale; float inner = texture2D(tInner, uInnerCOff + iu).r;
     if (vUv.y < uVRange.x || vUv.y > uVRange.y || m < 0.5) discard;          // beyond ±85° or a tile not (yet) in
-    if (uInnerOn > 0.5 && min(iu.x, iu.y) > 0.1 && max(iu.x, iu.y) < 0.9 && inner > 0.5) discard;
+    bool under = uInnerOn > 0.5 && iu.x > 0.0 && iu.y > 0.0 && iu.x < 1.0 && iu.y < 1.0 && inner > 0.5;
+    if (under && uInnerDone > 0.5 && min(iu.x, iu.y) > 0.1 && max(iu.x, iu.y) < 0.9) discard;
     float lum = dot(col, vec3(0.2126, 0.7152, 0.0722));
     col = mix(col, uSeaCol, vSea * (1.0 - smoothstep(0.004, 0.03, lum)));   // Sentinel-2 cloudless draws the open sea near-black
     float sunUp = dot(vUp, uSun), day = smoothstep(-0.08, 0.12, sunUp);
@@ -47,17 +68,23 @@ const FRAG = /* glsl */`uniform sampler2D tColor, tMask, tInner; uniform vec2 uC
     col *= mix(0.03, 1.0, day) * mix(1.0, relief, day);
     float dist = length(cameraPosition - vW), air = dist * min(1.0, uAirTop / max(cameraPosition.y - vW.y, uAirTop));
     col = mix(col, uHazeCol * (0.2 + 0.8 * day), uHazeK * (1.0 - exp(-air / uHazeL)));
-    vec2 e = smoothstep(vec2(0.0), vec2(0.08), vUv) * smoothstep(vec2(0.0), vec2(0.08), 1.0 - vUv);
-    gl_FragColor = vec4(col, uVis * e.x * e.y * day); }`;          // the night side fades to the globe's city lights
+    float c = under ? uInnerVis * edge(iu) : 0.0, V = uFar * day;
+    float stack = uFar < 1.0 ? mix(1.0, (1.0 - c) / max(1.0 - V * c, 1e-4), clamp((1.0 - uFar) / 0.05, 0.0, 1.0)) : 1.0;
+    gl_FragDepth = !under ? gl_FragCoord.z : (uInnerDone > 0.5 ? mix(gl_FragCoord.z, 1.0, 0.2) : 0.99999);
+    col = mix(col, uTint, uTintOn);
+    gl_FragColor = vec4(col, uVis * edge(vUv) * day * stack); }`;          // the night side fades to the globe's city lights
 
+// Debug false colour for the leak check (diagnosis §1(a)): one tint per ring, keyed off the ring's own level so it
+// tracks a level change and never hard-codes which colour is the finest ring (MAX_LEVEL may change later).
+const DEBUG_TINTS = [0xff0000, 0x0080ff, 0x00c000, 0xffd000, 0xffffff];
 // The atlases start empty and are only ever written on the GPU: all of them share one zero buffer per size.
 const ZEROS = new Map();
 const zeros = (n) => { if (!ZEROS.has(n)) ZEROS.set(n, new Uint8Array(n)); return ZEROS.get(n); };
 
-export function createEarthRings(scene, renderer, { loader = createTileLoader() } = {}) {
+export function createEarthRings(scene, renderer, { wantedUrls = new Set(), loader = createTileLoader({ maxInFlight: 24, pin: (url) => tileLevelOf(url) <= 8, keepIf: (url) => wantedUrls.has(url) }) } = {}) {
   const uploads = [], dst = new THREE.Vector2(), cpu = new Map(), _p = [0, 0, 0], _u = [0, 0, 0];
   const zero = new THREE.DataTexture(zeros(T * T * 4), T, T, THREE.RGBAFormat); zero.needsUpdate = true;
-  let frame = null, scratch = null, retryT = 0;
+  let frame = null, scratch = null, retryT = 0, debugTint = false;
   const count = (w, k) => { let c = 0; for (let i = 0; i < w.length; i++) if (w[i] && w[i] === k[i]) c++; return c; };
   function atlas(size, colorSpace, mips) {
     const t = new THREE.DataTexture(zeros(size * size * 4), size, size, THREE.RGBAFormat);
@@ -77,10 +104,10 @@ export function createEarthRings(scene, renderer, { loader = createTileLoader() 
     const mask = new THREE.DataTexture(new Uint8Array(RING_TILES * RING_TILES), RING_TILES, RING_TILES, THREE.RedFormat);
     mask.wrapS = mask.wrapT = THREE.RepeatWrapping; mask.minFilter = mask.magFilter = THREE.NearestFilter; mask.needsUpdate = true;
     const mat = new THREE.ShaderMaterial({ vertexShader: VERT, fragmentShader: FRAG, transparent: true, depthWrite: true, polygonOffset: true,
-      uniforms: { tColor: { value: color }, tHeight: { value: height }, tMask: { value: mask }, tInner: { value: mask }, uInnerMin: { value: new THREE.Vector2() }, uInnerCOff: { value: new THREE.Vector2() }, uInnerOn: { value: 0 }, uInnerScale: { value: 2 }, uAirTop: { value: 8 }, uSeaCol: { value: new THREE.Color(0.012, 0.035, 0.1) },
+      uniforms: { tColor: { value: color }, tHeight: { value: height }, tMask: { value: mask }, tInner: { value: mask }, uInnerMin: { value: new THREE.Vector2() }, uInnerCOff: { value: new THREE.Vector2() }, uInnerOn: { value: 0 }, uInnerDone: { value: 0 }, uInnerVis: { value: 0 }, uFar: { value: 1 }, uInnerScale: { value: 2 }, uInnerWrap: { value: 1 }, uAirTop: { value: 8 }, uSeaCol: { value: new THREE.Color(0.012, 0.035, 0.1) },
         uCOff: { value: new THREE.Vector2() }, uHOff: { value: new THREE.Vector2() },
         uHScale: { value: 1 }, uHSize: { value: HEIGHT_TILES * T }, uHeightK: { value: 0 }, uStepKm: { value: 1 }, uVRange: { value: new THREE.Vector2(0, 1) }, uVis: { value: 0 },
-        uSun: { value: new THREE.Vector3(0, 1, 0) }, uHazeCol: { value: new THREE.Color(0.62, 0.74, 0.9) }, uHazeK: { value: 0 }, uHazeL: { value: 60 } } });
+        uSun: { value: new THREE.Vector3(0, 1, 0) }, uHazeCol: { value: new THREE.Color(0.62, 0.74, 0.9) }, uHazeK: { value: 0 }, uHazeL: { value: 60 }, uTint: { value: new THREE.Color(1, 1, 1) }, uTintOn: { value: 0 } } });
     const mesh = new THREE.Mesh(geo, mat); mesh.frustumCulled = false; mesh.visible = false; scene.add(mesh);
     const S = RING_TILES * RING_TILES, H = HEIGHT_TILES * HEIGHT_TILES;
     return { level: -1, win: null, hwin: null, mesh, mat, color, height, mask, vis: 0, hk: 0, shown: false, hShown: false, valid: 0, hValid: 0, stats: null,
@@ -89,7 +116,19 @@ export function createEarthRings(scene, renderer, { loader = createTileLoader() 
   }
   const rings = Array.from({ length: RING_COUNT }, () => makeRing());
 
-  function copy(src, target, slot, size) { dst.set(mod(slot, size) * T, Math.floor(slot / size) * T); renderer.copyTextureToTexture(src, target, null, dst); }
+  // K6 (diagnosis 2026-09-29 §3 #9): three r170's copyTextureToTexture regenerates the WHOLE mip chain on every
+  // level-0 copy when the destination's generateMipmaps is true — up to UPLOADS_PER_FRAME times a frame for one
+  // atlas. Turned off for the copy itself and restored right after; touched (flush()'s Set, colour atlases only)
+  // collects target so flush() can rebuild the mips by hand, once per atlas, after all of this frame's copies are in.
+  function copy(src, target, slot, size, touched) {
+    const mips = target.generateMipmaps;
+    if (mips) target.generateMipmaps = false;
+    try {
+      dst.set(mod(slot, size) * T, Math.floor(slot / size) * T); renderer.copyTextureToTexture(src, target, null, dst);
+    } finally {
+      if (mips) { target.generateMipmaps = true; if (touched) touched.add(target); }
+    }
+  }
   function build(r) {
     const { level, x0, y0 } = r.win, n = 2 ** level, pos = r.mesh.geometry.attributes.position, up = r.mesh.geometry.attributes.aUp, lats = [], lons = [];
     for (let i = 0; i <= GRID; i++) {
@@ -101,6 +140,17 @@ export function createEarthRings(scene, renderer, { loader = createTileLoader() 
       pos.array[k] = _p[0]; pos.array[k + 1] = _p[1]; pos.array[k + 2] = _p[2]; up.array[k] = _u[0]; up.array[k + 1] = _u[1]; up.array[k + 2] = _u[2];
     }
     pos.needsUpdate = true; up.needsUpdate = true;
+  }
+  // Every used ring's current colour and height tile URLs, so the loader's cache never evicts a tile another ring
+  // still wants (a shared coarse Terrarium height tile, read by several rings at once). Rebuilt only here, from every
+  // ring, whenever a ring is placed or re-placed — never per frame. Bounded by RING_COUNT * (RING_TILES^2 + HEIGHT_TILES^2).
+  function rebuildWanted() {
+    wantedUrls.clear();
+    for (const q of rings) {
+      if (!q.win) continue;
+      for (let s = 0; s < q.want.length; s++) if (q.want[s]) wantedUrls.add(tileUrl(sourceForLevel(q.level), q.level, q.tile[s].x, q.tile[s].y));
+      for (let s = 0; s < q.hwant.length; s++) if (q.hwant[s]) wantedUrls.add(tileUrl(HEIGHT_SOURCE, q.hwin.level, q.htile[s].x, q.htile[s].y));
+    }
   }
   function place(r, level, lat, lon) {
     const win = ringWindow(lon, lat, level);
@@ -131,6 +181,7 @@ export function createEarthRings(scene, renderer, { loader = createTileLoader() 
       r.hfail[t.slot] = '';
       requestHeight(r, t);
     }
+    rebuildWanted();
   }
   function requestColour(r, t) {
     const level = r.level; r.pend[t.slot] = t.key;
@@ -155,18 +206,28 @@ export function createEarthRings(scene, renderer, { loader = createTileLoader() 
     for (let s = 0; s < r.hwant.length; s++) if (r.hwant[s] && r.hkey[s] !== r.hwant[s] && r.hpend[s] !== r.hwant[s]) requestHeight(r, r.htile[s]);
   }
   function flush() {
+    const touched = new Set();
     for (let done = 0; done < UPLOADS_PER_FRAME && uploads.length; ) {
       const u = uploads.shift(), r = u.r;
       if ((u.height ? r.hwant : r.want)[u.slot] !== u.key) continue;
       const src = new THREE.Texture(u.bmp); src.flipY = false; src.generateMipmaps = false; src.colorSpace = u.height ? THREE.NoColorSpace : THREE.SRGBColorSpace;
       try {
-        copy(src, u.height ? r.height : r.color, u.slot, u.height ? HEIGHT_TILES : RING_TILES);
+        copy(src, u.height ? r.height : r.color, u.slot, u.height ? HEIGHT_TILES : RING_TILES, touched);
         if (u.height) { r.hkey[u.slot] = u.key; r.hbmp[u.slot] = u.bmp; } else r.key[u.slot] = u.key;
       } catch (e) {
         console.warn('earth zoom: a tile could not be uploaded', e.message);
       }
       src.dispose(); done++;
     }
+    // one mip rebuild per touched atlas per frame (K6), not one per copy: copy() already suppressed r170's own
+    // per-copy regeneration above, so this is the only place each touched atlas' mips get rebuilt this frame.
+    for (const t of touched) {
+      const gl = renderer.getContext(), p = renderer.properties.get(t);
+      renderer.state.bindTexture(gl.TEXTURE_2D, p.__webglTexture);
+      gl.generateMipmap(gl.TEXTURE_2D);
+    }
+    // three's own convention after a texture operation (its copyTextureToTexture ends the same way): leave no atlas bound
+    if (touched.size) renderer.state.unbindTexture();
   }
   // A colour slot shows once its imagery AND the height tile under it are in (or that height tile failed for good).
   function refreshMask(r) {
@@ -196,6 +257,7 @@ export function createEarthRings(scene, renderer, { loader = createTileLoader() 
     // A closed view stops fetching; on reopening every ring re-requests what it is still missing.
     suspend() { loader.suspend(); uploads.length = 0; },
     resume() { loader.resume(); for (const r of rings) r.win = null; },
+    setDebugTint(on) { debugTint = !!on; },
     update(dt, view) {
       const want = ringLevels(view.L0);
       for (const L of want) place(rings.find((q) => q.level === L) || rings.find((q) => !want.includes(q.level)), L, view.lat, view.lon);
@@ -210,16 +272,23 @@ export function createEarthRings(scene, renderer, { loader = createTileLoader() 
         r.shown = used && have >= (r.shown ? HIDE_AT : SHOW_AT) * r.valid;
         r.hShown = used && hHave >= (r.hShown ? HIDE_AT : SHOW_AT) * r.hValid;
         r.vis += ((r.shown ? 1 : 0) - r.vis) * ease; r.hk += ((r.hShown ? 1 : 0) - r.hk) * ease;
-        const u = r.mat.uniforms; u.uVis.value = r.vis * view.vis; u.uHeightK.value = r.hk; u.uSun.value.copy(view.sun); u.uHazeK.value = view.hazeK; u.uHazeL.value = view.hazeL;
+        const u = r.mat.uniforms; u.uVis.value = r.vis * view.vis; u.uFar.value = view.vis; u.uHeightK.value = r.hk; u.uSun.value.copy(view.sun); u.uHazeK.value = view.hazeK; u.uHazeL.value = view.hazeL;
+        u.uTintOn.value = debugTint ? 1 : 0; if (debugTint) u.uTint.value.setHex(DEBUG_TINTS[(MAX_LEVEL - r.level) % 5]);
         r.mesh.visible = u.uVis.value > 0.003; r.stats = { have, valid: r.valid, hHave, hValid: r.hValid };
       }
+      // fix A: every used ring tracks the window of the NEAREST finer used ring that is drawn at all (on) every frame, so
+      // it is behind that ring as soon as it shows and leaves its hole once it is fully in (done); the finer ring's own
+      // fade-in (uInnerVis) sets how much of the pair it covers (FRAG's one-layer blend). Nearest ON, not just the next
+      // level: after a zoom step of two levels or more the loader brings the finest ring in first, and deferring only to
+      // the still-empty ring between would leave this one competing with the finest in depth (the (a) blobs) meanwhile.
       for (const r of rings) {
-        const finer = want.filter((L) => L > r.level), inner = want.includes(r.level) && finer.length && rings.find((q) => q.level === Math.min(...finer)), u = r.mat.uniforms;
-        u.uInnerOn.value = inner && inner.vis > 0.98 ? 1 : 0;
-        if (!u.uInnerOn.value) continue;
-        const s = 2 ** (inner.level - r.level);
-        u.tInner.value = inner.mask; u.uInnerCOff.value.copy(inner.mat.uniforms.uCOff.value); u.uInnerScale.value = s;
-        u.uInnerMin.value.set((inner.win.x0 / s - r.win.x0) / RING_TILES, (inner.win.y0 / s - r.win.y0) / RING_TILES);
+        const inner = want.includes(r.level) && rings.filter((q) => want.includes(q.level) && q.level > r.level && innerState(q).on).sort((a, b) => a.level - b.level)[0], u = r.mat.uniforms;
+        const st = inner ? innerState(inner) : { on: false, done: false };
+        u.uInnerOn.value = st.on ? 1 : 0; u.uInnerDone.value = st.done ? 1 : 0; u.uInnerVis.value = inner ? inner.vis : 0;
+        if (!inner) continue;
+        const w = innerWindow(inner.win, r.win);
+        u.tInner.value = inner.mask; u.uInnerCOff.value.copy(inner.mat.uniforms.uCOff.value); u.uInnerScale.value = w.scale; u.uInnerMin.value.set(w.min[0], w.min[1]);
+        u.uInnerWrap.value = w.wrap;
       }
     },
     heightAt(latDeg, lonDeg) {
