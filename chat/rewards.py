@@ -41,8 +41,8 @@ def comp_grounded(answer, notes, user):
     bad = [n for n in (norm_num(x) for x in NUM.findall(answer)) if n not in nums and n not in SMALL]
     low = src.lower()
     bad += [f for f in FLAG.findall(answer.lower()) if f not in low]
-    keys = {k.lower() for k in KEY.findall(src)}
-    bad += [k for k in KEY.findall(answer) if k.lower() not in keys and f"'{k.lower()}'" not in low]
+    # a key is grounded when that exact character stands alone somewhere in the notes/message ("key Z", "(Z)", "Z opens…")
+    bad += [k for k in KEY.findall(answer) if not re.search(rf'(?<![A-Za-z0-9]){re.escape(k)}(?![A-Za-z0-9])', src)]
     return max(0.0, 1.0 - 0.5 * len(bad))
 
 def comp_lead(answer, expected=True):

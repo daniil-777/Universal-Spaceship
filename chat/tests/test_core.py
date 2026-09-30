@@ -41,6 +41,10 @@ class TestRewards(unittest.TestCase):
         self.assertEqual(c['grounded'], 1.0); self.assertEqual(c['lead'], 1.0); self.assertEqual(c['recall'], 1.0); self.assertGreater(c['total'], 0.8)
     def test_invented_number_and_flag(self):
         self.assertLess(rewards.score('It lands at 999 kt. Try ?scenario=moonbase next.', self.ROW)['grounded'], 0.5)
+    def test_keys(self):
+        notes = ['The Z key or the Playbox button opens the telescope.']
+        self.assertEqual(rewards.comp_grounded('Press Z to zoom.', notes, ''), 1.0)
+        self.assertEqual(rewards.comp_grounded('Press Q to zoom.', notes, ''), 0.5)
     def test_nagging_and_no_lead(self):
         self.assertEqual(rewards.comp_lead('It is fast. Want more? Or the moon?'), 0.0)
         self.assertEqual(rewards.comp_lead('It is fast at 157 kt.'), 0.0)
