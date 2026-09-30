@@ -19,11 +19,19 @@ const sh = (cmd, args) => { try { return execFileSync(cmd, args).toString(); } c
 const freePct = () => +(/free percentage: (\d+)%/.exec(sh('memory_pressure', [])) || [0, 0])[1];
 // §7.7 / plan resource rules: >= 25 % free, no other Chromium (the idle hyperframes preview browser is not ours), no Monte
 // Carlo (real_mc, landing_mc), no Python training or export. Another agent may hold the one browser, so the check waits up
-// to waitS seconds before giving up.
-function resources() {
-  const free = freePct(), chrome = sh('pgrep', ['-fl', 'Chrome for Testing|chromium|chrome-headless-shell']).split('\n').filter((l) => l && !l.includes('/.cache/hyperframes/')).join('\n').trim();
+// to waitS seconds before giving up. Browser lanes (controller ruling, v0 capture): with APV_BROWSER_LANES=N the Chromium
+// check passes while fewer than N main browser processes run (command lines without a --type= flag; renderer, GPU and
+// utility helpers carry one), and the memory floor is 35 % free when N > 1.
+export const lanesOf = (env = process.env) => { const n = parseInt(env.APV_BROWSER_LANES || '1', 10); return Number.isInteger(n) && n >= 1 ? n : 1; };
+export const minFreePct = (lanes) => (lanes > 1 ? 35 : 25);
+export const mainBrowsers = (pgrepOut) => String(pgrepOut).split('\n').filter((l) => l.trim() && !l.includes('/.cache/hyperframes/') && !/\s--type=/.test(l));
+export function resourceVerdict({ free, pgrep, train, mc, lanes }) {
+  const mains = mainBrowsers(pgrep), chrome = mains.length >= lanes ? mains.join('\n') : '';
+  return { free, chrome, train, mc, lanes, ok: free >= minFreePct(lanes) && !chrome && !train && !mc };
+}
+function resources(lanes = lanesOf()) {
   const train = sh('pgrep', ['-fl', 'vlm/train/|train\\.py|lora_train|export_onnx|export_decoder']).trim(), mc = sh('pgrep', ['-fl', 'real_mc|landing_mc']).trim();
-  return { free, chrome, train, mc, ok: free >= 25 && !chrome && !train && !mc };
+  return resourceVerdict({ free: freePct(), pgrep: sh('pgrep', ['-fl', 'Chrome for Testing|chromium|chrome-headless-shell']), train, mc, lanes });
 }
 // Two clean checks 10 s apart are required, so a gap between another agent's back-to-back browser runs is not taken for free.
 async function preflight(waitS) {
@@ -31,7 +39,7 @@ async function preflight(waitS) {
   for (let r = resources(); ; r = resources()) {
     clean = r.ok ? clean + 1 : 0;
     if (clean >= 2) return r.free;
-    if (Date.now() - t0 > waitS * 1000) throw new Error(`preflight failed after ${waitS} s: ${r.free} % free (needs >= 25 %)${r.chrome ? `\nanother Chromium is running:\n${r.chrome}` : ''}${r.train ? `\nPython training or export is running:\n${r.train}` : ''}${r.mc ? `\na Monte Carlo is running:\n${r.mc}` : ''}`);
+    if (Date.now() - t0 > waitS * 1000) throw new Error(`preflight failed after ${waitS} s: ${r.free} % free (needs >= ${minFreePct(r.lanes)} %)${r.chrome ? `\n${r.lanes} or more other Chromium browsers are running (APV_BROWSER_LANES=${r.lanes}):\n${r.chrome}` : ''}${r.train ? `\nPython training or export is running:\n${r.train}` : ''}${r.mc ? `\na Monte Carlo is running:\n${r.mc}` : ''}`);
     await new Promise((res) => setTimeout(res, 10000));
   }
 }
@@ -71,7 +79,7 @@ if (process.argv[1] && process.argv[1].endsWith('drive.mjs')) {
     for (let e = 0; samples < n && e < 50000; e++) {
       if (scan.episodes.has(e)) continue;
       const free = freePct();
-      if (free < 25) { D.log({ stop: `memory_pressure shows ${free} % free (< 25 %) before episode ${e}`, kind: 'resources' }); code = RESOURCE_EXIT; break; }
+      if (free < minFreePct(lanesOf())) { D.log({ stop: `memory_pressure shows ${free} % free (< ${minFreePct(lanesOf())} %) before episode ${e}`, kind: 'resources' }); code = RESOURCE_EXIT; break; }
       // an A page samples across crash resets over at most the free indices from e (N-1): it stops before a finished episode
       const span = freeSpan(scan.episodes, e, MAX_RESETS + 1);
       const res = await nextEpisode(D, { episode: e, seed0: +arg('seed0', 1), rsOverride: arg('rs-override', null), forceWhen: arg('force-when', null), maxSpan: span });
