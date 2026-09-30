@@ -22,6 +22,7 @@ export async function captureExact(S, mode, stop, T = null) {
     const n0 = await call(S, 'requestNoop');
     for (let k = 0; k < 12; k++) { await waitIdle(S, null, { stop }); await frame(S, mode); if ((await chk(S)).noopDone > n0) break; }
     const t0 = performance.now(), f = await call(S, 'capture');
+    if (f.why) throw new Discard(f.why);
     if (f.exact) { if (T) { T.caps++; T.capHostMs += performance.now() - t0; T.capPageMs += f.ms.capture; if (f.ms.encode !== null) { T.encMs += f.ms.encode; T.encN++; } T.pngBytes += pngBytes(f.png); } return f; }
   }
   throw new Discard('the drawn ship never matched env.ship.p');
@@ -31,7 +32,7 @@ export async function runCorridorEpisode(D, ep) {
   const T = { caps: 0, capHostMs: 0, capPageMs: 0, encMs: 0, encN: 0, pngBytes: 0, labels: 0, labelHostMs: 0, rolloutMs: 0, factsMs: 0, bootMs: 0, warmMs: 0 };
   const stats = () => ({ ...T, frames: S.nFrames, frameMs: S.frameMs });
   try {
-    await boot(S, ep.url, '!!(window.__ap && window.__ap.ready)', D.mode); T.bootMs = Date.now() - t0;
+    await boot(S, ep.url, '!!(window.__ap && window.__ap.ready)', D.mode, D.stop); T.bootMs = Date.now() - t0;
     let c = await loadProbe(S, ep.family, ep.params);
     if (c.renderScale !== 1 || c.pixelRatio !== 1) throw new Discard(`renderScale ${c.renderScale} pixelRatio ${c.pixelRatio}`);
     if (ep.warmup) c = await ep.warmup(S, D);

@@ -36,10 +36,11 @@ export async function waitIdle(S, check = null, { timeoutMs = 10000, stop = null
   }
 }
 // the §7.2 per-frame wait holds from boot on: every pumped frame follows network idle, so the policy and texture fetches
-// land on the same fake tick in every run
-export async function boot(S, url, readyExpr, mode) {
-  await S.page.goto(url, { waitUntil: 'load', timeout: 180000 }); await waitIdle(S);
-  for (let i = 0; i < 4000; i++) { if (await S.page.evaluate(readyExpr)) return; await waitIdle(S); await frame(S, mode); }
+// land on the same fake tick in every run; `stop` (the drive's latch) makes a 403/429 during boot surface as StopDrive
+export async function boot(S, url, readyExpr, mode, stop = null) {
+  await S.page.goto(url, { waitUntil: 'load', timeout: 180000 }); await waitIdle(S, null, { stop });
+  for (let i = 0; i < 4000; i++) { if (await S.page.evaluate(readyExpr)) return; await waitIdle(S, null, { stop }); await frame(S, mode); }
+  if (stop && stop.error) throw stop.error;
   throw new Discard('boot: the ready flag never set');
 }
 export async function loadProbe(S, family, params) { return S.page.evaluate(async ([f, p]) => { const m = await import('/vlm/capture/probe/core.js'); window.__apv = m.createProbe(); return window.__apv.setup(f, p); }, [family, params]); }

@@ -9,8 +9,17 @@ import { projectSphere } from '../../gen/labels/camera.js';
 const rt = () => (globalThis.__pwClock && globalThis.__pwClock.builtins ? globalThis.__pwClock.builtins.performance.now() : performance.now());
 // measure (throughput runs only): a second toDataURL of the same drawing buffer in the same task times the PNG encode alone
 export const camOf = (c) => ({ mode: 'chase', fov_deg: c.fov, aspect: c.aspect, near: c.near, far: c.far, matrixWorldInverse: Array.from(c.matrixWorldInverse.elements), projectionMatrix: Array.from(c.projectionMatrix.elements) });
+// S flies the pretrained belt pilot (§3.2): a missing or fresh policy is a hard error (not a discard), so the drive stops
+export function assertBeltPilot(ap, p) {
+  const agent = ap.agent, why = [];
+  if (!/^pretrained /.test(String(ap.policy)) || ap.policyError) why.push(`policy ${ap.policy}${ap.policyError ? ` (${ap.policyError})` : ''}`);
+  if (ap.pilot !== agent) why.push('the flying pilot is not the belt agent');
+  if (p.policySteps !== null && p.policySteps !== undefined && (!agent || agent.steps !== p.policySteps)) why.push(`agent steps ${agent && agent.steps} != model/policy.json ${p.policySteps}`);
+  if (why.length) throw new Error(`S needs the pretrained belt pilot: ${why.join('; ')}`);
+}
 export async function setup(family, p) {
   const ap = window.__ap, env = ap.env, step = Object.getPrototypeOf(env).step;
+  if (family === 'S') assertBeltPilot(ap, p);
   const st = { family, p, ap, env, noop: 0, noopDone: 0, crashed: false, override: null, lastRaw: null };
   env.step = function (a) {
     if (st.noop > 0) { st.noop--; st.noopDone++; return { reward: 0, done: false, truncated: false, progress: 0 }; }
@@ -30,6 +39,9 @@ export function check(st) {
 export function requestNoop(st) { st.noop = 1; return st.noopDone; }
 export function capture(st) {
   const ap = st.ap, d = ap.scene.getObjectByName('ship').position, p = st.env.ship.p;
+  // every captured frame is full resolution (§7.1): adaptQuality must not have lowered the render scale since setup
+  const rs = ap.renderScale ?? 1, pr = ap.debug().pixelRatio;
+  if (rs !== 1 || pr !== 1) return { exact: false, why: `renderScale ${rs} pixelRatio ${pr} at capture` };
   if (Math.hypot(d.x - p[0], d.y - p[1], d.z - p[2]) >= 1e-3) return { exact: false };
   const t0 = rt(), png = ap.capture(), t1 = rt(), enc = st.p.measure ? (document.getElementById('view').toDataURL('image/png'), rt() - t1) : null;
   return { exact: true, png, cam: camOf(ap.camera), clock: { date_ms: Date.now(), perf_ms: performance.now() }, step: st.env.steps, ms: { capture: t1 - t0, encode: enc } };

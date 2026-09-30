@@ -1,7 +1,8 @@
 // vlm/capture/probe/zoom.js — Z in the page: fresh view per sample (close, reopen, goTo), the Z gate of spec §3.4, capture
 // through zoom.capture(), and the pose facts from zoom.info plus the camera the RenderPass actually rendered.
 import { ringLevels } from '../../../src/earthtiles.js';
-import { ZOOM } from '../../../src/earthzoom.js';
+// src/earthzoom.js ZOOM.camClearKm, copied so this module loads in Node without three.js (a test pins it to the src value)
+export const CAM_CLEAR_KM = 0.15;
 import { zoomFacts, lightingOf } from '../../gen/labels/zoom.js';
 const camOf = (c) => ({ mode: 'zoom', fov_deg: c.fov, aspect: c.aspect, near: c.near, far: c.far, matrixWorldInverse: Array.from(c.matrixWorldInverse.elements), projectionMatrix: Array.from(c.projectionMatrix.elements) });
 export async function setup(family, p) { return { p, page: window.__zoomPage, v: null, Lmax: p.licence === 'nc' ? 14 : 15 }; }
@@ -20,9 +21,9 @@ export function gate(st) {
 // the local frame on the view's target, so cameraPose put the camera at (0, g, 0) + rangeKm·(up·cos tilt − fwd·sin tilt)
 // with up = +y and fwd horizontal: g = y − rangeKm·cos(tilt), the rings.heightAt(target) the page used. Unknown (null)
 // when the 0.15 km clearance lift moved the camera (clearKm sits at that floor).
-function groundOf(i, c) {
+export function groundOf(i, c) {
   if (Number.isFinite(i.groundKm)) return { km: i.groundKm, src: 'info' };
-  if (Math.abs(i.clearKm - ZOOM.camClearKm) < 1e-9) return { km: null, src: null };
+  if (Math.abs(i.clearKm - CAM_CLEAR_KM) < 1e-9) return { km: null, src: null };
   return { km: c.position.y - i.rangeKm * Math.cos(i.tilt), src: 'pose' };
 }
 // The capture waits for a steady state (a determinism fix, not a tolerance): the rendered camera, its clip planes and each

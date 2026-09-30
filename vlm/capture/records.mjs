@@ -13,6 +13,29 @@ export function writeEpisode(dir, records, files, episode) {
   for (const r of records) fs.writeFileSync(path.join(dir, `${r.key}.json`), JSON.stringify(r));
   fs.writeFileSync(path.join(dir, `episode_${String(episode).padStart(5, '0')}.done`), String(records.length));
 }
+// A 403/429 (§6: stop with no retry) must outlive the process: tilecache latches the host only in memory, so the drive
+// persists it to raw/<run>/stop.json ({host, status, utc_ms}; `stops` keeps every one), refuses to start while it exists,
+// and exits with STOP_EXIT so a `&&` chain halts. A budget stop is not a ban: it persists via eox_budget.json and exits 0.
+export const STOP_EXIT = 3, RESOURCE_EXIT = 4;
+export function stopOf(err, host = null) {
+  const m = /^(403|429) from (\S+):/.exec(String(err && err.message));
+  if (m) return { kind: 'http', host: m[2], status: +m[1] };
+  const b = /^upstream budget of \d+ requests reached for (\S+)/.exec(String(err && err.message));
+  return b ? { kind: 'budget', host: b[1], status: null } : { kind: 'other', host, status: null };
+}
+export function readStop(runDir) { const f = path.join(runDir, 'stop.json'); return fs.existsSync(f) ? JSON.parse(fs.readFileSync(f, 'utf8')) : null; }
+export function writeStop(runDir, { host, status }, utcMs = Date.now()) {
+  const old = readStop(runDir), entry = { host, status, utc_ms: utcMs }, stops = [...((old && old.stops) || []), entry];
+  fs.mkdirSync(runDir, { recursive: true }); fs.writeFileSync(path.join(runDir, 'stop.json'), JSON.stringify({ ...(old ? { host: old.host, status: old.status, utc_ms: old.utc_ms } : entry), stops }));
+  return readStop(runDir);
+}
+// the start gate: a run with a recorded 403/429 stop refuses to start (before any browser or request); clearing it is a
+// deliberate human step (delete stop.json once the host allows the traffic again)
+export function startGate(runDir) {
+  const s = readStop(runDir);
+  return s ? { refuse: true, code: STOP_EXIT, why: `${runDir}/stop.json: ${s.status} from ${s.host} at ${new Date(s.utc_ms).toISOString()}; delete it only once the host allows traffic again` } : { refuse: false, code: 0, why: null };
+}
+export const exitCodeOf = (err) => (stopOf(err).kind === 'http' ? STOP_EXIT : 0);
 export function scanRun(dir) {
   const out = { samples: 0, episodes: new Set(), removed: [] }; if (!fs.existsSync(dir)) return out;
   const names = fs.readdirSync(dir).filter((n) => !n.startsWith('._'));
@@ -34,8 +57,9 @@ export function assemble(D, ep, s, extra = {}) {
   // view's ring levels (§6: A strip levels 9/11/12, Z ring levels)
   const frames = fam === 'Z' ? [s.frame] : s.frames, cams = Object.fromEntries(names.map((n, k) => [n, frames[k].cam])), p0 = s.ledger0 ?? 0, i0 = fam === 'A' ? p0 : frames[0].ledger[0], i1 = frames[frames.length - 1].ledger[1];
   const imagery = imageryFrom(D.ledger, fam === 'Z' ? p0 : i0, i1).filter((m) => fam !== 'Z' || (s.label.facts['view.rings'].v || []).includes(m.level));
-  // Z: the ground height under the target (ruling T6-d; zoom.info or the rendered pose, src says which) is kept with the record
-  const zoom = fam === 'Z' ? { tags: null, range_bin: s.v.range_bin, lighting: s.label.lighting, ground_km: s.label.ground ? s.label.ground.km : null, ground_src: s.label.ground ? s.label.ground.src : null } : null;
+  // Z: the ground height under the target (ruling T6-d; zoom.info or the rendered pose, src says which) is kept with the record,
+  // and lighting.utc_ms is the view's own Sun time (orbitInfo.utc = v.utcMs), which provenance.utc_ms (the page clock) is not
+  const zoom = fam === 'Z' ? { tags: null, range_bin: s.v.range_bin, lighting: { ...s.label.lighting, utc_ms: s.v.utcMs ?? null }, ground_km: s.label.ground ? s.label.ground.km : null, ground_src: s.label.ground ? s.label.ground.src : null } : null;
   const rec = { key, family: fam, frames: names, narrator_frame: extra.narrator ?? names[fam === 'Z' ? 0 : 2], frame_dt_steps: fam === 'Z' ? null : s.n, frame_dt_s: fam === 'Z' ? null : s.n.map((n) => +(n * STEP_S[fam]).toFixed(4)),
     facts: s.label.facts, safety: s.label.safety ?? null, safety_eye: s.label.safety_eye ?? null, zoom, cameras: { ...cams, ...(extra.cameras || {}) },
     render: { viewport: [896, 504], dpr: 1, renderScale: 1, toneMapping: 'ACESFilmic', capture_mode: D.mode, view: { eye: extra.eyeView ?? (fam === 'Z' ? 'zoom' : 'chase'), narrator: fam === 'Z' ? 'zoom' : 'chase' }, path: fam === 'L' ? false : null, imagery, licence_profile: D.licence },
