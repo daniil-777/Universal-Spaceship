@@ -102,7 +102,16 @@ export function createEarthRings(scene, renderer, { wantedUrls = new Set(), load
   }
   const rings = Array.from({ length: RING_COUNT }, () => makeRing());
 
-  function copy(src, target, slot, size) { dst.set(mod(slot, size) * T, Math.floor(slot / size) * T); renderer.copyTextureToTexture(src, target, null, dst); }
+  // K6 (diagnosis 2026-09-29 §3 #9): three r170's copyTextureToTexture regenerates the WHOLE mip chain on every
+  // level-0 copy when the destination's generateMipmaps is true — up to UPLOADS_PER_FRAME times a frame for one
+  // atlas. Turned off for the copy itself and restored right after; touched (flush()'s Set, colour atlases only)
+  // collects target so flush() can rebuild the mips by hand, once per atlas, after all of this frame's copies are in.
+  function copy(src, target, slot, size, touched) {
+    const mips = target.generateMipmaps;
+    if (mips) target.generateMipmaps = false;
+    dst.set(mod(slot, size) * T, Math.floor(slot / size) * T); renderer.copyTextureToTexture(src, target, null, dst);
+    if (mips) { target.generateMipmaps = true; if (touched) touched.add(target); }
+  }
   function build(r) {
     const { level, x0, y0 } = r.win, n = 2 ** level, pos = r.mesh.geometry.attributes.position, up = r.mesh.geometry.attributes.aUp, lats = [], lons = [];
     for (let i = 0; i <= GRID; i++) {
@@ -180,17 +189,25 @@ export function createEarthRings(scene, renderer, { wantedUrls = new Set(), load
     for (let s = 0; s < r.hwant.length; s++) if (r.hwant[s] && r.hkey[s] !== r.hwant[s] && r.hpend[s] !== r.hwant[s]) requestHeight(r, r.htile[s]);
   }
   function flush() {
+    const touched = new Set();
     for (let done = 0; done < UPLOADS_PER_FRAME && uploads.length; ) {
       const u = uploads.shift(), r = u.r;
       if ((u.height ? r.hwant : r.want)[u.slot] !== u.key) continue;
       const src = new THREE.Texture(u.bmp); src.flipY = false; src.generateMipmaps = false; src.colorSpace = u.height ? THREE.NoColorSpace : THREE.SRGBColorSpace;
       try {
-        copy(src, u.height ? r.height : r.color, u.slot, u.height ? HEIGHT_TILES : RING_TILES);
+        copy(src, u.height ? r.height : r.color, u.slot, u.height ? HEIGHT_TILES : RING_TILES, touched);
         if (u.height) { r.hkey[u.slot] = u.key; r.hbmp[u.slot] = u.bmp; } else r.key[u.slot] = u.key;
       } catch (e) {
         console.warn('earth zoom: a tile could not be uploaded', e.message);
       }
       src.dispose(); done++;
+    }
+    // one mip rebuild per touched atlas per frame (K6), not one per copy: copy() already suppressed r170's own
+    // per-copy regeneration above, so this is the only place each touched atlas' mips get rebuilt this frame.
+    for (const t of touched) {
+      const gl = renderer.getContext(), p = renderer.properties.get(t);
+      renderer.state.bindTexture(gl.TEXTURE_2D, p.__webglTexture);
+      gl.generateMipmap(gl.TEXTURE_2D);
     }
   }
   // A colour slot shows once its imagery AND the height tile under it are in (or that height tile failed for good).

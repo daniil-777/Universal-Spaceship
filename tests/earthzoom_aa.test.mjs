@@ -26,3 +26,13 @@ test('app.js stays at 499 lines and only calls adaptQuality while the zoom is cl
   const unguarded = lines.some((l) => /[^!]adaptQuality\(state\.fps\);/.test(l) && !l.includes('zoom.active)'));
   assert.ok(!unguarded, 'adaptQuality(state.fps) must not be called without the zoom guard');
 });
+
+// Task 6 addendum (Task 5 review): pin the ?zoomaa=0 escape so a later edit cannot make the MSAA target unconditional,
+// or move the flag's read off module scope (it must be read once, never mid-session, per the comment above it).
+test('earthzoom.js: ZOOMAA is a module-scope flag that still gates the MSAA target with a ternary', () => {
+  const src = fs.readFileSync(path.join(SRC, 'earthzoom.js'), 'utf8');
+  assert.match(src, /^const ZOOMAA = new URLSearchParams\(location\.search\)\.get\('zoomaa'\) !== '0';$/m,
+    'ZOOMAA must stay a module-scope const (column 0), not read inside a function');
+  assert.match(src, /const rt = ZOOMAA \? new THREE\.WebGLRenderTarget\(1,\s*1,\s*\{[^}]*samples:\s*4[^}]*\}\)\s*:\s*undefined;/,
+    'the MSAA target must stay behind the ?zoomaa=0 ternary, not become unconditional');
+});

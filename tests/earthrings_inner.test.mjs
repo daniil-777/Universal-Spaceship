@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { innerWindow, innerState, ringWindow, ringLevels, RING_TILES } from '../src/earthtiles.js';
+import { innerWindow, innerState, ringWindow, ringLevels, RING_TILES, MAX_LEVEL } from '../src/earthtiles.js';
 
 // Fix A (diagnosis 2026-09-29 §1(a)): a coarser ring never depth-competes with the next finer ring. The window maths
 // (where the finer ring sits in the coarser ring's uv) moved out of earthrings.js into a pure function; these are the
@@ -47,8 +47,8 @@ const underX = (u, w, wrap) => { const x = (wrap ? glslMod(u - w.min[0], w.wrap)
 test('innerWindow: from level 3 up the longitude wrap changes no under / footprint result (ringWindow pairs, antimeridian)', () => {
   const lons = [-179.999, -179.9, -120, -0.001, 0, 0.001, 45, 139.76, 179.9, 179.999], lats = [-84, -45, 0, 35.68, 45.976, 84];
   const pairs = [];
-  for (let c = 3; c <= 17; c++) for (const f of [c + 1, c + 2]) if (f <= 18) pairs.push([c, f]);
-  for (let L0 = 4; L0 <= 18; L0++) { const ls = ringLevels(L0); for (const c of ls) { const fin = ls.filter((l) => l > c); if (fin.length) pairs.push([c, Math.min(...fin)]); } }
+  for (let c = 3; c <= MAX_LEVEL - 1; c++) for (const f of [c + 1, c + 2]) if (f <= MAX_LEVEL) pairs.push([c, f]);
+  for (let L0 = 4; L0 <= MAX_LEVEL; L0++) { const ls = ringLevels(L0); for (const c of ls) { const fin = ls.filter((l) => l > c); if (fin.length) pairs.push([c, Math.min(...fin)]); } }
   let checked = 0, level2Differs = 0;
   for (const [c, f] of pairs) for (const lon of lons) for (const lat of lats) {
     const w = innerWindow(ringWindow(lon, lat, f), ringWindow(lon, lat, c));
