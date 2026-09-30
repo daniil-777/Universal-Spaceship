@@ -4,6 +4,7 @@
 // gazetteer entities. Position claims carry the subject they are about; claims under "not" carry negated: true.
 import { WORDS, UNIT_OF, UNITS, toNum, roundNice, RANGE_RES, NUMBER_RE, SPELLED_RE, spelledValue, isBelowCue, CLAUSE_CUT,
   esc } from './verify_numbers.js';
+import { GROUND_RES } from './verify_ground.js';
 import { TERMS, STOP, COMMON_LOWER, isCommonOpener, PROPER_FRAME, NAME_FRAME, PRONOUNS, REASON_CTX, REASON_PHRASES, ACTION_PHRASES,
   CONTINUE_RE, OUTCOME_PHRASES, CAUSE_CUE, CAUSE_PHRASES, DISAGREE, UNGROUNDED, CATS, RELS, KIND_RE, kindOf, SUBJECTS, PRESENCE_NOUN,
   PRESENCE_CUE } from './verify_words.js';
@@ -91,7 +92,7 @@ function negatedAt(low, sentAt, at, np = null) {
   }
   return n % 2 === 1;
 }
-const POSITION = new Set(['clock', 'region', 'compass']);
+const POSITION = new Set(['clock', 'region', 'compass', 'box', 'point']);
 const NEGATABLE = new Set(['number', 'range', 'count', 'clock', 'bearing_clock', 'region', 'compass', 'category', 'kind', 'cause',
   'outcome', 'entity', 'presence']);
 // the object a position claim or a closing relation is about: the nearest subject before it in its sentence, else the
@@ -168,6 +169,8 @@ export function parseClaims(text, gaz) {
     for (const m of [...(lower ? lowerSame(w) : w).matchAll(re)]) if (fn(m) !== false) blank(m.index, m[0].length);
   };
   parseEntities(src, gaz, push, blank);
+  // v1 grounding: boxes, points and lat/lon pairs, before the numbers read their digits (verify_ground.js)
+  for (const [type, re, get] of GROUND_RES) scan(re, (m) => push(type, get(m), m.index), false);
   scan(DISAGREE, (m) => push('disagree', m[0], m.index));
   // a number carries its clause (and the clause before it) for the binding to a quantity noun
   const numAt = (m) => {

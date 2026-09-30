@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 import { checkBank, loadBank, render, pickForm, heldOut, slotsOf, formId } from '../vlm/gen/text/paraphrase.js';
 import { QFAMILIES, balanceAnswers, exportable } from '../vlm/gen/text/vqa.js';
+import { GROUND_ANSWERS } from '../vlm/gen/text/ground_items.js';
 import { renderContext, parseContext, corruptMonitor, monitorOf } from '../vlm/gen/text/context.js';
 import { runTeacher, estimateCost, TEACHER_PROMPT } from '../vlm/gen/text/teacher.js';
 import { CATS, COMMON_LOWER } from '../vlm/gen/text/verify_words.js';
@@ -184,7 +185,7 @@ test('bank rules: Z detail leads carry {range} and {terrain}; monitor answers na
   const fired = new Set(), aids = new Set();
   for (const r of REC) for (let k = 1; k <= 8; k++) for (const q of QFAMILIES) if (q.families.includes(r.family)) { const a = q.ask(r, mulberry32(k), { ...ctxOf(r), ...(r.safety ? { monitor: { ...monOf(r), ttc_bin: '1-3 s', clr_bin: '5-15 u' } } : {}) }); if (a) { fired.add(q.id); aids.add(a.aid); } }
   assert.deepEqual(QFAMILIES.map((q) => q.id).filter((id) => !fired.has(id)), [], 'every family fires on some record');
-  assert.deepEqual(T.filter(([id, t]) => t.kind === 'vqa_a' && !aids.has(id)).map(([id]) => id), [], 'every answer template is produced');
+  assert.deepEqual(T.filter(([id, t]) => t.kind === 'vqa_a' && !aids.has(id) && !GROUND_ANSWERS.includes(id)).map(([id]) => id), [], 'every answer template is produced (grounding: tests/vlm_ground.test.mjs)');
 });
 // the L/D outcomes a text may state next to each monitor verdict, written out (not outcomeAgrees): a benign outcome never
 // stands next to UNSAFE

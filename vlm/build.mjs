@@ -28,6 +28,7 @@ import { licenceOf, attributionOf, oofPreds } from './gen/build/licence.js';
 import { zoomGeo } from './gen/build/zoomgeo.js';
 import { createPool, poolSize } from './gen/build/pool.js';
 import { openFactCache, codeShaOf, stampOf } from './gen/build/factcache.js';
+import { addGroundFacts } from './gen/build/ground.js';
 import { recordTexts } from './gen/text/items.js';
 import { makeGazetteer, BASE_NAMES } from './gen/text/verify.js';
 import { loadBank } from './gen/text/paraphrase.js';
@@ -60,7 +61,7 @@ fs.rmSync(out, { recursive: true, force: true }); fs.mkdirSync(path.join(out, 'c
 const pool = createPool(new URL('./gen/build/frames.js', import.meta.url));
 // the modules whose code decides the cached facts (a change to any of them starts a new cache)
 const CODE = ['gen/imagefacts.js', 'gen/boxresize.js', 'gen/schema.js', 'gen/build/dedupe.js', 'gen/build/frames.js', 'gen/build/zoomgeo.js', 'gen/build/split.js', 'gen/geo/naturalearth.js',
-  'gen/geo/terrarium.js', 'gen/geo/sources.json', 'gen/labels/zoom.js', 'gen/text/items.js', 'capture/tilecache.mjs', '../src/earthtiles.js'].map((f) => fileURLToPath(new URL(`./${f}`, import.meta.url)));
+  'gen/geo/terrarium.js', 'gen/geo/sources.json', 'gen/labels/zoom.js', 'gen/text/items.js', 'gen/build/ground.js', 'capture/tilecache.mjs', '../src/earthtiles.js'].map((f) => fileURLToPath(new URL(`./${f}`, import.meta.url)));
 const codeSha = codeShaOf(CODE), cache = flag('no-cache') ? null : openFactCache(arg('cache-dir', path.join(L, 'cache', 'build')), codeSha);
 
 // ---- 1. load: validated records of finished pages only (the files are read concurrently, then taken in the v0 order)
@@ -108,6 +109,7 @@ for (const r of recs) {
   Object.assign(r.facts, c.image);
   if (r.family === 'Z') { for (const [k, x] of Object.entries(c.geo.facts)) r.facts[k] = x; r.zoom.tags = c.geo.tags; }
   hashOf.set(r.key, BigInt(`0x${c.hash}`));
+  addGroundFacts(r);   // v1 grounding facts from the snapshot, facts and cameras (cheap, not cached)
 }
 say(`image and geo facts done (${hits} of ${recs.length} from the cache ${codeSha}; ${pool.size} workers)`);
 

@@ -12,6 +12,7 @@ import { heightLevel } from '../../../src/earthtiles.js';
 import { fact } from '../schema.js';
 import { terrainPhrase } from '../text/items.js';
 import { queryOf } from './split.js';
+import { nx, ny } from './ground.js';
 
 const LACIE = '/Volumes/LaCie/astro-pilot/vlm', CELL_PX = 56;
 const rankOf = (x) => { const p = x.feature ? x.feature.props : {}; return p.SCALERANK ?? p.scalerank ?? 20; };
@@ -52,6 +53,8 @@ export const zoomGeo = {
     put('place.country', centreCountry ? nameOf(centreCountry.props) : Object.entries(countries).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0]?.[0] ?? null); put('geo.country_frac', frac(countries)); put('geo.admin1_frac', frac(admin1));
     const centreAdmin = featuresAt(ne, 'ne_10m_admin_1_states_provinces', origin.lon, origin.lat)[0]; put('place.admin1', centreAdmin ? nameOf(centreAdmin.props) ?? null : null);
     put('place.in_view', view.filter((x) => typeof x.name === 'string' && x.name).sort(salience).map((x) => ({ name: neName(x.name), kind: x.kind, region: x.region })));
+    // v1 grounding (ground.js): the same features at their pixel position, integers 0-100 on the frame, x first
+    put('ground.features', view.filter((x) => typeof x.name === 'string' && x.name).sort(salience).map((x) => ({ name: neName(x.name), kind: x.kind, pt: [nx(x.px), ny(x.py)] })));
     const np = nearestPlace(ne, origin.lat, origin.lon, { exclude: inView });
     put('place.nearest', np ? { name: np.name, km: +np.km.toFixed(1), bearing: +np.bearing.toFixed(1), compass: np.compass } : null);
     const cellRelief = (thr) => {
