@@ -34,6 +34,10 @@ class TestNarratorData(unittest.TestCase):
         if k < n:
             self.assertTrue((out['input_ids'][short, k:] == PAD).all()); self.assertTrue((out['attention_mask'][short, k:] == 0).all()); self.assertTrue((out['labels'][short, k:] == -100).all())
 
+    def test_check_rows_reports_every_row(self):
+        from vlm.train.narrator.data import check_rows
+        r = check_rows(ROWS, self.p, limit=3); self.assertEqual((r['rows'], r['failed']), (3, [])); self.assertGreater(r['max_len'], 64)
+
     def test_generate_prompt_matches_the_training_prefix(self):
         from PIL import Image
         r = self.ds.rows[0]; inp = encode_prompt(self.p, r['messages'][0]['content'][1]['text'], Image.open(frame_path(r['images'][0])))

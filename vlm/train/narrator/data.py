@@ -37,3 +37,19 @@ def collate(batch):
     for k in ('pixel_values', 'pixel_attention_mask', 'image_hidden_states'):
         if k in batch[0]: out[k] = torch.stack([b[k] for b in batch])
     return out
+
+def check_rows(path, processor, limit=None):
+    """The §10.2 / §11.1 check over every row of a narrator JSONL: build_labels + check_row on the real processor output."""
+    ds, failed, n = NarratorData(path, processor, limit=limit), [], 0
+    for i in range(len(ds)):
+        try: n = max(n, len(ds[i]['input_ids']))
+        except (AssertionError, OSError) as e: failed.append({'i': i, 'key': ds.rows[i].get('key'), 'error': str(e)})
+    return {'rows': len(ds), 'failed': failed, 'max_len': n}
+
+if __name__ == '__main__':
+    import argparse, json
+    from transformers import AutoProcessor
+    ap = argparse.ArgumentParser(description='check the loss mask of every Narrator row'); ap.add_argument('--rows', required=True, nargs='+'); ap.add_argument('--processor-dir', required=True)
+    a = ap.parse_args(); p = AutoProcessor.from_pretrained(a.processor_dir); bad = 0
+    for f in a.rows: r = check_rows(f, p); bad += len(r['failed']); print(json.dumps({'file': f, **r, 'failed': r['failed'][:5]}), flush=True)
+    raise SystemExit(1 if bad else 0)
