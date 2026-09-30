@@ -247,5 +247,7 @@
  },
  "n_per_cell": 200,
  "git_sha": "b76bfa9",
+ "generator_sha": "4d90a6a",
+ "note": "git_sha is the HEAD this run was launched against; vlm/gen/calibrate.mjs itself was uncommitted at run time and was first committed in generator_sha (4d90a6a). Do not expect b76bfa9 to contain the generator script.",
  "date": "2026-09-30T01:35:51.063Z"
 }
