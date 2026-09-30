@@ -33,7 +33,8 @@
     "How much room is there between the ship and the nearest hazard?",
     "At what distance is the closest hazard?",
     "How distant is the nearest hazard right now?",
-    "Estimate the distance to the nearest hazard."
+    "Estimate the distance to the nearest hazard.",
+    "What is the range to the nearest hazard?"
   ] },
   "dist_a": { "kind": "vqa_a", "families": ["S", "A"], "slots": ["dist"], "forms": [
     "The nearest hazard is {dist} away.",
@@ -129,7 +130,8 @@
     "No: they separate at {rate}.",
     "It is getting farther away at {rate}.",
     "No, the hazard draws away from the ship at {rate}.",
-    "Receding, at a rate of {rate}."
+    "Receding, at a rate of {rate}.",
+    "No: it is moving away at {rate}."
   ] },
   "ttc_q": { "kind": "vqa_q", "families": ["S", "A"], "slots": [], "forms": [
     "How long until the nearest hazard reaches the ship?",
@@ -165,7 +167,8 @@
     "What will the separation be at closest approach?",
     "By how much does the nearest hazard clear the ship?",
     "Give the closest-approach distance for the nearest hazard.",
-    "How tight is the pass of the nearest hazard?"
+    "How tight is the pass of the nearest hazard?",
+    "How near will the nearest hazard come?"
   ] },
   "cpa_a": { "kind": "vqa_a", "families": ["S", "A"], "slots": ["cpa"], "forms": [
     "Its closest approach is {cpa}.",
@@ -225,7 +228,8 @@
     "Pitch is {pitch} up.",
     "The nose sits {pitch} above level.",
     "Up: the pitch is {pitch}.",
-    "The ship points {pitch} upwards."
+    "The ship points {pitch} upwards.",
+    "Its nose is raised by {pitch}."
   ] },
   "pitch_down_a": { "kind": "vqa_a", "families": ["S", "A"], "slots": ["pitch"], "forms": [
     "The nose points {pitch} down.",

@@ -46,12 +46,15 @@ export const TAG_WORDS = Object.freeze({ WATER_DOMINANT: ['mostly open sea', 'op
 // the build-time facts the text layer reads, all obs visual and required for their families. Shapes: place = {name, km,
 // bearing (deg from north), compass (one of the 8 compass words)} | null; features = [{name, kind, region (3x3 phrase)}];
 // frac = number in [0, 1]; palette / brightness / edge / coast = one of PALETTE_NAMES / BRIGHTNESS_BINS / EDGE_BINS / COAST_SIDES
-// (coast may be null); place.admin1 is the admin-1 name at the view centre (T11 writes it; text asks "which region is this")
+// (coast may be null); place.admin1 is the admin-1 name at the view centre (T11 writes it; text asks "which region is this");
+// clouds = the landing scene's METAR group: an optional light-rain prefix "-RA ", then NSC / SKC or FEW|SCT|BKN|OVC with a
+// three-digit base in hundreds of feet ("SCT030", "-RA BKN012"), or null
 const ALL = FAMILIES;
 export const TEXT_FACTS = Object.freeze({ 'place.nearest': { families: ['Z'], shape: 'place' }, 'place.country': { families: ['Z'], shape: 'name' }, 'place.admin1': { families: ['Z'], shape: 'name' },
   'place.in_view': { families: ['Z'], shape: 'features' }, 'geo.sea_frac': { families: ['Z'], shape: 'frac' }, 'geo.coast_side': { families: ['Z'], shape: 'coast' },
   'image.palette_0': { families: ALL, shape: 'palette' }, 'image.palette_1': { families: ALL, shape: 'palette' }, 'image.palette_2': { families: ALL, shape: 'palette' },
-  'image.brightness_bin': { families: ALL, shape: 'brightness' }, 'image.edge_bin': { families: ALL, shape: 'edge' } });
+  'image.brightness_bin': { families: ALL, shape: 'brightness' }, 'image.edge_bin': { families: ALL, shape: 'edge' },
+  'scene.clouds': { families: ['L'], shape: 'clouds' } });
 // safety.* ids text items cite; a Context line with a monitor supplies them (§5.7, controller ruling)
 export const SAFETY_TEXT_IDS = Object.freeze(['safety.verdict', 'safety.reasons', 'safety.best_action', 'safety.action_outcome', 'safety.cause', 'safety.p_ref', 'safety.ttc_s', 'safety.clearance']);
 const COMPASS8 = ['north', 'north-east', 'east', 'south-east', 'south', 'south-west', 'west', 'north-west'];
@@ -59,7 +62,8 @@ const REGION9 = ['upper left', 'upper centre', 'upper right', 'middle left', 'ce
 const SHAPE = { place: (v) => v === null || (v && typeof v.name === 'string' && v.km >= 0 && Number.isFinite(v.bearing) && COMPASS8.includes(v.compass)),
   name: (v) => v === null || (typeof v === 'string' && v.length > 0), features: (v) => Array.isArray(v) && v.every((x) => x && typeof x.name === 'string' && typeof x.kind === 'string' && REGION9.includes(x.region)),
   frac: (v) => typeof v === 'number' && v >= 0 && v <= 1, coast: (v) => v === null || COAST_SIDES.includes(v), palette: (v) => PALETTE_NAMES.includes(v),
-  brightness: (v) => BRIGHTNESS_BINS.includes(v), edge: (v) => EDGE_BINS.includes(v) };
+  brightness: (v) => BRIGHTNESS_BINS.includes(v), edge: (v) => EDGE_BINS.includes(v),
+  clouds: (v) => v === null || (typeof v === 'string' && /^(?:-RA )?(?:NSC|SKC|(?:FEW|SCT|BKN|OVC)\d{3})$/.test(v)) };
 export function validateTextFacts(rec) {
   const e = [], facts = (rec && rec.facts) || {};
   for (const [id, spec] of Object.entries(TEXT_FACTS)) {

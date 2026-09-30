@@ -249,7 +249,8 @@
     "Here it is {daylight}.",
     "The lighting shows the scene {daylight}.",
     "The region lies {daylight} in this view.",
-    "We see it {daylight}."
+    "We see it {daylight}.",
+    "The ground lies {daylight}."
   ] },
   "colours_q": { "kind": "vqa_q", "families": ["Z"], "slots": [], "forms": [
     "What are the main colours in the image?",

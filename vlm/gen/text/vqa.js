@@ -5,7 +5,9 @@
 import { fmtSlot, factsOf, catSlot, entSlot, countSlot, clockSlot, regionSlot, compassSlot, rangeSlot, rangeText, roundNice, verifyTemplateItem, parseClaims, checkClaim, ROUTE_NAMES, NOUNS, countPhrase, numText, unitText, W, outcomeSlot, prefOutcome, outcomeAgrees } from './verify.js';
 import { mulberry32 } from '../../../src/mathx.js';
 export { W };
-import { REASON_TEXT, ACTION_TEXT, TTC_RANGE, CLR_RANGE_U, normContext } from './context.js';
+import { REASON_TEXT, ACTION_TEXT, TTC_RANGE, CLR_RANGE_U, normContext, contextSupplies } from './context.js';
+import { CAUSE_REASONS } from './verify_words.js';
+export { CAUSE_REASONS };
 import { defaultBank, pickForm, render, polish } from './paraphrase.js';
 
 const val = (F, id) => (F[id] && F[id].v !== null && F[id].v !== undefined ? F[id].v : null);
@@ -159,15 +161,14 @@ export const QFAMILIES = [
   // monitor's reasons (and a hazard only when its kind is in the frame)
   fam('if_nothing_changes', 'safety', FLIGHT, (r, rng, ctx) => { const p = predictionOf(r, mon(ctx)); return p ? Q('what_if_q', p.aid, { outcome: p.slot }, [p.slot.fact_id], p.slot.value, { monitor: true }) : null; }),
   fam('most_dangerous', 'safety', FLIGHT, (r, rng, ctx) => { const c = r.safety && r.safety.cause, m = mon(ctx), k = val(factsOf(r), 'kinds_in_frame');
-    if (!c || !W.cause[c] || !m || !(CAUSE_REASONS[c] || []).some((x) => m.reasons.includes(x)) || (KIND_A[c] && !(Array.isArray(k) && k.includes(c)))) return null;
+    if (!c || !W.cause[c] || !m || !(CAUSE_REASONS[c] || []).some((x) => m.reasons.includes(x))) return null;
+    // a hazard only when it is the one kind in the frame (with two kinds in view, which one the danger is is not visible)
+    if (KIND_A[c] && !(Array.isArray(k) && k.length === 1 && k[0] === c)) return null;
     return Q('danger_q', 'danger_a', { threat: catSlot('safety.cause', c, W.cause[c]) }, ['safety.cause'], c, { monitor: true }); }),
   fam('monitor_ttc', 'safety', SA, (r, rng, ctx) => { const m = mon(ctx), t = m && TTC_RANGE[m.ttc_bin]; return t ? Q('mttc_q', 'mttc_a', { ttc: monRange('safety.ttc_s', t, 's') }, ['safety.ttc_s'], m.ttc_bin, { monitor: true }) : null; }),
   fam('monitor_clearance', 'safety', SA, (r, rng, ctx) => { const m = mon(ctx), c = m && CLR_RANGE_U[m.clr_bin];
     return c ? Q('mclr_q', 'mclr_a', { clr_bin: monRange('safety.clearance', [c[0] * 19, c[1] * 19], 'm') }, ['safety.clearance'], m.clr_bin, { monitor: true }) : null; }),
 ];
-export const CAUSE_REASONS = Object.freeze({ rock: ['HAZARD_AHEAD', 'HAZARD_CLOSING_FAST'], comet: ['HAZARD_AHEAD', 'HAZARD_CLOSING_FAST'], satellite: ['HAZARD_AHEAD', 'HAZARD_CLOSING_FAST'],
-  airliner: ['HAZARD_AHEAD', 'HAZARD_CLOSING_FAST'], birds: ['HAZARD_AHEAD', 'HAZARD_CLOSING_FAST'], terrain: ['TERRAIN_CLOSE', 'PULL_UP'], building: ['BUILDING_CLOSE'], roof: ['BUILDING_CLOSE'], overstress: ['OVERSTRESS'],
-  ground: ['UNSTABLE_APPROACH', 'HIGH_SINK_RATE', 'GLIDESLOPE_DEVIATION'], runway: ['RUNWAY_EDGE', 'CANNOT_STOP'], station: ['KOS_VIOLATION', 'LATERAL_MISALIGNMENT', 'CLOSING_TOO_FAST', 'ATTITUDE_ERROR'] });
 // the prediction a row may state next to monitor m: {aid, slot} or null (S/A from p_ref, L/D the agreeing safety outcome)
 export function predictionOf(r, m) {
   if (!r.safety || !m) return null;
@@ -195,10 +196,11 @@ export function balanceAnswers(items, { maxShare = 0.5, rng = mulberry32(1) } = 
   return out;
 }
 
-// every context-class fact an item cites is supplied by the row's Context (telemetry ids; a monitor supplies safety.*)
+// every context-class fact an item cites is supplied by the row's Context: the one §5.7 rule, contextSupplies (telemetry
+// ids; a monitor supplies SAFETY_TEXT_IDS)
 export function exportable(factIds, rec, context) {
-  const F = factsOf(rec), c = normContext(context);
-  return factIds.every((id) => (id.startsWith('safety.') ? !!(c && c.monitor) : !F[id] || F[id].obs === 'visual' || (!!c && c.ids.has(id))));
+  const F = factsOf(rec);
+  return contextSupplies(factIds.filter((id) => id.startsWith('safety.') || (F[id] && F[id].obs !== 'visual')), context);
 }
 // LRV-style negatives (spec §5.5): an absent hazard (checked against kinds_in_frame), a wrong number (|stated/true - 1| >= 0.3
 // and outside the rounding interval) or a wrong place (not in view, not the nearest place, not the country; for A a wrong
@@ -220,7 +222,8 @@ const V = {
   absent: (F, rng, { forceKind }) => { const k = val(F, 'kinds_in_frame'), n = val(F, 'hazards.count_in_frame'); if (!Array.isArray(k) || n === null) return null;
     const pool = Object.keys(KIND_A).filter((x) => !k.includes(x)), kind = forceKind ?? pick(pool, rng); if (!kind || k.includes(kind)) return null;
     return { variant: 'absent', qid: 'neg_absent_q', aid: 'neg_absent_a', q: { kind: KIND_N[kind], side: rng() < 0.5 ? 'left' : 'right' }, a: { kind_none: countSlot('kinds_in_frame', 0, kind, ['count_of', kind]), hazards: countSlot('hazards.count_in_frame', n, 'hazard') },
-      fact_ids: ['kinds_in_frame', 'hazards.count_in_frame'], premise: { fact_id: 'kinds_in_frame', stated: kind }, isPremise: null }; },
+      fact_ids: ['kinds_in_frame', 'hazards.count_in_frame'], premise: { fact_id: 'kinds_in_frame', stated: kind },
+      isPremise: (cl) => (cl.type === 'kind' || cl.type === 'cause') && cl.value === kind && !cl.negated }; },
   count: (F, rng) => { const k = val(F, 'kinds_in_frame'), t = val(F, 'hazards.count_in_frame'); if (!Array.isArray(k) || t === null) return null;
     const noun = k.length === 1 ? k[0] : 'hazard', c = [1, 2, 3, 4, 5, 6].filter((s) => s !== t && (t === 0 || Math.abs(s / t - 1) >= 0.3)), s = pick(c, rng);
     return { variant: 'count', qid: 'neg_count_q', aid: 'neg_count_a', q: { count_stated: countPhrase(s, noun) }, a: { count_true: countSlot('hazards.count_in_frame', t, noun) }, fact_ids: ['hazards.count_in_frame', 'kinds_in_frame'],

@@ -1,10 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
-import { checkBank, loadBank, render, pickForm, heldOut, slotsOf } from '../vlm/gen/text/paraphrase.js';
-import { QFAMILIES, balanceAnswers } from '../vlm/gen/text/vqa.js';
+import { checkBank, loadBank, render, pickForm, heldOut, slotsOf, formId } from '../vlm/gen/text/paraphrase.js';
+import { QFAMILIES, balanceAnswers, exportable } from '../vlm/gen/text/vqa.js';
 import { renderContext, parseContext, corruptMonitor, monitorOf } from '../vlm/gen/text/context.js';
-import { runTeacher, estimateCost } from '../vlm/gen/text/teacher.js';
+import { runTeacher, estimateCost, TEACHER_PROMPT } from '../vlm/gen/text/teacher.js';
+import { CATS, COMMON_LOWER } from '../vlm/gen/text/verify_words.js';
 import { mulberry32 } from '../src/mathx.js';
 
 const bank = loadBank(fileURLToPath(new URL('../vlm/gen/text/bank/', import.meta.url)));
@@ -50,6 +51,7 @@ import { recordTexts, visualSlots } from '../vlm/gen/text/items.js';
 import { makeGazetteer, BASE_NAMES, SENTENCE_WORDS, ROUTE_NAMES, verifyTemplateItem, verifyFreeText } from '../vlm/gen/text/verify.js';
 import { telemetryOf, contextSupplies, rowContext, REASON_TEXT, ACTION_TEXT } from '../vlm/gen/text/context.js';
 import { REASONS, ACTIONS, OUTCOMES, CAUSES, HAZARD_KINDS, ZOOM_TAGS, TAG_WORDS, PALETTE_NAMES, SAFETY_TEXT_IDS, validateTextFacts } from '../vlm/gen/schema.js';
+import { BRIGHTNESS_BINS, EDGE_BINS, COAST_SIDES } from '../vlm/gen/schema.js';
 import { W, KIND_A, CAUSE_REASONS } from '../vlm/gen/text/vqa.js';
 import { parseClaims, prefOutcome, outcomeAgrees } from '../vlm/gen/text/verify.js';
 const V = (v, unit = null) => ({ v, unit, obs: 'visual' }), C = (v, unit = null) => ({ v, unit, obs: 'context' });
@@ -179,6 +181,14 @@ test('bank rules: Z detail leads carry {range} and {terrain}; monitor answers na
   assert.deepEqual(QFAMILIES.map((q) => q.id).filter((id) => !fired.has(id)), [], 'every family fires on some record');
   assert.deepEqual(T.filter(([id, t]) => t.kind === 'vqa_a' && !aids.has(id)).map(([id]) => id), [], 'every answer template is produced');
 });
+// the L/D outcomes a text may state next to each monitor verdict, written out (not outcomeAgrees): a benign outcome never
+// stands next to UNSAFE
+const BENIGN = ['landed', 'capture', 'clear'];
+const AGREES = { SAFE: BENIGN, CAUTION: [...BENIGN, 'go_around', 'breakout', 'crash_possible'],
+  UNSAFE: ['crash_possible', 'crash_certain', 'go_around', 'hard', 'excursion', 'overrun', 'short', 'tailstrike', 'crash', 'breakout', 'fail'] };
+test('outcomeAgrees matches the written-out table for every outcome and verdict', () => {
+  for (const v of Object.keys(AGREES)) for (const o of Object.keys(W.outcome)) assert.equal(outcomeAgrees(o, v), AGREES[v].includes(o), `${o} / ${v}`);
+});
 test("§5.7 under a corrupted monitor: the prediction is the monitor's p_ref (S/A) or agrees with its verdict (L/D); a cause is one of its reasons", () => {
   let n = 0;
   for (const r of REC.filter((x) => x.safety)) for (const verdict of ['SAFE', 'CAUTION', 'UNSAFE']) for (const p_ref of SA_(r) ? [0, 0.5, 1] : [null]) for (const reasons of [[], ['HAZARD_AHEAD'], ['TERRAIN_CLOSE', 'CANNOT_STOP', 'KOS_VIOLATION']]) {
@@ -190,7 +200,7 @@ test("§5.7 under a corrupted monitor: the prediction is the monitor's p_ref (S/
         for (const c of parseClaims(t.answer, GAZ).filter((x) => x.type === 'outcome')) {
           n++;
           if (SA_(r)) { assert.equal(c.value, prefOutcome(p_ref), `${r.key} ${t.answer}`); assert.match(t.answer.split(/(?<=[.!?])\s+/).find((x) => x.includes(W.outcome[c.value])), /monitor/i); }
-          else assert.ok(outcomeAgrees(c.value, verdict), `${r.key} ${verdict}: ${t.answer}`);
+          else assert.ok(AGREES[verdict].includes(c.value), `${r.key} ${verdict}: ${t.answer}`);
         }
         if (t.family_q === 'most_dangerous') assert.ok(CAUSE_REASONS[r.safety.cause].some((x) => reasons.includes(x)), `${r.key}: ${t.answer}`);
         if (rowContext(t, ctx, () => 0).keep && t.needsContext) assert.ok(verifyFreeText(t.answer, r, { gaz: GAZ, obsRule: true, context: ctx }).verified, `${r.key} ${verdict}: ${t.answer}`);
@@ -223,4 +233,40 @@ test('shared text constants: the text tables cover the schema enums, TEXT_FACTS 
   assert.equal(pickForm(bank, 'sky_a', () => 0.99, 'train').paraphrase_id, f0, 'a paraphrase id is the hash of its form, not its position');
   const a = balanceAnswers(Array.from({ length: 40 }, (_, i) => ({ family_q: 'q', answerKey: i < 30 ? 'a' : 'b', i })), { maxShare: 0.5, rng: mulberry32(1) }), b = balanceAnswers(Array.from({ length: 40 }, (_, i) => ({ family_q: 'q', answerKey: i < 30 ? 'a' : 'b', i })), { maxShare: 0.5, rng: mulberry32(2) });
   assert.equal(a.length, 20); assert.notDeepEqual(a.map((x) => x.i), b.map((x) => x.i));
+});
+
+// ---- fix round 2 ----
+test('round 2: the word tables follow the schema enums; scene.clouds is a text fact; the bank vocabulary is whole; the teacher prompt is plain', () => {
+  assert.deepEqual(Object.keys(W.bright), [...BRIGHTNESS_BINS]); assert.deepEqual(Object.keys(W.coast), [...COAST_SIDES]);
+  assert.deepEqual(CATS.filter(([d]) => d === 'texture').map(([, v]) => v).sort(), [...EDGE_BINS].sort());
+  const l = REC.find((r) => r.key === 'L_t_1');
+  assert.deepEqual(validateTextFacts(l), { ok: true, errors: [] });
+  assert.equal(validateTextFacts({ ...l, facts: { ...l.facts, 'scene.clouds': V('cloudy') } }).ok, false);
+  const words = new Set(Object.values(bank).flatMap((t) => t.forms.flatMap((f) => f.replace(/\{[a-z_]+\}/g, ' ').toLowerCase()
+    .match(/\p{L}[\p{L}'-]*/gu) || []).map((x) => x.replace(/'s$/, ''))));
+  assert.deepEqual([...words].filter((x) => x.length > 1 && !COMMON_LOWER.has(x)), []);
+  assert.doesNotMatch(TEACHER_PROMPT, /vivid/i);
+});
+test('round 2: held-out forms are stable under appends; every template keeps a train and a held form; exportable is contextSupplies', () => {
+  for (const [id, t] of Object.entries(bank)) {
+    const held = t.forms.filter((f) => parseInt(formId(f), 16) % 5 === 0).length;
+    assert.ok(held >= 1 && held < t.forms.length, id);
+  }
+  const t = bank.sky_a, before = t.forms.map((f) => heldOut('sky_a', formId(f)));
+  pickForm({ sky_a: { ...t, forms: [...t.forms, 'Yet another form about {sky} skies.'] } }, 'sky_a', () => 0, 'train');
+  assert.deepEqual(t.forms.map((f) => heldOut('sky_a', formId(f))), before, 'appending a form moves no split');
+  pickForm(bank, 'sky_a', () => 0, 'train');
+  const heldForm = t.forms.find((f) => parseInt(formId(f), 16) % 5 === 0);
+  assert.throws(() => pickForm({ solo: { ...t, forms: [heldForm] } }, 'solo', () => 0, 'train'), /no train form/);
+  const l = REC.find((r) => r.key === 'L_t_1'), ctx = ctxOf(l);
+  for (const ids of [['ias_kt'], ['vert_mode'], ['safety.verdict'], ['cfg.gear', 'safety.cause'], ['cfg.gear']]) {
+    const cited = ids.filter((id) => id.startsWith('safety.') || l.facts[id].obs !== 'visual');
+    for (const c of [ctx, null, { telemetry: ctx.telemetry, monitor: null }]) assert.equal(exportable(ids, l, c), contextSupplies(cited, c), `${ids} ${!!c}`);
+  }
+});
+test('round 2: most_dangerous names a hazard only when it is the one kind in the frame', () => {
+  const md = QFAMILIES.find((q) => q.id === 'most_dangerous'), s1 = REC.find((r) => r.key === 'S_t_1');
+  assert.equal(md.ask(s1, mulberry32(1), ctxOf(s1)), null, 'comet and rock in view');
+  const one = { ...s1, facts: { ...s1.facts, kinds_in_frame: V(['rock']) } };
+  assert.ok(md.ask(one, mulberry32(1), ctxOf(one)));
 });

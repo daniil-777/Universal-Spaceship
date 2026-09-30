@@ -6,7 +6,7 @@ import crypto from 'node:crypto';
 import { verifyFreeText } from './verify.js';
 
 export const estimateCost = ({ n, tokensIn, tokensOut, priceIn, priceOut }) => (n * (tokensIn * priceIn + tokensOut * priceOut)) / 1e6;
-export const TEACHER_PROMPT = 'Describe this image vividly for a pilot, using ONLY the facts in the JSON below. Do not add any place, number or object that is not in the facts.';
+export const TEACHER_PROMPT = 'Describe this image for a pilot, using ONLY the facts in the JSON below. Do not add any place, number or object that is not in the facts.';
 export const visualFacts = (facts) => Object.fromEntries(Object.entries(facts || {}).filter(([, f]) => f && f.obs === 'visual'));
 const redact = (s, key) => String(s).split(key).join('[redacted]');
 export async function runTeacher(records, { send, model, temperature = 0.7, priceIn, priceOut, yesSpend = false, env = process.env, log = console.log, gaz = null, tokensIn = 1500, tokensOut = 200 }) {

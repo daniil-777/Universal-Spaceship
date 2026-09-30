@@ -45,7 +45,8 @@
     "No, it is {count_true}.",
     "No, I see {count_true} here.",
     "No, the view contains {count_true}.",
-    "No; the frame has {count_true}."
+    "No; the frame has {count_true}.",
+    "No, the true count is {count_true}."
   ] },
   "neg_dist_q": { "kind": "negative_q", "families": ["S", "A"], "slots": ["dist_stated"], "forms": [
     "The nearest hazard is {dist_stated} away, right?",
@@ -213,6 +214,7 @@
     "No, the ship follows the {route} route.",
     "No. This view belongs to the {route} route.",
     "No, the route is {route}.",
-    "No, it is the {route} route instead."
+    "No, it is the {route} route instead.",
+    "No, the frame is from the {route} route."
   ] }
 }

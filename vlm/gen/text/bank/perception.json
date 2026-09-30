@@ -9,7 +9,8 @@
     "Tell me how many {kind_pl} are visible.",
     "How many {kind_pl} appear in this view?",
     "Give the number of {kind_pl} in sight.",
-    "How many {kind_pl} are there in the scene?"
+    "How many {kind_pl} are there in the scene?",
+    "How many {kind_pl} are shown?"
   ] },
   "count_kind_a": { "kind": "vqa_a", "families": ["S", "A"], "slots": ["kind_count"], "forms": [
     "I can count {kind_count} in the frame.",
@@ -81,7 +82,8 @@
     "Closest in view: {a_kind}.",
     "The hazard nearest to the ship is {a_kind}.",
     "I see {a_kind} as the closest hazard.",
-    "{a_kind} is closest to the ship in this frame."
+    "{a_kind} is closest to the ship in this frame.",
+    "The closest hazard is {a_kind}."
   ] },
   "nearest_side_q": { "kind": "vqa_q", "families": ["S", "A"], "slots": ["kind"], "forms": [
     "On which side of the image is the nearest {kind}?",
@@ -105,7 +107,8 @@
     "Look {side_at}; that is where it is.",
     "It shows up {side_at}.",
     "The nearest one can be seen {side_at}.",
-    "It is placed {side_at}."
+    "It is placed {side_at}.",
+    "The nearest hazard is {side_at}."
   ] },
   "nearest_clock_q": { "kind": "vqa_q", "families": ["S", "A"], "slots": ["kind"], "forms": [
     "Where is the nearest {kind} in the image, as a clock position?",
@@ -129,7 +132,8 @@
     "Look at {clock} on the image; it is there.",
     "It lies at {clock} in the frame.",
     "The closest one shows at {clock} in the picture.",
-    "On the image clock it is at {clock}."
+    "On the image clock it is at {clock}.",
+    "The nearest hazard is at {clock} in the image."
   ] },
   "size_q": { "kind": "vqa_q", "families": ["S", "A"], "slots": ["kind"], "forms": [
     "How big does the nearest {kind} look in the frame?",
@@ -165,7 +169,8 @@
     "How many hazards appear in the picture?",
     "Give me a count of the hazards in sight.",
     "How many hazards does this view contain?",
-    "Tell me how many hazards are visible here."
+    "Tell me how many hazards are visible here.",
+    "How many hazards appear in the image?"
   ] },
   "hazards_a": { "kind": "vqa_a", "families": ["S", "A"], "slots": ["hazards"], "forms": [
     "The frame shows {hazards}.",
@@ -225,7 +230,8 @@
     "Can the Moon be seen from this camera?",
     "Is there a Moon in the image?",
     "Do you see the Moon here?",
-    "Is the Moon part of this scene?"
+    "Is the Moon part of this scene?",
+    "Can you spot the Moon?"
   ] },
   "moon_yes_a": { "kind": "vqa_a", "families": ["S", "D"], "slots": [], "forms": [
     "Yes, the Moon is in view.",
@@ -273,7 +279,8 @@
     "The Sun lights this scene.",
     "It is sunlit, not in shadow.",
     "Here the Sun is shining directly.",
-    "The frame is in sunlight."
+    "The frame is in sunlight.",
+    "The scene lies in full sunlight."
   ] },
   "sun_shadow_a": { "kind": "vqa_a", "families": ["S", "D"], "slots": [], "forms": [
     "It is in shadow.",

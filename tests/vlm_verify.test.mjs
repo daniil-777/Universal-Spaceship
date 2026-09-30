@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { roundNice, fmtSlot, parseClaims, makeGazetteer, verifyFreeText, verifyTemplateItem } from '../vlm/gen/text/verify.js';
+import { roundNice, fmtSlot, parseClaims, makeGazetteer, verifyFreeText, verifyTemplateItem, derive } from '../vlm/gen/text/verify.js';
+import { aboutHolds } from '../vlm/gen/text/verify_numbers.js';
 import { makeNegative } from '../vlm/gen/text/vqa.js';
 
 const gaz = makeGazetteer(['Zermatt', 'Switzerland', 'Italy', 'Tokyo', 'New York', 'Matterhorn']);
@@ -76,7 +77,7 @@ test('parser: acronyms and bodies are terms, not places; a sentence-initial comm
   const g = makeGazetteer(['PAPI', 'Earth', 'Split', 'Orange', 'Zermatt']);
   assert.deepEqual(t2('The PAPI shows two white and two red lights; the Earth is in view.', g), [['count', 2], ['count', 2]]);
   assert.deepEqual(t2('Split the wind into components. Orange and blue dominate. The view is near Split.', g).filter((c) => c[0] !== 'category'), [['entity', 'Split']]);
-  assert.deepEqual(t2('A comet at your 1 o\'clock; the rock sits at 2 o\'clock in the image.'), [['bearing_clock', 1], ['clock', 2]]);
+  assert.deepEqual(t2('A comet at your 1 o\'clock; the rock sits at 2 o\'clock in the image.'), [['kind', 'comet'], ['bearing_clock', 1], ['kind', 'rock'], ['clock', 2]]);
   const brec = { ...rec, facts: { ...rec.facts, 'hazard.0.bearing_clock': F(1, 'clock') } };
   assert.equal(verifyFreeText('The rock is at your 1 o\'clock and in the upper right of the image.', brec, { gaz }).verified, true, 'box_px 730,130 lies in the upper right');
   assert.equal(verifyFreeText('One jet failed: P6. No white lights show.', drec, { gaz }).verified, false, 'papi unknown: no count claim about it holds');
@@ -115,4 +116,68 @@ test('corruptMonitor copies the donor tuple whole (p_ref included) and refuses a
   const m = { verdict: 'UNSAFE', severity: 3, reasons: ['HAZARD_AHEAD'], action: 'CLIMB', p_ref: 1, ttc_bin: '1-3 s', clr_bin: '<5 u' }, pool = [{ family: 'S', verdict: 'SAFE', severity: 0, reasons: [], action: 'CONTINUE', p_ref: 0, ttc_bin: 'none', clr_bin: 'none' }];
   const c = corruptMonitor(m, { rng: () => 0.01, confusion: null, pool, family: 'S' }); assert.deepEqual([c.verdict, c.action, c.p_ref], ['SAFE', 'CONTINUE', 0]);
   assert.throws(() => corruptMonitor(m, { rng: () => 0.01, confusion: null, pool, family: 'A' }), /pool entry of family S/);
+});
+
+// ---- fix round 2 ----
+const ok = (t, r, o = {}) => verifyFreeText(t, r, { gaz, ...o }).verified;
+const sRec = { family: 'S', facts: { ...rec.facts, 'hazard.0.size_bin': F('medium', null, 'visual'), 'hazard.0.closing_u_s': F(21.5, 'u/s'),
+  'hazard.1.kind': F('comet'), 'hazard.1.in_frame': F(false, null, 'visual'), 'hazard.1.clock': F(null, 'clock', 'visual'),
+  'hazard.1.closing_u_s': F(-3, 'u/s'), moon_in_frame: F(false, null, 'visual') }, safety: { ...rec.safety, cause: 'rock' } };
+const sMon = { monitor: { verdict: 'UNSAFE', severity: 3, reasons: ['HAZARD_AHEAD'], action: 'CLIMB', p_ref: 1, ttc_bin: 'none', clr_bin: 'none' } };
+test('round 2: a benign L/D outcome never stands next to an UNSAFE monitor', () => {
+  const l = { family: 'L', facts: { 'cfg.gear': F('down', null, 'visual') },
+    safety: { verdict: 'CAUTION', reasons: [], best_action: 'CONTINUE', action_outcome: { CONTINUE: 'landed' } } };
+  const mon = (verdict) => ({ monitor: { verdict, severity: 3, reasons: ['CANNOT_STOP'], action: 'GO_AROUND', p_ref: null, ttc_bin: 'none',
+    clr_bin: 'none' } });
+  const say = 'If nothing changes, the aircraft touches down and completes the landing.';
+  assert.equal(ok(say, l, { context: mon('UNSAFE'), obsRule: true }), false);
+  assert.equal(ok(say, l, { context: mon('SAFE'), obsRule: true }), true);
+});
+test('round 2: no false rejects for closing in D and L, world tags, METAR clouds, the binding window and common openers', () => {
+  const d = { family: 'D', facts: { closing_cms: F(12.1, 'cm/s'), speed_limit_cms: F(30, 'cm/s'), phase: F('FINAL', null, 'visual') }, safety: null };
+  assert.ok(ok('The spacecraft is approaching the station.', d) && !ok('The spacecraft is moving away from the station.', d));
+  assert.ok(ok('The spacecraft is approaching the station.', { ...d, facts: { phase: d.facts.phase } }), 'no closing rate: the phase');
+  assert.ok(ok('The spacecraft must not exceed about 30 cm/s.', d), 'a limit, not a negated speed');
+  const l = { family: 'L', facts: { vert_mode: F('GS'), wow: F(false), 'scene.clouds': F('-RA SCT030', null, 'visual'), ias_kt: F(142.3, 'kt'),
+    'wind.head_kt': F(12.4, 'kt') }, safety: null };
+  assert.ok(ok('The aircraft approaches the runway under scattered clouds in the rain.', l));
+  assert.ok(!ok('The aircraft approaches the runway.', { ...l, facts: { ...l.facts, vert_mode: F('ROLLOUT'), wow: F(true) } }));
+  assert.ok(ok('The aircraft is at about 140 kt with a headwind of about 12 kt.', l) && !ok('The sky is overcast.', l));
+  assert.deepEqual(['SCT030', 'OVC003', '-RA BKN012', 'NSC', 'broken', 'few'].map((x) => derive(['cloud_code'], x)),
+    ['SCT', 'OVC', 'BKN', 'NSC', 'BKN', 'FEW']);
+  const a = { family: 'A', facts: { world: F('mountains', null, 'visual'), route: F('alps', null, 'visual') }, safety: null };
+  assert.ok(ok('The aircraft flies over the mountains and hilly terrain.', a) && !ok('The aircraft flies over city areas.', a));
+  for (const o of ['Watch', 'Keep', 'Floating', 'Bathed', 'Glinting', 'Built-up']) assert.ok(ok(`${o}, a rock sits at 2 o'clock in the image.`, rec), o);
+  assert.ok(!ok('Zorblax lies ahead.', rec) && !ok('It is near Zorblax town.', rec));
+  const g = makeGazetteer(['Split']);
+  assert.deepEqual(parseClaims('Split lies on the coast.', g).map((c) => c.type), ['entity']);
+  assert.deepEqual(parseClaims('Split the view in two.', g).map((c) => c.type), []);
+});
+test('round 2: position claims bind to their subject; kinds, causes and disagreements are claims', () => {
+  assert.ok(ok("The rock is at 2 o'clock in the image.", sRec) && !ok("The Moon is at 2 o'clock in the image.", sRec));
+  assert.ok(!ok("The comet is at 2 o'clock in the image.", sRec) && !ok('The Moon is on the right side of the image.', sRec));
+  assert.ok(ok('The rock is on the right side of the image.', sRec) && !ok('An airliner is on the right side of the image.', sRec));
+  assert.ok(ok('The Matterhorn sits in the upper left of the image.', zrec) && !ok('Zermatt sits in the upper left of the image.', zrec));
+  assert.ok(ok('There is a rock in the frame.', sRec) && !ok('There is a comet in the frame.', sRec), 'the comet is out of the frame');
+  assert.ok(ok('The rock is closing in.', sRec) && !ok('The rock is moving away.', sRec), 'the receding hazard is the comet');
+  assert.ok(!ok('The comet is moving away.', sRec), 'a kind named with an article must be in the frame');
+  assert.ok(ok('The biggest threat is the rock.', sRec, { context: sMon }) && !ok('The biggest threat is the satellite.', sRec, { context: sMon }));
+  assert.ok(!ok('The biggest threat is the rock.', sRec, { context: { monitor: { ...sMon.monitor, reasons: ['STALL'] } } }), 'not a monitor reason');
+  assert.ok(!ok('The monitor rates this UNSAFE. But the monitor is wrong here.', sRec, { context: sMon }));
+  assert.ok(!ok('Despite the monitor, the flight is fine.', sRec, { context: sMon }) && !ok('The monitor is quiet.', sRec), 'no Context');
+});
+test('round 2: a negated claim holds when its positive does not; spelled-out numbers are numbers', () => {
+  assert.ok(!ok('The rock is not medium-sized.', sRec) && ok('The rock is not large.', sRec));
+  assert.ok(ok('There is not a comet in the frame.', sRec) && !ok('There is not a rock in the frame.', sRec));
+  assert.ok(!ok("The rock is not at 2 o'clock in the image.", sRec) && ok("The rock is not at 5 o'clock in the image.", sRec));
+  assert.ok(!ok('It does not show up on the right side of the image.', sRec));
+  const c = parseClaims('It is about nine hundred and fifty metres away, closing at twenty-one knots, under five seconds out.', gaz);
+  assert.deepEqual(c.map((x) => [x.type, x.value ?? [x.lo, x.hi], x.unit]), [['number', 950, 'm'], ['number', 21, 'kt'], ['range', [0, 5], 's']]);
+  assert.ok(ok('The nearest hazard is about two hundred and fifty metres away.', rec) && !ok('The nearest hazard is about seven hundred metres away.', rec));
+});
+test('round 2: roundNice is symmetric about zero; "about X" holds within half a human step of X', () => {
+  assert.deepEqual(roundNice(-19.3), { value: -20, lo: -22.5, hi: -17.5 }); assert.equal(roundNice(-3.5).value, -4);
+  for (const v of [0.66, 3.5, 6.6, 12.4, 142.3, 233.7]) assert.equal(roundNice(-v).value, -roundNice(v).value, String(v));
+  assert.ok(aboutHolds(6.6, 7) && aboutHolds(0.66, 0.6) && aboutHolds(142.3, 140) && aboutHolds(12.4, 12));
+  assert.ok(!aboutHolds(6.6, 5) && !aboutHolds(233.7, 300) && !aboutHolds(21.5, 30));
 });

@@ -299,7 +299,8 @@
     "The aircraft flies with the gear {gear}.",
     "Its landing gear is {gear}.",
     "The undercarriage is {gear}.",
-    "The image shows the gear {gear}."
+    "The image shows the gear {gear}.",
+    "In the image the gear is {gear}."
   ] },
   "perc_docking": { "kind": "safety_part", "families": ["D"], "slots": ["dphase", "station_dist"], "forms": [
     "The spacecraft is in {dphase}, {station_dist} from the station.",
@@ -335,7 +336,8 @@
     "Going by the monitor, if the current path is held, {outcome}.",
     "The monitor reckons that, unless something changes, {outcome}.",
     "Per the monitor, with no intervention, {outcome}.",
-    "The monitor's prediction: if nothing changes, {outcome}."
+    "The monitor's prediction: if nothing changes, {outcome}.",
+    "The monitor reckons that if nothing changes, {outcome}."
   ] },
   "what_if_mon_a": { "kind": "vqa_a", "families": ["S", "A"], "slots": ["outcome"], "forms": [
     "According to the monitor, if nothing changes, {outcome}.",

@@ -8,7 +8,7 @@
 // monitor's verdict, reasons, action and, for S/A, its p_ref as the prediction; an L/D outcome only when it agrees with the
 // monitor's verdict), and a visual fact that contradicts the monitor is said.
 import { pickForm, render, polish } from './paraphrase.js';
-import { verifyTemplateItem, factsOf, catSlot, entSlot, countSlot, clockSlot, regionSlot, compassSlot, fmtSlot, ROUTE_NAMES, W } from './verify.js';
+import { verifyTemplateItem, factsOf, catSlot, entSlot, countSlot, clockSlot, regionSlot, compassSlot, fmtSlot, ROUTE_NAMES, W, derive } from './verify.js';
 import { QFAMILIES, makeNegative, NEGATIVE_TYPES, exportable, stationSlot, predictionOf, KIND_A, KIND_N, reasonsText } from './vqa.js';
 import { PALETTE_NAMES, BRIGHTNESS_BINS, EDGE_BINS, COAST_SIDES, TAG_WORDS } from '../schema.js';
 import { ACTION_TEXT, normContext } from './context.js';
@@ -46,7 +46,7 @@ export function visualSlots(rec) {
   if (w !== null) { put('papi_white', countSlot('papi_whites_cam', w, 'white')); put('papi_red', countSlot('papi_whites_cam', 4 - w, 'red', ['papi_red'])); put('papi_path', catSlot('papi_whites_cam', w, W.papi[w])); }
   if (v('windsock.from_deg') !== null) put('sock', fmtSlot('windsock.from_deg', F['windsock.from_deg']));
   if (W.time[t]) put('light', catSlot('scene.time', t, W.time[t])); if (W.vis[vis]) put('visibility', catSlot('scene.vis', vis, W.vis[vis]));
-  const cc = v('scene.clouds') === null ? null : (/\b(FEW|SCT|BKN|OVC|NSC|SKC|NONE)\b/.exec(String(v('scene.clouds'))) || [])[1]; if (W.clouds[cc]) put('clouds', catSlot('scene.clouds', cc, W.clouds[cc], ['cloud_code']));
+  const cc = v('scene.clouds') === null ? null : derive(['cloud_code'], v('scene.clouds')); if (W.clouds[cc]) put('clouds', catSlot('scene.clouds', cc, W.clouds[cc], ['cloud_code']));
   if (v('scene.rain') === true) put('rain', catSlot('scene.rain', true, 'rain')); if (v('cfg.spoilers') !== null && v('cfg.spoilers') >= 0.5) put('spoilers', catSlot('cfg.spoilers', true, 'deployed', ['gt', 0.25]));
   const ph = v('phase'), sb = v('station_distance_bin');
   if (W.phase[ph]) put('dphase', catSlot('phase', ph, W.phase[ph]));

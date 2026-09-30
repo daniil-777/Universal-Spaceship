@@ -12,13 +12,13 @@
     "Is the aircraft tracking the glideslope?"
   ] },
   "gs_on_a": { "kind": "vqa_a", "families": ["L"], "slots": [], "forms": [
-    "The aircraft is on the glideslope, within one dot.",
+    "The aircraft is on the glideslope, within a dot.",
     "It is on the glideslope.",
-    "The aircraft tracks the glideslope within one dot.",
-    "On the glideslope: the deviation is less than one dot.",
+    "The aircraft tracks the glideslope within a dot.",
+    "On the glideslope: the deviation is less than a dot.",
     "The vertical path is on the glideslope.",
     "It sits on the glideslope, neither high nor low.",
-    "The glideslope indication is centred within one dot.",
+    "The glideslope indication is centred within a dot.",
     "The aircraft is right on the glideslope.",
     "On the glideslope, within a dot.",
     "Vertically the approach is on the glideslope."
@@ -28,7 +28,7 @@
     "It sits {gs_dev} {gs_side} the glideslope.",
     "Off the glideslope: {gs_dev} {gs_side} it.",
     "The glideslope indication puts the aircraft {gs_dev} {gs_side} the path.",
-    "It is {gs_dev} {gs_side} the glideslope, outside one dot.",
+    "It is {gs_dev} {gs_side} the glideslope, more than a dot off.",
     "The aircraft flies {gs_dev} {gs_side} the glideslope.",
     "Not on the glideslope; it is {gs_dev} {gs_side} it.",
     "Vertically the aircraft is {gs_dev} {gs_side} the glideslope.",
@@ -48,13 +48,13 @@
     "Is the aircraft tracking the localizer?"
   ] },
   "loc_on_a": { "kind": "vqa_a", "families": ["L"], "slots": [], "forms": [
-    "The aircraft is on the localizer, within one dot.",
+    "The aircraft is on the localizer, within a dot.",
     "It is on the localizer course.",
-    "The aircraft tracks the localizer within one dot.",
-    "On the localizer: the deviation is less than one dot.",
+    "The aircraft tracks the localizer within a dot.",
+    "On the localizer: the deviation is less than a dot.",
     "The lateral path is on the localizer.",
     "It sits on the localizer, neither left nor right of it.",
-    "The localizer indication is centred within one dot.",
+    "The localizer indication is centred within a dot.",
     "The aircraft is right on the localizer.",
     "On the localizer, within a dot.",
     "Laterally the approach is on the localizer."
@@ -64,7 +64,7 @@
     "It sits {loc_dev} {loc_side} of the localizer.",
     "Off the localizer: {loc_dev} to the {loc_side}.",
     "The localizer indication puts the aircraft {loc_dev} {loc_side} of course.",
-    "It is {loc_dev} {loc_side} of the localizer, outside one dot.",
+    "It is {loc_dev} {loc_side} of the localizer, more than a dot off.",
     "The aircraft flies {loc_dev} {loc_side} of the localizer course.",
     "Not on the localizer; it is {loc_dev} to the {loc_side}.",
     "Laterally the aircraft is {loc_dev} {loc_side} of the localizer.",
@@ -93,7 +93,8 @@
     "The lights show {papi_white} and {papi_red}, putting the aircraft {papi_path}.",
     "PAPI: {papi_white} and {papi_red}. The aircraft is {papi_path}.",
     "The PAPI has {papi_white} and {papi_red} lights lit, meaning the aircraft is {papi_path}.",
-    "It reads {papi_white} and {papi_red}, so the approach is {papi_path}."
+    "It reads {papi_white} and {papi_red}, so the approach is {papi_path}.",
+    "The PAPI has {papi_white} and {papi_red} lights: the aircraft is {papi_path}."
   ] },
   "stab_q": { "kind": "vqa_q", "families": ["L"], "slots": [], "forms": [
     "Is the approach stabilized?",
@@ -225,7 +226,8 @@
     "What is the windsock telling the pilot?",
     "Which direction is the wind from, by the windsock?",
     "What direction does the windsock give for the wind?",
-    "How is the windsock oriented?"
+    "How is the windsock oriented?",
+    "What wind does the windsock indicate?"
   ] },
   "sock_a": { "kind": "vqa_a", "families": ["L"], "slots": ["sock"], "forms": [
     "The windsock shows the wind coming from {sock}.",

@@ -45,7 +45,8 @@
     "The docking port is {station_dist} off.",
     "It still has {station_dist} to go.",
     "The station sits {station_dist} from the spacecraft.",
-    "Range to the port: {station_dist}."
+    "Range to the port: {station_dist}.",
+    "From here the station is {station_dist} off."
   ] },
   "dclosing_q": { "kind": "vqa_q", "families": ["D"], "slots": [], "forms": [
     "Is the closing rate within the corridor limit?",
@@ -90,10 +91,11 @@
     "Is the attitude error small enough?",
     "Is the attitude of the spacecraft aligned?",
     "Is the spacecraft lined up with the station port?",
-    "Is the docking attitude within two degrees?",
+    "Is the docking attitude within a couple of degrees?",
     "Is the spacecraft oriented correctly for docking?",
     "Does the spacecraft hold the right attitude?",
-    "Is the alignment good?"
+    "Is the alignment good?",
+    "Is the docking attitude correct?"
   ] },
   "aligned_yes_a": { "kind": "vqa_a", "families": ["D"], "slots": ["att"], "forms": [
     "Yes, the attitude error is {att}.",
@@ -213,7 +215,8 @@
     "I count {jets} failed: {jet_names}.",
     "{jets} failed. That is {jet_names}.",
     "Failures on {jets}: {jet_names}.",
-    "Out of service: {jets}, which means {jet_names}."
+    "Out of service: {jets}, which means {jet_names}.",
+    "Out of service: {jets}, which are {jet_names}."
   ] },
   "breakout_q": { "kind": "vqa_q", "families": ["D"], "slots": [], "forms": [
     "Is a breakout available?",

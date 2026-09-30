@@ -213,7 +213,8 @@
     "Everything below is {daylight}.",
     "The region is shown {daylight}.",
     "Here it is {daylight}.",
-    "The camera sees the surface {daylight}."
+    "The camera sees the surface {daylight}.",
+    "Seen from above, the ground is {daylight}."
   ] },
   "cap_part_z_feature": { "kind": "caption_part", "families": ["Z"], "slots": ["feature", "feature_region"], "part": "feature", "forms": [
     "In this view, {feature} lies in {feature_region} of the image.",
@@ -237,7 +238,8 @@
     "Toward the {coast_side} side, the view opens onto the sea.",
     "The {coast_side} side of the frame shows the sea.",
     "The sea sits on the {coast_side} side.",
-    "Along the {coast_side} side the image shows water."
+    "Along the {coast_side} side the image shows water.",
+    "The water sits on the {coast_side} side of the picture."
   ] },
   "cap_part_z_sea": { "kind": "caption_part", "families": ["Z"], "slots": ["sea"], "part": "sea", "forms": [
     "Sea covers {sea} of the view.",
@@ -285,7 +287,8 @@
     "The dominant colours are {colour_a}, {colour_b} and {colour_c}.",
     "{colour_a} covers the most area, with {colour_b} next and {colour_c} after it.",
     "The picture is chiefly {colour_a}, {colour_b} and {colour_c}.",
-    "The frame shows mainly {colour_a}, {colour_b} and {colour_c} tones."
+    "The frame shows mainly {colour_a}, {colour_b} and {colour_c} tones.",
+    "The leading colours are {colour_a}, {colour_b} and {colour_c}."
   ] },
   "cap_part_clouds": { "kind": "caption_part", "families": ["L"], "slots": ["clouds"], "part": "clouds", "forms": [
     "The sky over the airfield shows {clouds}.",

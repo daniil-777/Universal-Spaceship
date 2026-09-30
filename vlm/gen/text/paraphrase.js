@@ -25,8 +25,10 @@ const EMPTY_GAZ = makeGazetteer([]);
 export const slotsOf = (form) => [...new Set([...form.matchAll(/\{([a-z_]+)\}/g)].map((m) => m[1]))].sort();
 const fnv = (s) => { let h = 0x811c9dc5; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; } return h; };
 export const formId = (form) => fnv(form).toString(16).padStart(8, '0');
-// held-out ids per template: forms whose id hashes to 0 mod 5, or the smallest id when none does
-const HELD = new Map(), heldOf = (forms) => { const ids = forms.map(formId), h = ids.filter((x) => parseInt(x, 16) % 5 === 0); return { ids, held: new Set(h.length ? h : [ids.reduce((a, b) => (a < b ? a : b))]) }; };
+// held-out ids per template: forms whose id hashes to 0 mod 5. checkBank requires at least one such form and one train form
+// per template, so the fallback (the first form, which appending forms never moves) is for banks outside the lint only
+export const naturallyHeld = (id) => parseInt(id, 16) % 5 === 0;
+const HELD = new Map(), heldOf = (forms) => { const ids = forms.map(formId), h = ids.filter(naturallyHeld); return { ids, held: new Set(h.length ? h : ids.slice(0, 1)) }; };
 const register = (id, forms) => { const r = HELD.get(id); if (!r || r.ids.length !== forms.length || r.ids.some((x, i) => x !== formId(forms[i]))) HELD.set(id, heldOf(forms)); return HELD.get(id); };
 // heldOut(templateId, paraphrase id or form index); a template the process has not loaded falls back to the id's own hash
 export const heldOut = (templateId, key) => { const r = HELD.get(templateId); if (!r) return (typeof key === 'number' ? fnv(`${templateId}#${key}`) : parseInt(key, 16)) % 5 === 0; return r.held.has(typeof key === 'number' ? r.ids[key] : key); };
@@ -54,6 +56,9 @@ export function checkBank(bank) {
     if (new Set(t.forms).size !== t.forms.length) e.push(`${id}: duplicate forms`);
     for (const f of t.forms) if (JSON.stringify(slotsOf(f)) !== JSON.stringify([...t.slots].sort())) e.push(`${id}: "${f}" changes the slot set`);
     for (const f of t.forms) e.push(...lintForm(id, t, f));
+    const held = t.forms.filter((f) => naturallyHeld(formId(f))).length;
+    if (!held) e.push(`${id}: no form hashes to the held-out split (add a paraphrase whose id is 0 mod 5)`);
+    if (held === t.forms.length) e.push(`${id}: every form is held out (no train form)`);
   }
   return e;
 }
@@ -65,6 +70,7 @@ export const polish = (s) => s.replace(/\s+/g, ' ').replace(/\s+([,.;:!?])/g, '$
 // the test split (and OOD) draws only held-out paraphrase ids; train and val never do
 export function pickForm(bank, templateId, rng, split) {
   const t = bank[templateId], r = register(templateId, t.forms), test = split === 'test' || split === 'ood', pool = t.forms.map((_, i) => i).filter((i) => r.held.has(r.ids[i]) === test);
+  if (!pool.length) throw new Error(`${templateId}: no ${test ? 'held-out' : 'train'} form`);
   const i = pool[Math.floor(rng() * pool.length)]; return { form: t.forms[i], paraphrase_id: r.ids[i] };
 }
 export function loadBank(dir) {
