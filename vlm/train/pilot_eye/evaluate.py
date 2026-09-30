@@ -6,12 +6,13 @@ It also writes <out>/confusion.json, the val-split verdict confusion matrix (cou
 that build.mjs --confusion passes to corruptMonitor), since v0 has no cross-fit (T3H-3). --write-preds writes the monitor
 tuples used as Narrator's Context (spec §5.7).
   python -m vlm.train.pilot_eye.evaluate --ckpt <model.pt> --data <dataset> --split test [--out <dir>]
-  python -m vlm.train.pilot_eye.evaluate --ckpt <model.pt> --data <dataset> --write-preds <file> --keys-from <split>"""
+  python -m vlm.train.pilot_eye.evaluate --ckpt <model.pt> --data <dataset> --write-preds <file> --keys-from <split>
+(--keys-from train needs a train.py --fold k checkpoint and predicts only the other half's rows, tagged with the fold.)"""
 import argparse, json, math, os, numpy as np, torch
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import roc_auc_score, f1_score
 from torch.utils.data import DataLoader
-from vlm.train.common import read_jsonl
+from vlm.train.common import read_jsonl, group_half
 from vlm.train.pilot_eye.model import PilotEye
 from vlm.train.pilot_eye.data import PilotEyeData, REG
 FAM_ACTIONS = {'S': [0, 1, 2, 3, 4, 5, 6], 'A': [0, 1, 2, 3, 4, 5, 6], 'L': [0, 7, 3, 4, 1, 2, 5, 6], 'D': [0, 9, 8, 6]}
@@ -74,6 +75,7 @@ def evaluate(pred, rows, train_rows, recs):
         R['per_family'][f] = {'n': int(k.sum()), 'auroc': auroc(y[k], s[k]), 'ci95': boot_ci(y[k], s[k], [r['group'] for r, kk in zip(fl, k) if kk]),
                               'auroc_natural': auroc(y[nat], s[nat], [r['sampler_weight'] for r, kk in zip(fl, nat) if kk]) if nat.any() else None}
     aus = [v['auroc'] for v in R['per_family'].values() if v['auroc'] is not None]; R['mean_family_auroc'] = float(np.mean(aus)) if aus else None
+    R['families_measured'] = [f for f in 'SALD' if R['per_family'][f]['auroc'] is not None]  # gate (a) needs all four
     R['pooled_auroc'] = auroc(y, s) if fl else None; yv = [r['targets']['verdict'] for r in fl]; pv = [int(np.argmax(pred[r['key']]['verdict'])) for r in fl]
     R['pooled_macro_f1'] = float(f1_score(yv, pv, average='macro')) if fl else None
     R['majority_macro_f1'] = float(f1_score(yv, [max(set(yv), key=yv.count)] * len(yv), average='macro')) if fl else None
@@ -104,7 +106,10 @@ def evaluate(pred, rows, train_rows, recs):
     return R
 def gates(R):
     bad = []
-    if not (R['mean_family_auroc'] and R['mean_family_auroc'] >= 0.75): bad.append('(a) mean within-family AUROC < 0.75')
+    # (a) is the mean over the four families (§11.4): a family with no AUROC (one class or no rows) fails it, never drops out
+    miss = [f for f in 'SALD' if (R['per_family'].get(f) or {}).get('auroc') is None]
+    if miss: bad.append(f"(a) family {','.join(miss)} has no AUROC (one class or no rows in the split)")
+    elif not (R['mean_family_auroc'] and R['mean_family_auroc'] >= 0.75): bad.append('(a) mean within-family AUROC < 0.75')
     if not (R['pooled_auroc'] is not None and R['baseline_auroc'] is not None and R['pooled_auroc'] >= 0.80 and R['pooled_auroc'] >= R['baseline_auroc'] + 0.10): bad.append('(b) pooled AUROC (None = one class only: a failure)')
     if not (R['pooled_macro_f1'] is not None and R['baseline_macro_f1'] is not None and R['pooled_macro_f1'] >= R['baseline_macro_f1'] + 0.10): bad.append('(c) macro-F1 vs baseline')
     if not (R['pairs']['frac'] is not None and R['pairs']['frac'] >= 0.80): bad.append('(d) minimal pairs < 80 %')
@@ -144,6 +149,12 @@ def load_recs(path, keys):
             if r['key'] in keys:
                 s = r.get('safety'); out[r['key']] = {'safety': {'action_risk': s.get('action_risk') or {}, 'p_best': s.get('p_best', 0)} if s else None, 'pixel_identical_pair': bool(r.get('pixel_identical_pair'))}
     return out
+def preds_rows(rows, fold, keys_from):
+    """The rows --write-preds predicts. Train rows need a cross-fit checkpoint and get only the half its model did not train on
+    (spec §5.7: Context from a model that never saw the row); a checkpoint trained on every train row is refused."""
+    if keys_from != 'train': return rows
+    if fold is None: raise SystemExit('--keys-from train needs a cross-fit checkpoint (train.py --fold k): out-of-fold predictions only')
+    return [r for r in rows if group_half(r['group']) != fold]
 def parse(argv):
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     ap.add_argument('--ckpt', required=True); ap.add_argument('--data', required=True); ap.add_argument('--split', default='test'); ap.add_argument('--write-preds'); ap.add_argument('--keys-from')
@@ -155,10 +166,11 @@ def main(argv=None):
     with open(f'{a.data}/labels.json') as f: labels = json.load(f)
     reasons, allowed = labels.get('reasons') or REASONS, labels.get('reason_masks') or {}
     if a.write_preds:
-        ds = PilotEyeData(a.data, a.keys_from or a.split, H=H, W=W); pred = predict(m, ds, device=a.device); n = 0
-        with open(a.write_preds, 'a') as f:
+        ds = PilotEyeData(a.data, a.keys_from or a.split, H=H, W=W); fold = ck.get('fold'); ds.rows = preds_rows(ds.rows, fold, a.keys_from or a.split)
+        pred = predict(m, ds, device=a.device); n = 0
+        with open(a.write_preds, 'a') as f:  # appends: the two fold models write disjoint train halves; build.mjs rejects duplicate keys
             for r in ds.rows:
-                if r['family'] != 'Z': f.write(json.dumps({'key': r['key'], 'monitor': monitor(pred[r['key']], r['family'], reasons, allowed.get(r['family']))}) + '\n'); n += 1
+                if r['family'] != 'Z': f.write(json.dumps({'key': r['key'], 'fold': fold, 'monitor': monitor(pred[r['key']], r['family'], reasons, allowed.get(r['family']))}) + '\n'); n += 1
         print(f'wrote {n} predictions'); return
     val = PilotEyeData(a.data, 'val', H=H, W=W); pval = predict(m, val, device=a.device); vfl = flight(val.rows)
     C = confusion([r['targets']['verdict'] for r in vfl], [int(np.argmax(pval[r['key']]['logits'])) for r in vfl]); C['split'] = 'val'

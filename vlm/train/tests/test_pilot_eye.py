@@ -217,6 +217,26 @@ class TestTrainExportEvaluate(unittest.TestCase):
             if r['key'].startswith(('L', 'D')): self.assertEqual((m['p_ref'], m['ttc_bin'], m['clr_bin']), (None, 'none', 'none'))
 
 class TestEvaluateHelpers(unittest.TestCase):
+    def test_gate_a_needs_an_auroc_for_all_four_families(self):
+        from vlm.train.pilot_eye.evaluate import gates
+        fam = lambda d: {f: {'auroc': (None if f == d else 0.9)} for f in 'SALD'}
+        R = {'per_family': fam('D'), 'mean_family_auroc': 0.9, 'pooled_auroc': 0.95, 'baseline_auroc': 0.5, 'pooled_macro_f1': 0.9, 'baseline_macro_f1': 0.3, 'pairs': {'frac': 0.9}}
+        self.assertEqual([g for g in gates(R) if g.startswith('(a)')], ['(a) family D has no AUROC (one class or no rows in the split)'])
+        R['per_family'] = fam(None); self.assertEqual(gates(R), [])
+    def test_export_licence_is_the_build_profile_never_a_default(self):
+        from vlm.train.pilot_eye.export_onnx import licence
+        d = tmpdir(self); rec = lambda p: json.dumps({'render': {'licence_profile': p}}) + '\n'
+        (d / 'records.jsonl').write_text(rec('nc') + rec('nc')); self.assertEqual(licence(str(d)), 'nc')
+        (d / 'records.jsonl').write_text(rec('open') + rec('nc'))
+        with self.assertRaises(SystemExit): licence(str(d))
+        (d / 'stats.json').write_text(json.dumps({'build': {'licence': 'open'}})); self.assertEqual(licence(str(d)), 'open')
+    def test_oof_rows_are_the_half_the_fold_model_did_not_train_on(self):
+        from vlm.train.pilot_eye.evaluate import preds_rows
+        rows = [{'key': str(i), 'group': f'S:{i}'} for i in range(20)]
+        for k in (0, 1): self.assertTrue(all(group_half(r['group']) != k for r in preds_rows(rows, k, 'train')))
+        self.assertEqual(len(preds_rows(rows, 0, 'train')) + len(preds_rows(rows, 1, 'train')), 20)
+        with self.assertRaises(SystemExit): preds_rows(rows, None, 'train')
+        self.assertEqual(preds_rows(rows, None, 'val'), rows)
     def test_pick_action_confusion_and_ece(self):
         from vlm.train.pilot_eye.evaluate import pick_action, confusion, ece
         p = np.zeros(11); self.assertEqual(pick_action(p, 'S'), 'NONE_SAFE'); p[[0, 3]] = 0.9; self.assertEqual(pick_action(p, 'S'), 'CONTINUE')

@@ -49,9 +49,15 @@ def random_parity(m, out, H, W, n=2):
     return max(_diff(m, enc, hd, torch.rand(3, 3, H, W, generator=g), torch.rand(2, generator=g) + 0.5) for _ in range(n))
 
 def licence(data):
+    """The dataset's one licence profile: stats.json build.licence (build.mjs pins it), else every record's; never a default,
+    since an nc dataset makes the weights NC too (spec R2)."""
     try:
-        with open(f'{data}/records.jsonl') as f: return json.loads(f.readline())['render']['licence_profile']
-    except (OSError, ValueError, KeyError, TypeError): return 'open'
+        with open(f'{data}/stats.json') as f: v = json.load(f)['build']['licence']
+        if v: return v
+    except (OSError, ValueError, KeyError, TypeError): pass
+    with open(f'{data}/records.jsonl') as f: profs = {json.loads(l)['render']['licence_profile'] for l in f if l.strip()}
+    if len(profs) != 1: raise SystemExit(f'{data}: licence profiles {sorted(profs)}; a dataset must have exactly one')
+    return profs.pop()
 
 def parse(argv):
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])

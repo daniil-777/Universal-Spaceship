@@ -1,7 +1,7 @@
 // vlm/capture/drive.mjs — the capture CLI (spec §3, §7): one headless browser from the harness launch(), a fresh context per
 // page load, the tile cache and politeness limiter, episodes until --n samples, a checkpoint every 50 samples, resume at the
 // episode boundary, StopDrive (403/429/budget) checkpoints and stops.
-// Exit codes: 0 done (also at the EOX budget, which persists in eox_budget.json); 3 (STOP_EXIT) a 403/429 stop, persisted to
+// Exit codes: 0 done (also at the EOX budget, which persists per family, budget.mjs); 3 (STOP_EXIT) a 403/429 stop, persisted to
 // raw/<run>/stop.json, or a run that refuses to start because that file exists; 4 (RESOURCE_EXIT) free memory fell below 25 %
 // between episodes; 1 any other error. `&&` chains therefore halt on a ban or a resource stop.
 import fs from 'node:fs';
@@ -9,10 +9,11 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { scanRun, writeEpisode, startGate, stopOf, writeStop, exitCodeOf, pickStop, freeSpan, freshRecords, STOP_EXIT, RESOURCE_EXIT } from './records.mjs';
+import { scanRun, writeEpisode, startGate, licenceGate, stopOf, readStop, writeStop, exitCodeOf, pickStop, freeSpan, freshRecords, STOP_EXIT, RESOURCE_EXIT } from './records.mjs';
 import { MAX_RESETS } from './episode_corridor.mjs';
 import { nextEpisode, closeEpisode } from './families.mjs';
 import { ledgerCounts } from './routes.mjs';
+import { runBudget } from './budget.mjs';
 export { fnv1a32, renderSeed, scanRun, writeEpisode, assemble, startGate, stopOf, writeStop, readStop, exitCodeOf, STOP_EXIT } from './records.mjs';
 const REPO = fileURLToPath(new URL('../../', import.meta.url)), LACIE = '/Volumes/LaCie/astro-pilot/vlm';
 const sh = (cmd, args) => { try { return execFileSync(cmd, args).toString(); } catch (e) { return ''; } };
@@ -50,6 +51,7 @@ if (process.argv[1] && process.argv[1].endsWith('drive.mjs')) {
   // when the gate passes), so a test can never reach the preflight, a browser or the network; captures always use $LACIE/raw
   const RAW = process.env.APV_RAW_ROOT || path.join(LACIE, 'raw'), runDir = path.join(RAW, run), gate = startGate(runDir);
   if (gate.refuse) { console.error(`refusing to start: ${gate.why}`); process.exit(gate.code); }
+  const lic = licenceGate(runDir, arg('licence', 'open')); if (lic.refuse) { console.error(`refusing to start: ${lic.why}`); process.exit(1); }
   if (process.env.APV_RAW_ROOT) { console.error('APV_RAW_ROOT (test hook): the start gate passed; stopping before the preflight'); process.exit(2); }
   // temp files (Playwright's browser profile among them) go to LaCie, never the Mac disk
   const TMP = path.join(LACIE, 'tmp'); fs.mkdirSync(TMP, { recursive: true }); process.env.TMPDIR = TMP;
@@ -63,11 +65,17 @@ if (process.argv[1] && process.argv[1].endsWith('drive.mjs')) {
   const D = { browser, port, run, family, dir, policy, mode: arg('mode', 'clock'), licence: arg('licence', 'open'), cNear: +arg('c-near', cal.c_near ?? 2.5), ledger: [], stop: {}, sizes: arg('sizes', null), measure: process.argv.includes('--measure'),
     gitSha: execFileSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: REPO }).toString().trim(), siteDirty: !!execFileSync('git', ['status', '--porcelain', '--', 'src', 'index.html', 'textures', 'model', 'vlm'], { cwd: REPO }).toString().trim(),
     log: (o) => fs.appendFileSync(path.join(dir, 'drive.log.jsonl'), JSON.stringify({ t: Date.now(), ...o }) + '\n') };
-  // the 80,000 EOX budget is per run (§6), across families and resumes: the used count persists in raw/<run>/eox_budget.json
-  // and seeds the cache's `used` count (its default EOX budget is the 80,000)
-  const EOX = 'tiles.maps.eox.at', budgetFile = path.join(runDir, 'eox_budget.json'), eoxUsed0 = fs.existsSync(budgetFile) ? JSON.parse(fs.readFileSync(budgetFile, 'utf8')).used : 0;
-  D.upstream = createUpstream({ dir: arg('cache-dir', path.join(LACIE, 'tilecache')), contact: process.env.APV_CONTACT || '', used: { [EOX]: eoxUsed0 } });
-  const eoxUsed = () => (D.upstream.stats().byHost[EOX] || {}).used ?? eoxUsed0, saveBudget = () => { fs.mkdirSync(path.dirname(budgetFile), { recursive: true }); fs.writeFileSync(budgetFile, JSON.stringify({ used: eoxUsed() })); };
+  // the 80,000 EOX budget is per run (§6), across families, lanes and resumes: each lane keeps its family's count in
+  // raw/<run>/<F>/eox_used.json and the cap check adds the other families' counts (budget.mjs; the cache's default EOX budget is
+  // the 80,000). Lanes share hosts: a 403/429 latched by any lane goes to raw/<run>/stop.json at once and every lane reads it
+  // (cached 1 s) before each send and between episodes; the per-host politeness limits are divided among the lanes.
+  const EOX = 'tiles.maps.eox.at', B = runBudget(runDir, family), eoxUsed0 = B.total(B.own0), lanes = lanesOf();
+  let stopAt = 0, stopSeen = null; const runStop = () => { if (Date.now() - stopAt > 1000) { try { stopSeen = readStop(runDir); } catch { /* being written: read it next time */ } stopAt = Date.now(); } return stopSeen; };
+  const sharedStop = (h) => { const s = runStop(), x = s && (s.stops || [s]).find((y) => y.host === h); return x ? `${x.status} from ${h}: stopping without retry (raw/${run}/stop.json)` : null; };
+  const persistStop = (s) => { const old = readStop(runDir); if (!(old && (old.stops || [old]).some((y) => y.host === s.host && y.status === s.status))) writeStop(runDir, s); stopAt = 0; };
+  D.upstream = createUpstream({ dir: arg('cache-dir', path.join(LACIE, 'tilecache')), contact: process.env.APV_CONTACT || '', used: { [EOX]: B.own0 }, elsewhere: { [EOX]: B.others }, sharedStop,
+    onStop: (host, status) => persistStop({ host, status }), maxInFlight: Math.max(1, Math.floor(4 / lanes)), maxPerSec: Math.max(1, Math.floor(8 / lanes)) });
+  const ownUsed = () => (D.upstream.stats().byHost[EOX] || {}).used ?? B.own0, eoxUsed = () => B.total(ownUsed()), saveBudget = () => B.save(ownUsed());
   D.routes = () => ({ port, profile: D.licence, upstream: D.upstream, ledger: D.ledger, stop: D.stop });
   fs.mkdirSync(dir, { recursive: true }); D.log({ start: { family, n, mode: D.mode, licence: D.licence, measure: D.measure, resumed: scan.samples, removed: scan.removed.length, eox_used: eoxUsed0, free_pct: free0, git: D.gitSha, site_dirty: D.siteDirty, policy_sha: policy && policy.sha, tmpdir: TMP } });
   let samples = scan.samples, since = 0, code = 0, fatal = null;
@@ -78,6 +86,7 @@ if (process.argv[1] && process.argv[1].endsWith('drive.mjs')) {
     // twins are episodes e + 50000 (Task 10), so primary episodes stay below 50000; twins count toward the family's size (§8)
     for (let e = 0; samples < n && e < 50000; e++) {
       if (scan.episodes.has(e)) continue;
+      const st = runStop(); if (st) throw new StopDrive(`${st.status} from ${st.host}: stopping without retry (raw/${run}/stop.json, written by another lane)`);
       const free = freePct();
       if (free < minFreePct(lanesOf())) { D.log({ stop: `memory_pressure shows ${free} % free (< ${minFreePct(lanesOf())} %) before episode ${e}`, kind: 'resources' }); code = RESOURCE_EXIT; break; }
       // an A page samples across crash resets over at most the free indices from e (N-1): it stops before a finished episode
@@ -111,7 +120,7 @@ if (process.argv[1] && process.argv[1].endsWith('drive.mjs')) {
     const err = pickStop(err0, D.stop.error); if (err !== err0) D.log({ error: String(err0 && err0.message), superseded_by: String(err.message) });
     if (err instanceof StopDrive) {
       const s = stopOf(err); D.log({ stop: String(err.message), kind: 'StopDrive', ...s });
-      code = exitCodeOf(err); if (code === STOP_EXIT) { writeStop(runDir, s); console.error(`STOP ${s.status} from ${s.host}: persisted to ${runDir}/stop.json`); }
+      code = exitCodeOf(err); if (code === STOP_EXIT) { persistStop(s); console.error(`STOP ${s.status} from ${s.host}: persisted to ${runDir}/stop.json`); }
     } else { D.log({ stop: String(err.message), kind: 'error' }); fatal = err; }
   } finally { ckpt(null); D.log({ end: { samples, code, upstream: D.upstream.stats() } }); await browser.close(); server.close(); D.upstream.close(); }
   if (fatal) throw fatal;

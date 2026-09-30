@@ -35,6 +35,14 @@ export function startGate(runDir) {
   const s = readStop(runDir);
   return s ? { refuse: true, code: STOP_EXIT, why: `${runDir}/stop.json: ${s.status} from ${s.host} at ${new Date(s.utc_ms).toISOString()}; delete it only once the host allows traffic again` } : { refuse: false, code: 0, why: null };
 }
+// a run's licence profile is pinned in raw/<run>/licence.json by its first drive: a resume or another lane with a different
+// --licence is refused, so one run never mixes open and nc records (spec R2)
+export function licenceGate(runDir, licence) {
+  const f = path.join(runDir, 'licence.json'), old = fs.existsSync(f) ? JSON.parse(fs.readFileSync(f, 'utf8')).licence : null;
+  if (old && old !== licence) return { refuse: true, why: `${f}: the run is ${old}; --licence ${licence} would mix profiles (start a new run instead)` };
+  if (!old) { fs.mkdirSync(runDir, { recursive: true }); fs.writeFileSync(f, JSON.stringify({ licence })); }
+  return { refuse: false, why: null };
+}
 export const exitCodeOf = (err) => (stopOf(err).kind === 'http' ? STOP_EXIT : 0);
 // the stop the drive classifies at its end: a latched 403/429 (routes.latchStop) wins over the error that was thrown
 export const pickStop = (thrown, latched) => (latched && stopOf(latched).kind === 'http' ? latched : thrown);

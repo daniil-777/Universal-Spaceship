@@ -25,7 +25,9 @@ const isImage = (b) => b.length >= 4 && ((b[0] === 0xff && b[1] === 0xd8 && b[2]
 const failed = () => ({ status: 502, body: Buffer.alloc(0), ctype: 'text/plain', outcome: 'fetch-error' });
 // stats: hit (served from the cache), fetch (requests sent upstream), error (sent requests that failed); byHost[h] has
 // fetch and error as above plus used (the budget count: the given used[h] plus this run's fetch)
-export function createUpstream({ dir, contact, budgets = {}, used = {}, fetchImpl = fetch, maxInFlight = 4, maxPerSec = 8, timeoutMs = 30000 }) {
+// Lanes (other drive processes) share hosts: elsewhere[h]() is the budget the other lanes used (added to the cap check),
+// sharedStop(h) a stop message another lane latched (checked before every send), onStop(h, status) persists this lane's latch.
+export function createUpstream({ dir, contact, budgets = {}, used = {}, elsewhere = {}, sharedStop = () => null, onStop = () => {}, fetchImpl = fetch, maxInFlight = 4, maxPerSec = 8, timeoutMs = 30000 }) {
   const limits = { ...DEFAULT_BUDGETS, ...budgets }, caches = new Map(), lanes = new Map(), pending = new Map(), stats = { hit: 0, fetch: 0, error: 0, byHost: {} };
   const ua = contact ? `AstroPilotVision/0 (research dataset capture; low-rate, cached; contact ${contact})` : 'AstroPilotVision/0 (research dataset capture; low-rate, cached)';
   const cache = (h) => { if (!caches.has(h)) caches.set(h, openTileCache(dir, h)); return caches.get(h); };
@@ -33,13 +35,14 @@ export function createUpstream({ dir, contact, budgets = {}, used = {}, fetchImp
   // per host: live (in flight), starts (send times in the last second), queued (admitted, not sent; they hold budget),
   // open (the host has answered once), stop (the StopDrive message once a 403/429 latched the host)
   const lane = (h) => { if (!lanes.has(h)) lanes.set(h, { live: 0, starts: [], queued: 0, open: false, stop: null }); return lanes.get(h); };
+  const checkShared = (h, L) => { if (!L.stop) { const m = sharedStop(h); if (m) L.stop = m; } return L.stop; };
   // send() runs under the host's limits. The start is stamped in the same tick as the send, so a blocked event loop (a
   // slow synchronous cache open or write on the USB drive) cannot bunch granted-but-unsent requests into a burst.
   function limited(h, send) {
     const L = lane(h), hs = hostStats(h);
     return new Promise((resolve, reject) => {
       const attempt = () => {
-        if (L.stop) { L.queued--; reject(new StopDrive(L.stop)); return; }
+        if (checkShared(h, L)) { L.queued--; reject(new StopDrive(L.stop)); return; }
         const now = Date.now(), cap = L.open ? maxInFlight : 1; L.starts = L.starts.filter((t) => now - t < 1000);
         if (L.live >= cap || L.starts.length >= maxPerSec) { setTimeout(attempt, L.live >= cap ? 5 : 1000 - (now - L.starts[0]) + 1); return; }
         L.queued--; L.live++; L.starts.push(now); hs.fetch++; hs.used++; stats.fetch++;
@@ -54,7 +57,7 @@ export function createUpstream({ dir, contact, budgets = {}, used = {}, fetchImp
       ({ r, body } = await limited(h, async () => {
         const res = await fetchImpl(url, { headers: { 'user-agent': ua }, signal: AbortSignal.timeout(timeoutMs) });
         if (res.status === 403 || res.status === 429) {
-          L.stop ||= `${res.status} from ${h}: stopping without retry`;
+          if (!L.stop) { L.stop = `${res.status} from ${h}: stopping without retry`; try { onStop(h, res.status); } catch { /* the latch holds in memory either way */ } }
           try { await res.body?.cancel(); } catch { /* the body is dropped either way */ }
           return { r: res, body: null };
         }
@@ -73,13 +76,13 @@ export function createUpstream({ dir, contact, budgets = {}, used = {}, fetchImp
   }
   async function get(url) {
     const h = new URL(url).host, L = lane(h);
-    if (L.stop) throw new StopDrive(L.stop);
+    if (checkShared(h, L)) throw new StopDrive(L.stop);
     const c = cache(h), hit = c.get(url);
     if (hit) { stats.hit++; return { status: 200, body: Buffer.from(hit.body), ctype: hit.ctype, outcome: 'hit' }; }
     // a second request for a URL already on its way shares that one upstream request (served as a hit if it succeeds)
     if (pending.has(url)) return pending.get(url).then((r) => (r.outcome === 'fetch' ? (stats.hit++, { ...r, outcome: 'hit' }) : r));
     const hs = hostStats(h);
-    if (limits[h] !== undefined && hs.used + L.queued >= limits[h]) throw new StopDrive(`upstream budget of ${limits[h]} requests reached for ${h}`);
+    if (limits[h] !== undefined && hs.used + L.queued + (elsewhere[h] ? elsewhere[h]() : 0) >= limits[h]) throw new StopDrive(`upstream budget of ${limits[h]} requests reached for ${h}`);
     L.queued++;
     const p = fetchOnce(url, h, c).finally(() => pending.delete(url));
     pending.set(url, p);

@@ -1,5 +1,5 @@
 // vlm/build.mjs — raw records -> dataset (spec §4.4, §5, §8, §9).
-// node vlm/build.mjs --run <run>[,<run>…] --out <name> [--families S,A,L,D,Z] [--sizes sizes.json] [--context gt+noise|oof]
+// node vlm/build.mjs --run <run>[,<run>…] --out <name> [--families S,A,L,D,Z] [--sizes sizes.json] [--context gt+noise|oof] [--licence open|nc]
 //   [--context-from preds.jsonl] [--confusion file]
 // -> $LACIE/datasets/<name>/{records.jsonl, pilot_eye/*.jsonl, narrator/*.jsonl, llava/*.json, coco/captions_*.json,
 //    cache/pilot_eye_<split>.u8 + cache/index.json, labels.json, stats.json, datasheet.md, ATTRIBUTION.txt, rejections.jsonl}
@@ -19,6 +19,7 @@ import { targetsOf, REG, REASON_SETS } from './gen/build/targets.js';
 import { narratorRows, rowContextOf, eyeExcluded, llavaOf, cocoOf, writeCache, writeJsonl, EYE_SIZE, EYE_MIN_AXIAL_M, datasetNameOk } from './gen/build/export.js';
 import { textTally, datasetStats, upstreamOf } from './gen/build/stats.js';
 import { datasheet } from './gen/build/datasheet.js';
+import { licenceOf, attributionOf, oofPreds } from './gen/build/licence.js';
 import { zoomGeo } from './gen/build/zoomgeo.js';
 import { recordTexts } from './gen/text/items.js';
 import { makeGazetteer, BASE_NAMES } from './gen/text/verify.js';
@@ -56,6 +57,8 @@ for (const run of runs) for (const f of fams) {
   }
 }
 recs.sort((a, b) => a.key.localeCompare(b.key));
+// one licence profile per dataset (spec R2): a build mixing open and nc records, or one whose --licence differs, is refused
+const licence = licenceOf(recs, arg('licence', null));
 say(`loaded ${recs.length} records from ${runs.join(',')} (${invalid.length} invalid, ${incomplete.length} of pages without .done)`);
 
 // ---- 2. image facts (every record) and Z geo facts
@@ -85,7 +88,7 @@ say(`dedupe dropped ${dropped.size}`);
 
 // ---- 5. texts: the row monitor (gt+noise, or oof), recordTexts against the row's Context, the verifier tally
 const gaz = makeGazetteer([...BASE_NAMES, ...geo.names]), bank = loadBank(fileURLToPath(new URL('./gen/text/bank/', import.meta.url)));
-const preds = mode === 'oof' ? new Map(fs.readFileSync(arg('context-from'), 'utf8').trim().split('\n').map((l) => JSON.parse(l)).map((p) => [p.key, p.monitor])) : null;
+const preds = mode === 'oof' ? oofPreds(fs.readFileSync(arg('context-from'), 'utf8'), { groupOf: (k) => (keptKey.get(k) ? groupOf(keptKey.get(k), keptKey) : null), splitOf: (k) => splitOfKey.get(k) }) : null;
 const confusion = arg('confusion') ? JSON.parse(fs.readFileSync(arg('confusion'), 'utf8')) : null, pools = {};
 // the gt+noise pools per split x family, so a val/test monitor tuple never reaches a train Context line (review item 6)
 const poolKey = (r) => `${splitOfKey.get(r.key)}|${r.family}`;
@@ -139,13 +142,11 @@ const cal = JSON.parse(fs.readFileSync(new URL('./gen/calibration.json', import.
 fs.writeFileSync(path.join(out, 'labels.json'), JSON.stringify({ c_near: cal.c_near, verdicts: VERDICTS, reasons: REASONS, actions: ACTIONS, zoom_tags: ZOOM_TAGS, reg: REG, reason_masks: REASON_SETS, eye: EYE, eye_hidden: EYE.hidden, eye_closing_rho_m: EYE.closingRhoM, eye_removed: EYE_REMOVED,
   eye_export_excludes: { D_axial_below_m: EYE_MIN_AXIAL_M, ruling: 'T10-g' }, nominal_frame_dt: { S: 0.2, A: 0.2, L: 0.25, D: 2 }, input: EYE_SIZE, resize: 'box', context_mode: mode }, null, 1));
 const eyeStats = { records: Object.fromEntries(SPLITS.map((s) => [s, Object.keys(index[s]).length])), excluded_d_contact: kept.filter((r) => /T10-g/.test(r.pilot_eye_excluded || '')).length, excluded_pixel_identical_train: kept.filter((r) => /T11-a/.test(r.pilot_eye_excluded || '')).length };
-const stats = { build: { name, runs, families: fams, mode, build_sha: buildSha, seconds: Math.round((Date.now() - t0) / 1000) },
+const stats = { build: { name, runs, families: fams, mode, licence, build_sha: buildSha, seconds: Math.round((Date.now() - t0) / 1000) },
   ...datasetStats({ kept, recs, splitOfKey, dropped, invalid, zDiscards, textSummary, rows: allRows, exportDrops, eye: eyeStats, upstream: upstreamOf(path.join(L, 'raw'), runs), textFactFails }), incomplete: incomplete.length, textErrors };
 fs.writeFileSync(path.join(out, 'stats.json'), JSON.stringify(stats, null, 1));
-fs.writeFileSync(path.join(out, 'ATTRIBUTION.txt'), ['EOxCloudless https://cloudless.eox.at by EOX IT Services GmbH (Contains modified Copernicus Sentinel data 2016 & 2017)', 'Blue Marble: NASA Earth Observatory (GIBS), public domain',
-  'AWS Terrain Tiles: SRTM, GMTED2010, ETOPO1 and others (see https://github.com/tilezen/joerd/blob/master/docs/attribution.md)', 'Made with Natural Earth. Free vector and raster map data @ naturalearthdata.com', 'NASA textures: see textures/CREDITS.txt in the Astro Pilot repository',
-  'Meshy models (CC BY 4.0 credit to Meshy if made on the free plan; the user confirms the plan)'].join('\n') + '\n');
+fs.writeFileSync(path.join(out, 'ATTRIBUTION.txt'), attributionOf(kept, licence));
 const sizes = arg('sizes') && fs.existsSync(arg('sizes')) ? JSON.parse(fs.readFileSync(arg('sizes'), 'utf8')).sizes ?? null : null, first = kept[0];
-fs.writeFileSync(path.join(out, 'datasheet.md'), datasheet(stats, { name, date: new Date().toISOString(), runs, git_sha: [...new Set(kept.map((r) => r.provenance.git_sha))].join('/'), build_sha: buildSha, licence: first ? first.render.licence_profile : 'open',
+fs.writeFileSync(path.join(out, 'datasheet.md'), datasheet(stats, { name, date: new Date().toISOString(), runs, git_sha: [...new Set(kept.map((r) => r.provenance.git_sha))].join('/'), build_sha: buildSha, licence,
   capture_mode: first ? first.render.capture_mode : 'clock', sizes, mode, captured: kept.reduce((m, r) => ({ ...m, [r.family]: (m[r.family] || 0) + 1 }), {}), playwright: '1.63.0', c_near: cal.c_near, eye: EYE, eye_removed: EYE_REMOVED }));
 console.log(`built ${name}: ${kept.length} records (${invalid.length} invalid, ${incomplete.length} without .done, ${dropped.size} deduped, ${zDiscards.length} Z views discarded, ${textFactFails.length} text-fact failures), ${textSummary.items} text items, ${allRows.length} narrator rows, reject rate ${textSummary.rejectRate}, parser false-reject ${textSummary.parserFalseReject}`);

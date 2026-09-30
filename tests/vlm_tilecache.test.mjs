@@ -108,3 +108,14 @@ test('budgets merge with the EOX default, a resumed run passes the requests alre
   const s = up.stats(); assert.equal(s.fetch, n); assert.equal(s.fetch, Object.values(s.byHost).reduce((a, h) => a + h.fetch, 0));
   assert.deepEqual([s.byHost['tiles.maps.eox.at'].used, s.byHost['gibs.earthdata.nasa.gov'].used, s.error, s.hit], [80000, 2, 1, 0]);
 });
+test('lanes share a host: the budget counts the other lanes\' use, and a stop latched by any lane stops this one before sending', async () => {
+  const H = 'tiles.maps.eox.at', ok = async () => res(200, jpg, 'image/jpeg');
+  const a = createUpstream({ dir: tmp(), contact: 'x', budgets: { [H]: 3 }, elsewhere: { [H]: () => 2 }, fetchImpl: ok });
+  await a.get(U + '?e1'); await assert.rejects(a.get(U + '?e2'), /budget/);
+  let shared = null, sent = 0; const latched = [];
+  const b = createUpstream({ dir: tmp(), contact: 'x', sharedStop: (h) => (h === H ? shared : null), onStop: (h, status) => latched.push([h, status]), fetchImpl: async () => { sent++; return res(200, jpg, 'image/jpeg'); } });
+  await b.get(U + '?s1'); shared = `429 from ${H}: stopping without retry (another lane)`;
+  await assert.rejects(b.get(U + '?s2'), StopDrive); assert.equal(sent, 1);
+  const c = createUpstream({ dir: tmp(), contact: 'x', onStop: (h, status) => latched.push([h, status]), fetchImpl: async () => res(403, Buffer.alloc(0), 'text/plain') });
+  await assert.rejects(c.get(U + '?s3'), StopDrive); assert.deepEqual(latched, [[H, 403]]);
+});

@@ -27,3 +27,12 @@ test('zplan --blocks-from: a second run reuses the first run\'s level-3 blocks, 
   assert.deepEqual([...blocksFor({ seed: 29, weights: w, from: { blocks: { '3/0/0': 'val', '3/1/0': 'train' } } })], [['3/0/0', 'val'], ['3/1/0', 'train']]);
   const { assignBlocks } = await import('../vlm/gen/sampler_z.js'); assert.deepEqual([...blocksFor({ seed: 29, weights: w })], [...assignBlocks(29, w)]);
 });
+test('the run EOX budget is the sum of per-family counts (lanes never overwrite each other) plus any legacy total', async () => {
+  const fs = await import('node:fs'), os = await import('node:os'), path = await import('node:path'), { runBudget } = await import('../vlm/capture/budget.mjs');
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'apv-budget-')); fs.writeFileSync(path.join(d, 'eox_budget.json'), JSON.stringify({ used: 100 }));
+  const z = runBudget(d, 'Z'), a = runBudget(d, 'A'); assert.equal(z.own0, 0); assert.equal(a.others(), 100);
+  z.save(40); a.save(7); z.save(41); // interleaved saves: each lane writes only its own count
+  assert.equal(runBudget(d, 'S').others(), 148); assert.equal(JSON.parse(fs.readFileSync(path.join(d, 'eox_budget.json'), 'utf8')).used, 148);
+  assert.equal(runBudget(d, 'Z').own0, 41); assert.equal(runBudget(d, 'Z').others(), 107);
+  fs.rmSync(d, { recursive: true, force: true });
+});
