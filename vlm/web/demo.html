@@ -12,11 +12,11 @@ h1{font-size:18px;margin:0 0 4px} #status{color:#9ab;margin-bottom:8px}
 <script type="module">
 // demo.html — test-split frames with Pilot Eye verdicts (worker) and Describe / Safety check (Narrator, the trained prompts),
 // with latencies (spec §10.3). The Narrator sees the frame it was trained on: narrator/test.jsonl images[0] joined on key (D: chase).
-// ?dataset=apv-open-v0&eye=pilot_eye_v0&narrator=narrator_v0/web&n=12 (served by vlm/web/serve.mjs from /__vlm/)
+// ?dataset=apv-open-v0&eye=pilot-eye-v0/export&narrator=narrator-v0&n=12 (served by vlm/web/serve.mjs from /__vlm/)
 import * as tf from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.3.0';
 import { prepareFrame } from './pilot-eye.js';
 import { createNarrator, contextLine, narratorFrame, NARRATOR_TASKS } from './narrator.js';
-const q = new URLSearchParams(location.search), DS = q.get('dataset') || 'apv-open-v0', EYE = q.get('eye') || 'pilot_eye_v0', NAR = q.get('narrator') || 'narrator_v0/web', V = '/__vlm/';
+const q = new URLSearchParams(location.search), DS = q.get('dataset') || 'apv-open-v0', EYE = q.get('eye') || 'pilot-eye-v0/export', NAR = q.get('narrator') || 'narrator-v0', V = '/__vlm/';
 const status = document.getElementById('status'), say = (t, bad = false) => { status.textContent = t; status.className = bad ? 'err' : ''; };
 const getJson = async (u) => { const r = await fetch(u); if (!r.ok) throw new Error(`${u}: HTTP ${r.status}`); return r.json(); };
 const getText = async (u) => { const r = await fetch(u); if (!r.ok) throw new Error(`${u}: HTTP ${r.status}`); return r.text(); };
