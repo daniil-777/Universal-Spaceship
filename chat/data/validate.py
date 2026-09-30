@@ -63,7 +63,7 @@ def check(d, facts, brief=None):
 
 def load_jsonl(p):
     out = []
-    for n, l in enumerate(Path(p).read_text().splitlines(), 1):
+    for n, l in enumerate(Path(p).read_text().split('\n'), 1):
         if not l.strip(): continue
         try: out.append(json.loads(l))
         except json.JSONDecodeError as x: out.append({'_bad_json': f'line {n}: {x}'})

@@ -61,7 +61,7 @@ def pick(rng, weights):
 
 def make(kb_dir, n, seed=0):
     kb_dir = Path(kb_dir); kb = json.loads((kb_dir / 'kb.json').read_text()); facts = {f['id']: f for f in kb['facts']}
-    qs = [json.loads(l) for l in (kb_dir / 'questions.train.jsonl').read_text().splitlines() if l.strip()]
+    qs = [json.loads(l) for l in (kb_dir / 'questions.train.jsonl').read_text().split('\n') if l.strip()]
     by_area, area_facts = {}, {}
     for q in qs: by_area.setdefault(q['facts'][0].split('-')[0], []).append(q)
     for f in kb['facts']: area_facts.setdefault(f['area'], []).append(f['id'])
