@@ -6,7 +6,7 @@ import { bodyToWorld } from '../../../src/landing/flight.js';
 import { KT, FT } from '../../../src/landing/vehicle.js';
 import { AIRPORT, RWY } from '../../../src/landing/airport.js';
 import { landingSafety, eyeView } from '../safety.js';
-import { fact } from '../schema.js';
+import { fact, Discard } from '../schema.js';
 import { project, cameraPosition } from './camera.js';
 
 export const H_L = 1 / 120;
@@ -14,6 +14,22 @@ const DEG = Math.PI / 180, GSA = 3 * DEG, r2 = (x) => (Number.isFinite(x) ? +x.t
 export const stepOf = (sim) => Math.round(sim.flight.t / H_L);
 export const papiWhites = (eye) => AIRPORT.papi.reduce((n, u) => n + (Math.atan2(eye[1] - u.y, Math.hypot(eye[0] - u.x, eye[2] - u.z)) > u.angle ? 1 : 0), 0);
 export const lOutcome = (rep) => (rep.result === 'go-around' ? 'go_around' : rep.result);
+// world boxes [lo, hi] of what the visual facts read: the PAPI bar (4 units with their 2.2 m light sprites, airportmesh.js:101,
+// lights.js:10) and the windsock's sock (4.5 m, swinging round the pole top, airportmesh.js:112)
+const PZ = AIRPORT.papi.map((u) => u.z), PX = AIRPORT.papi[0].x, WS = AIRPORT.windsock;
+export const PAPI_BOX = Object.freeze([[PX - 1.1, 0, Math.min(...PZ) - 1.1], [PX + 1.1, 2.1, Math.max(...PZ) + 1.1]]);
+export const SOCK_BOX = Object.freeze([[WS.x - 4.5, WS.h - 0.9, WS.z - 4.5], [WS.x + 4.5, WS.h + 0.9, WS.z + 4.5]]);
+// the in-frame part of a box's projection (px at W x H), or null when a corner is behind the camera or nothing is in frame
+export function pixelBox(cam, [lo, hi], W, H) {
+  const c = [];
+  for (const x of [lo[0], hi[0]]) for (const y of [lo[1], hi[1]]) for (const z of [lo[2], hi[2]]) c.push(project(cam, [x, y, z], W, H));
+  if (c.some((q) => !q.front)) return null;
+  const x0 = Math.max(0, Math.min(...c.map((q) => q.x))), x1 = Math.min(W, Math.max(...c.map((q) => q.x))), y0 = Math.max(0, Math.min(...c.map((q) => q.y))), y1 = Math.min(H, Math.max(...c.map((q) => q.y)));
+  return x1 > x0 && y1 > y0 ? [x0, y0, x1, y1] : null;
+}
+// a visual fact counts only when its in-frame box is at least 1 px wide and 1 px tall at Pilot Eye's 160x96
+export const eyeVisible = (cam, box, W, H) => { const b = pixelBox(cam, box, W, H); return !!b && (b[2] - b[0]) * 160 / W >= 1 && (b[3] - b[1]) * 96 / H >= 1; };
+const sameBits = (a, b) => a.every((v, i) => Object.is(v, b[i]));
 
 export function landingNow(sim) {
   const f = sim.flight, A = f.air, st = sim.gnc.st, d = st.dev || {}, P = sim.gnc.params, ft = A.hRA / FT, wc = sim.wind.components(10);
@@ -34,9 +50,8 @@ export function landingFacts(sim, cam, { W = 896, H = 504, scene = {} } = {}) {
   put('att.pitch_deg', r2(A.theta / DEG), 'deg', 'context'); put('att.bank_deg', r2(A.phi / DEG), 'deg', 'context'); put('att.heading_deg', Math.round(((A.psi / DEG) + RWY.heading + 360) % 360), 'deg', 'context');
   put('att.alpha_deg', r2(A.alpha / DEG), 'deg', 'context'); put('att.beta_deg', r2(A.beta / DEG), 'deg', 'context'); put('att.fpa_deg', r2(A.gamma / DEG), 'deg', 'context');
   put('ils.loc_dots', d.locValid ? r2(d.loc) : null, 'dots', 'context'); put('ils.gs_dots', d.gsValid ? r2(d.gs) : null, 'dots', 'context');
-  const inFrame = (p) => { const q = project(cam, p, W, H); return q.front && q.x >= 0 && q.x <= W && q.y >= 0 && q.y <= H; };
-  put('papi_whites_cam', AIRPORT.papi.some((u) => inFrame([u.x, u.y, u.z])) ? papiWhites(cameraPosition(cam)) : null, 'count', 'visual');
-  const ws = AIRPORT.windsock; put('windsock.from_deg', inFrame([ws.x, ws.h, ws.z]) ? w.dir : null, 'deg', 'visual');
+  put('papi_whites_cam', eyeVisible(cam, PAPI_BOX, W, H) ? papiWhites(cameraPosition(cam)) : null, 'count', 'visual');
+  put('windsock.from_deg', eyeVisible(cam, SOCK_BOX, W, H) ? w.dir : null, 'deg', 'visual');
   put('cfg.gear', f.gear > 0.99 ? 'down' : f.gear > 0.01 ? 'transit' : 'up', null, 'visual'); put('cfg.spoilers', r2(f.spoil), null, 'visual');
   put('thrust', r2(f.spool), null, 'context'); put('wow', f.wow, null, 'context');
   put('wind.metar', `${String(w.dir).padStart(3, '0')}${String(w.kt).padStart(2, '0')}${w.gust ? 'G' + w.gust : ''}KT`, null, 'context');
@@ -55,17 +70,25 @@ export function applyLandingKick(sim, inj) {
   else if (inj.kind === 'forced_ga') forceGoAround(sim);
   else throw new Error(`not a runtime L injection: ${inj.kind}`);
 }
-export function replayLanding(cond, { params = {}, injection = null, step }) {
+// replay to `step`; with the live flight's p and v at that step (liveP, liveV) it must match them bit for bit
+export function replayLanding(cond, { params = {}, injection = null, step, liveP = null, liveV = null }) {
   const sim = createLandingSim(cond, { params });
   for (let n = 0; n < step && !sim.rep.done; n++) { if (injection && injection.step === n) applyLandingKick(sim, injection); sim.step(); }
+  if (liveP && !(sameBits(sim.flight.p, liveP) && sameBits(sim.flight.v, liveV))) throw new Error(`landing replay is not bit-exact at t_sample (step ${step})`);
   return sim;
 }
-export function landingBranches({ cond, params = {}, injection = null, step, liveResult, airborne, retard }) {
+// branches at the sample `step`; a branch that ends in timeout is a Discard (spec §4.3: a timeout run is dropped)
+export function landingBranches({ cond, params = {}, injection = null, step, liveResult, airborne, retard, liveP = null, liveV = null }) {
   const rt = injection && injection.step !== null && injection.step !== undefined ? injection : null;
+  if (rt && rt.step === step) throw new Error(`injection ${rt.kind} at the sample step ${step}: the timing rule forbids it`);
   let CONTINUE = lOutcome({ result: liveResult });
-  if (rt && rt.step > step) { const s = replayLanding(cond, { params, step }); s.run(); CONTINUE = lOutcome(s.rep); }
+  if (rt && rt.step > step) { const s = replayLanding(cond, { params, step, liveP, liveV }); s.run(); CONTINUE = lOutcome(s.rep); }
+  if (CONTINUE === 'timeout') throw new Discard(`L CONTINUE ends in timeout (step ${step})`);
   let GO_AROUND = null;
-  if (airborne && !retard) { const s = replayLanding(cond, { params, injection: rt && rt.step < step ? rt : null, step }); forceGoAround(s); s.run(); GO_AROUND = lOutcome(s.rep); }
+  if (airborne && !retard) {
+    const s = replayLanding(cond, { params, injection: rt && rt.step < step ? rt : null, step, liveP, liveV }); forceGoAround(s); s.run(); GO_AROUND = lOutcome(s.rep);
+    if (GO_AROUND === 'timeout') throw new Discard(`L GO_AROUND replay ends in timeout (step ${step})`);
+  }
   return { CONTINUE, GO_AROUND };
 }
 export function landingLabel(sim, branches) {

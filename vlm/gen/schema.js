@@ -35,6 +35,9 @@ export const STEP_S = Object.freeze({ S: 1 / 15, A: 1 / 15, L: 1 / 120, D: 0.1 }
 export const fact = (v, unit, obs) => ({ v, unit, obs });
 export const recordKey = (family, run, episode, step) => `${family}_${run}_${String(episode).padStart(5, '0')}_${String(step).padStart(6, '0')}`;
 export const rangeBin = (km) => RANGE_EDGES_KM.filter((e) => km >= e).length;
+// a sample the capture drops instead of labelling (e.g. a branch that ends in timeout): the label modules throw it and the
+// capture catches it by `e.discard === true`; any other error is a bug and propagates
+export class Discard extends Error { constructor(why) { super(`discard: ${why}`); this.name = 'Discard'; this.discard = true; } }
 
 function numbers(x, at, errors) {
   if (typeof x === 'number') { if (!Number.isFinite(x)) errors.push(`non-finite number at ${at}`); return; }
@@ -48,6 +51,7 @@ function safetyErrors(s, fam, at, e) {
   for (const r of s.reasons || []) if (!REASONS.includes(r)) e.push(`${at} reason ${r}`);
   for (const a of s.safe_actions || []) if (!FAMILY_ACTIONS[fam].includes(a)) e.push(`${at}.safe_actions has ${a}`);
   if (!ACTIONS.includes(s.best_action)) e.push(`${at}.best_action ${s.best_action}`);
+  for (const [a, o] of Object.entries(s.action_outcome || {})) if (!OUTCOMES[fam].includes(o)) e.push(`${at}.action_outcome.${a} ${o} is not in OUTCOMES.${fam}`);
 }
 
 export function validateRecord(rec) {
@@ -87,7 +91,6 @@ export function validateRecord(rec) {
   }
   safetyErrors(rec.safety, fam, 'safety', e);
   safetyErrors(rec.safety_eye, fam, 'safety_eye', e);
-  if (fam === 'L' && rec.safety && rec.safety.action_outcome && rec.safety.action_outcome.CONTINUE === 'timeout') e.push('L outcome timeout');
   const dt = rec.frame_dt_steps, [lo, hi] = FRAME_DT_STEPS_RANGE[fam];
   if (!Array.isArray(dt) || dt.length !== 2 || dt.some((n) => !Number.isInteger(n) || n < lo || n > hi)) e.push(`frame_dt_steps outside [${lo}, ${hi}]`);
   const inj = pv.injection;

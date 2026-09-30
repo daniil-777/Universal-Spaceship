@@ -47,6 +47,15 @@ test('rejects a runtime injection applied less than 2 frame_dt + 1 step before f
   const b = S(); b.provenance.injection = { kind: 'collision_course', params: {}, step: 116, sim_t_s: 7.73 }; assert.equal(validateRecord(b).ok, true);
   const c = S(); c.provenance.injection = { kind: 'hflare', params: {}, step: null, sim_t_s: null }; assert.equal(validateRecord(c).ok, true);
 });
+test('rejects any action_outcome outside OUTCOMES[family], for every action, in safety and in safety_eye', () => {
+  const a = S(); a.safety.action_outcome.CLIMB = 'landed'; rejects(a, /safety\.action_outcome\.CLIMB landed is not in OUTCOMES\.S/);
+  const b = S(); b.safety_eye.action_outcome.CONTINUE = 'crash'; rejects(b, /safety_eye\.action_outcome\.CONTINUE crash/);
+  const l = S(); l.family = 'L'; l.render.path = false;
+  for (const s of [l.safety, l.safety_eye]) { s.action_outcome = { CONTINUE: 'landed', GO_AROUND: 'go_around' }; s.safe_actions = ['CONTINUE']; }
+  assert.ok(!validateRecord(l).errors.some((e) => /action_outcome/.test(e)), 'landed and go_around are L outcomes');
+  l.safety_eye.action_outcome.GO_AROUND = 'timeout'; rejects(l, /safety_eye\.action_outcome\.GO_AROUND timeout is not in OUTCOMES\.L/);
+  const d = S(); d.family = 'D'; for (const s of [d.safety, d.safety_eye]) s.action_outcome = { CONTINUE: 'fail', BREAKOUT: 'timeout' }; rejects(d, /BREAKOUT timeout is not in OUTCOMES\.D/);
+});
 test('rejects enum violations in the safety block', () => {
   const a = S(); a.safety.reasons = ['NOT_A_REASON']; rejects(a, /reason/);
   const b = S(); b.safety.safe_actions = ['GO_AROUND']; rejects(b, /safe_actions/);

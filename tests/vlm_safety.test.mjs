@@ -81,6 +81,10 @@ test('landing safety_eye removes TAILWIND, every GS-dot rule and LOC-dot rules b
   assert.equal(L({ hRAft: 200, locDots: 1.8, thrNm: 0.8 }, undefined, true).verdict, 'UNSAFE');
   assert.equal(L({ crossKt: 16 }, undefined, true).verdict, 'CAUTION', 'STRONG_CROSSWIND stays (the crab is visible)');
 });
+test('landing safety_eye hides SEVERE_TURBULENCE (sub-pixel attitude jitter, Task 4 measurement); safety keeps it', () => {
+  const s = L({ turbSevere: true }); assert.equal(s.verdict, 'CAUTION'); assert.ok(s.reasons.includes('SEVERE_TURBULENCE'));
+  const e = L({ turbSevere: true }, undefined, true); assert.equal(e.verdict, 'SAFE'); assert.ok(!e.reasons.includes('SEVERE_TURBULENCE'));
+});
 test('landing dot-threshold boundaries: exactly 1 dot is SAFE, exactly 1.5 dots is CAUTION not UNSAFE, below and above 500 ft', () => {
   assert.equal(L({ hRAft: 300, locDots: 1.0 }).verdict, 'SAFE', 'exactly 1 dot does not exceed the > 1 CAUTION rule');
   assert.equal(L({ hRAft: 300, locDots: 1.5 }).verdict, 'CAUTION', 'exactly 1.5 dots does not exceed the > 1.5 UNSAFE rule');
@@ -124,6 +128,13 @@ test('docking closing-speed boundaries: exactly 1.5x the limit is CAUTION not UN
   assert.equal(D({ rho: 20, closing: 0.31, limit: 0.2 }).verdict, 'UNSAFE', 'rho = 20 m is inside the 20 m scope (inclusive)');
   assert.equal(D({ rho: EYE.closingRhoM, closing: 0.25, limit: 0.2 }, undefined, true).verdict, 'CAUTION', 'the eye-scope cutoff (EYE.closingRhoM, set by the Task 4 measurement) is inclusive too');
   assert.equal(D({ rho: EYE.closingRhoM + 0.01, closing: 0.25, limit: 0.2 }, undefined, true).verdict, 'SAFE', 'just beyond the eye scope the closing rules are removed');
+});
+test('docking closing speed above the limit outside the corridor (speedLimit(r)) is CAUTION, never UNSAFE there; safety_eye drops it beyond its scope', () => {
+  const out = (o) => ({ phase: 'TRANSFER', inCorridor: false, rho: 330, limit: 1.0, ...o });
+  const c = D(out({ closing: 1.4 })); assert.equal(c.verdict, 'CAUTION'); assert.ok(c.reasons.includes('CLOSING_TOO_FAST')); assert.equal(c.best_action, 'SLOW_DOWN');
+  assert.equal(D(out({ closing: 3.0, rho: 15 })).verdict, 'CAUTION', 'the 1.5x UNSAFE rule is the corridor axial limit only');
+  assert.equal(D(out({ closing: 1.0 })).verdict, 'SAFE', 'exactly at the limit');
+  assert.equal(D(out({ closing: 1.4 }), undefined, true).verdict, 'SAFE');
 });
 // controller ruling: a failed CONTINUE has cause station only for a KOS violation, a collision, a non-IDSS contact or a
 // keep-in exit (outcome.failKind, from docking.js failKind(rep)); every other fail kind leaves cause null
