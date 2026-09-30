@@ -8,7 +8,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createFrameRing, pickAction, gridIndex, decodeHeads, prepareFrame, createPilotEye, ACTIONS } from '../vlm/web/pilot-eye.js';
 import { templateSentence } from '../vlm/web/templates.js';
-import { monitorFromHeads, contextLine, createNarrator, NARRATOR_EOS } from '../vlm/web/narrator.js';
+import { monitorFromHeads, contextLine, createNarrator, squareImage, NARRATOR_EOS } from '../vlm/web/narrator.js';
 import { vlmFile, checkPort } from '../vlm/web/serve.mjs';
 import { renderContext, parseContext } from '../vlm/gen/text/context.js';
 import { REASONS } from '../vlm/gen/schema.js';
@@ -120,6 +120,19 @@ test('createNarrator: deploy dtypes (q4f16 decoder, q8 vision), WASM fallback, 5
   assert.equal(d.text, 'decoded null:7,'); assert.ok(d.ms >= 0);
   const q4 = fakeTf(); await createNarrator({ tf: q4, modelId: 'm', decoder: 'q4', vision: 'q8' }); assert.equal(q4.log.loads[0].dtype.decoder_model_merged, 'q4');
   const lfm = fakeTf(); await createNarrator({ tf: lfm, modelId: 'm', model: 'lfm' }); assert.equal(lfm.log.loads[0].dtype, 'q4f16', 'Plan B keeps its own processor and one dtype');
+});
+
+const G2 = process.env.APV_NARRATOR_DIR || '/Volumes/LaCie/astro-pilot/vlm/models/narrator-base-g2-fused';
+test('createNarrator loads the G2 folder in transformers.js (CPU, deploy dtypes): a raw frame squares to 64 image tokens and describe returns text', { skip: !fs.existsSync(path.join(G2, 'parity.json')) && `no exported folder at ${G2}`, timeout: 180000 }, async () => {
+  const tf = await import(pathToFileURL(createRequire(fileURLToPath(new URL('../vlm/web/bench.mjs', import.meta.url))).resolve('@huggingface/transformers').replace(/\.cjs$/, '.mjs')).href);
+  const nar = await createNarrator({ tf, modelId: path.basename(G2), localModelPath: path.dirname(G2) + '/', device: 'cpu', fallback: null });
+  try {
+    const raw = await tf.RawImage.read(JSON.parse(fs.readFileSync(path.join(G2, 'parity.json'), 'utf8')).samples[0].image), sq = await squareImage(tf, raw);
+    assert.notDeepEqual([raw.width, raw.height], [512, 512]); assert.deepEqual([sq.width, sq.height], [512, 512]);
+    const text = nar.processor.apply_chat_template([{ role: 'user', content: [{ type: 'image' }, { type: 'text', text: 'Is it safe?' }] }], { add_generation_prompt: true });
+    const ids = Array.from((await nar.processor(text, [sq], { do_image_splitting: false })).input_ids.data, Number); assert.equal(ids.filter((t) => t === 49190).length, 64);
+    const d = await nar.describe(raw, { context: 'Context: telemetry: none.', maxNewTokens: 4, minNewTokens: 4 }); assert.equal(typeof d.text, 'string'); assert.ok(d.text.length > 0 && d.ms > 0);
+  } finally { await nar.dispose(); }
 });
 
 test('serve.mjs: /__vlm/ maps only models, datasets and raw under the LaCie root; reserved ports are refused', () => {
