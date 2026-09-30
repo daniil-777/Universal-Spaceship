@@ -109,8 +109,11 @@ export function createEarthRings(scene, renderer, { wantedUrls = new Set(), load
   function copy(src, target, slot, size, touched) {
     const mips = target.generateMipmaps;
     if (mips) target.generateMipmaps = false;
-    dst.set(mod(slot, size) * T, Math.floor(slot / size) * T); renderer.copyTextureToTexture(src, target, null, dst);
-    if (mips) { target.generateMipmaps = true; if (touched) touched.add(target); }
+    try {
+      dst.set(mod(slot, size) * T, Math.floor(slot / size) * T); renderer.copyTextureToTexture(src, target, null, dst);
+    } finally {
+      if (mips) { target.generateMipmaps = true; if (touched) touched.add(target); }
+    }
   }
   function build(r) {
     const { level, x0, y0 } = r.win, n = 2 ** level, pos = r.mesh.geometry.attributes.position, up = r.mesh.geometry.attributes.aUp, lats = [], lons = [];
