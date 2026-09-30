@@ -1,8 +1,15 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import { register } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { createLocalFrame } from '../src/earthtiles.js';   // pure geo maths, no three.js (see its own header)
+
+// src/earthrings.js imports the bare specifier 'three', which Node only resolves from tests/ (tests/node_modules/three,
+// r170): src/ and the repo root have no node_modules. This inline resolve hook re-resolves 'three' and 'three/...' as if
+// this test file had imported them, so the dynamic import('../src/earthrings.js') below loads (Task 7 carry-over).
+register('data:text/javascript,' + encodeURIComponent(`export async function resolve(s, c, next) {
+  return s === 'three' || s.startsWith('three/') ? next(s, { ...c, parentURL: ${JSON.stringify(import.meta.url)} }) : next(s, c); }`));
 
 // Task 6 (diagnosis 2026-09-29 §3 #9, K6): three r170's copyTextureToTexture regenerates a texture's whole mip chain
 // on every level-0 copy when dstTexture.generateMipmaps is true (confirmed in three.module.js: `if (level === 0 &&
@@ -42,21 +49,16 @@ test('earthrings.js: flush() collects touched colour atlases in a Set and rebuil
   assert.match(fn, /renderer\.state\.bindTexture\(/); assert.match(fn, /__webglTexture/); assert.match(fn, /gl\.generateMipmap\(/);
 });
 
-// --- behavioural check: attempted, but createEarthRings CANNOT be driven in Node here. earthrings.js does
-// `import * as THREE from 'three'`, and that bare specifier only resolves under tests/ (tests/node_modules/three,
-// r170.0 — used by this file's own harness, e.g. earthloader.test.mjs's fakes) because that is the nearest
-// node_modules above it; src/earthrings.js has no node_modules above *it* (src/ or the repo root), so importing it
-// throws ERR_MODULE_NOT_FOUND before a single line of createEarthRings runs — confirmed with
-// `node -e "import('./src/earthrings.js')"` from the repo root. Per the brief ("if it cannot, say so and keep the
-// source test"): the dynamic import below is attempted first and the test records why it was skipped, so a future
-// change to module resolution (e.g. a src/node_modules or an import map for Node) would make this test start
-// exercising createEarthRings for real instead of silently staying a no-op. ------------------------------------
+// --- behavioural check: createEarthRings driven in Node with a fake renderer and loader. The resolve hook registered
+// at the top of this file lets src/earthrings.js's own `import * as THREE from 'three'` load tests/node_modules/three
+// (r170.0); without it the import throws ERR_MODULE_NOT_FOUND, and the test now FAILS instead of skipping, so it can
+// never silently turn back into a no-op. ----------------------------------------------------------------------------
 
 function makeFakeRenderer() {
   const props = new Map();
   const ensure = (t) => { let p = props.get(t); if (!p) { p = { __webglTexture: {} }; props.set(t, p); } return p; };
-  const calls = { generateMipmap: 0, bindTexture: 0 };
-  const gl = { TEXTURE_2D: 0x0de1, generateMipmap() { calls.generateMipmap++; } };
+  const calls = { generateMipmap: 0, bindTexture: 0, unbindTexture: 0, log: [] };
+  const gl = { TEXTURE_2D: 0x0de1, generateMipmap() { calls.generateMipmap++; calls.log.push('mip'); } };
   return {
     calls,
     initTexture: (t) => ensure(t),
@@ -68,7 +70,7 @@ function makeFakeRenderer() {
     },
     getContext: () => gl,
     properties: { get: ensure },
-    state: { bindTexture: () => { calls.bindTexture++; } },
+    state: { bindTexture: () => { calls.bindTexture++; calls.log.push('bind'); }, unbindTexture: () => { calls.unbindTexture++; calls.log.push('unbind'); } },
   };
 }
 // Resolves every job the moment it is requested (still wanted), so a whole ring's colour and height tiles land in
@@ -79,14 +81,8 @@ function makeFakeLoader(bmp = {}) {
     request(job) { if (job.wanted()) job.done(bmp); }, prune() {}, suspend() {}, resume() {} };
 }
 
-test('createEarthRings + flush(): 6 uploads into one colour atlas give exactly 1 generateMipmap call, once a frame', async (t) => {
-  let createEarthRings;
-  try { ({ createEarthRings } = await import('../src/earthrings.js')); }
-  catch (e) {
-    t.skip(`createEarthRings cannot be driven in Node: ${e.message} (src/earthrings.js's own 'three' import only `
-      + `resolves under tests/, not under src/ or the repo root; kept as the source-level checks above instead)`);
-    return;
-  }
+test('createEarthRings + flush(): 6 uploads into one colour atlas give exactly 1 generateMipmap call, once a frame', async () => {
+  const { createEarthRings } = await import('../src/earthrings.js');
   const scene = { add() {} }, renderer = makeFakeRenderer(), loader = makeFakeLoader();
   const rings = createEarthRings(scene, renderer, { loader });
   rings.rebase(createLocalFrame(45, 8));
@@ -97,10 +93,11 @@ test('createEarthRings + flush(): 6 uploads into one colour atlas give exactly 1
   // are all colour tiles into the SAME ring's SAME atlas — the "6 uploads into one atlas" case the brief asks for.
   rings.update(0.016, view);
   assert.equal(renderer.calls.generateMipmap, 1, `frame 1: expected 1 generateMipmap call for the one touched colour atlas, got ${renderer.calls.generateMipmap}`);
-  assert.ok(renderer.calls.bindTexture >= 1, 'the manual rebuild binds the atlas before calling generateMipmap');
+  assert.deepEqual(renderer.calls.log, ['bind', 'mip', 'unbind'], 'frame 1: bind the atlas, rebuild its mips, then unbind (three\'s own convention)');
 
   // Frame 2: ring 0 still has far more than 6 undelivered colour tiles queued, so this frame's flush() again drains
   // 6 uploads into that same atlas — one more manual rebuild, not six, and not zero.
   rings.update(0.016, view);
   assert.equal(renderer.calls.generateMipmap, 2, `frame 2: expected 2 cumulative generateMipmap calls (1 more), got ${renderer.calls.generateMipmap}`);
+  assert.equal(renderer.calls.unbindTexture, 2, 'one unbind after each frame\'s mip rebuild');
 });

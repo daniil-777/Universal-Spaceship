@@ -38,10 +38,18 @@ const VERT = /* glsl */`uniform sampler2D tHeight; uniform vec2 uHOff; uniform f
 // longitude (uInnerWrap): a level-2 ring spans the globe twice, and a copy of it left at its true depth would hide the
 // pushed rings. Haze grows with the air crossed (the path below uAirTop km), not with the distance, so a view straight
 // down from orbit stays clear while a low view's horizon fades.
+// The rings are ONE layer over the globe (Task 7, 2026-09-30): every ring's alpha carries the view's far fade uFar
+// (2500 -> 4000 km) and the day side, so where a coarse ring is still drawn under a finer one (the finer ring's edge
+// band, and its whole footprint until it is fully in) two "over" blends let the globe through (1 - a)^2 instead of
+// (1 - a): a soft box around every finer ring at 1000-4000 km. Under the finer ring the coarse ring's alpha is scaled
+// by (1 - c) / (1 - V c), c = the finer ring's own cover there (its fade-in uInnerVis times its edge fade), V = uFar
+// times day: the pair then composites as V (c F + (1 - c) C) + (1 - V) globe. With V = 1 (below 2500 km, in
+// daylight) the factor is skipped rather than computed as x / x, so the near views are unchanged.
 const FRAG = /* glsl */`uniform sampler2D tColor, tMask, tInner; uniform vec2 uCOff, uVRange, uInnerMin, uInnerCOff; uniform vec3 uSun, uHazeCol;
-  uniform float uVis, uHazeK, uHazeL, uInnerOn, uInnerDone, uInnerScale, uInnerWrap, uAirTop; uniform vec3 uSeaCol;
+  uniform float uVis, uHazeK, uHazeL, uInnerOn, uInnerDone, uInnerScale, uInnerWrap, uAirTop, uInnerVis, uFar; uniform vec3 uSeaCol;
   uniform vec3 uTint; uniform float uTintOn;
   varying vec2 vUv; varying vec3 vW, vN, vUp; varying float vSea;
+  float edge(vec2 u) { vec2 e = smoothstep(vec2(0.0), vec2(0.08), u) * smoothstep(vec2(0.0), vec2(0.08), 1.0 - u); return e.x * e.y; }
   void main() {
     vec3 col = texture2D(tColor, uCOff + vUv).rgb; float m = texture2D(tMask, uCOff + vUv).r;
     vec2 iu = vec2(mod(vUv.x - uInnerMin.x, uInnerWrap), vUv.y - uInnerMin.y) * uInnerScale; float inner = texture2D(tInner, uInnerCOff + iu).r;
@@ -55,10 +63,11 @@ const FRAG = /* glsl */`uniform sampler2D tColor, tMask, tInner; uniform vec2 uC
     col *= mix(0.03, 1.0, day) * mix(1.0, relief, day);
     float dist = length(cameraPosition - vW), air = dist * min(1.0, uAirTop / max(cameraPosition.y - vW.y, uAirTop));
     col = mix(col, uHazeCol * (0.2 + 0.8 * day), uHazeK * (1.0 - exp(-air / uHazeL)));
-    vec2 e = smoothstep(vec2(0.0), vec2(0.08), vUv) * smoothstep(vec2(0.0), vec2(0.08), 1.0 - vUv);
+    float c = under ? uInnerVis * edge(iu) : 0.0, V = uFar * day;
+    float stack = V < 1.0 && V * c < 0.9999 ? (1.0 - c) / (1.0 - V * c) : 1.0;
     gl_FragDepth = !under ? gl_FragCoord.z : (uInnerDone > 0.5 ? mix(gl_FragCoord.z, 1.0, 0.2) : 0.99999);
     col = mix(col, uTint, uTintOn);
-    gl_FragColor = vec4(col, uVis * e.x * e.y * day); }`;          // the night side fades to the globe's city lights
+    gl_FragColor = vec4(col, uVis * edge(vUv) * day * stack); }`;          // the night side fades to the globe's city lights
 
 // Debug false colour for the leak check (diagnosis §1(a)): one tint per ring, keyed off the ring's own level so it
 // tracks a level change and never hard-codes which colour is the finest ring (MAX_LEVEL may change later).
@@ -90,7 +99,7 @@ export function createEarthRings(scene, renderer, { wantedUrls = new Set(), load
     const mask = new THREE.DataTexture(new Uint8Array(RING_TILES * RING_TILES), RING_TILES, RING_TILES, THREE.RedFormat);
     mask.wrapS = mask.wrapT = THREE.RepeatWrapping; mask.minFilter = mask.magFilter = THREE.NearestFilter; mask.needsUpdate = true;
     const mat = new THREE.ShaderMaterial({ vertexShader: VERT, fragmentShader: FRAG, transparent: true, depthWrite: true, polygonOffset: true,
-      uniforms: { tColor: { value: color }, tHeight: { value: height }, tMask: { value: mask }, tInner: { value: mask }, uInnerMin: { value: new THREE.Vector2() }, uInnerCOff: { value: new THREE.Vector2() }, uInnerOn: { value: 0 }, uInnerDone: { value: 0 }, uInnerScale: { value: 2 }, uInnerWrap: { value: 1 }, uAirTop: { value: 8 }, uSeaCol: { value: new THREE.Color(0.012, 0.035, 0.1) },
+      uniforms: { tColor: { value: color }, tHeight: { value: height }, tMask: { value: mask }, tInner: { value: mask }, uInnerMin: { value: new THREE.Vector2() }, uInnerCOff: { value: new THREE.Vector2() }, uInnerOn: { value: 0 }, uInnerDone: { value: 0 }, uInnerVis: { value: 0 }, uFar: { value: 1 }, uInnerScale: { value: 2 }, uInnerWrap: { value: 1 }, uAirTop: { value: 8 }, uSeaCol: { value: new THREE.Color(0.012, 0.035, 0.1) },
         uCOff: { value: new THREE.Vector2() }, uHOff: { value: new THREE.Vector2() },
         uHScale: { value: 1 }, uHSize: { value: HEIGHT_TILES * T }, uHeightK: { value: 0 }, uStepKm: { value: 1 }, uVRange: { value: new THREE.Vector2(0, 1) }, uVis: { value: 0 },
         uSun: { value: new THREE.Vector3(0, 1, 0) }, uHazeCol: { value: new THREE.Color(0.62, 0.74, 0.9) }, uHazeK: { value: 0 }, uHazeL: { value: 60 }, uTint: { value: new THREE.Color(1, 1, 1) }, uTintOn: { value: 0 } } });
@@ -212,6 +221,8 @@ export function createEarthRings(scene, renderer, { wantedUrls = new Set(), load
       renderer.state.bindTexture(gl.TEXTURE_2D, p.__webglTexture);
       gl.generateMipmap(gl.TEXTURE_2D);
     }
+    // three's own convention after a texture operation (its copyTextureToTexture ends the same way): leave no atlas bound
+    if (touched.size) renderer.state.unbindTexture();
   }
   // A colour slot shows once its imagery AND the height tile under it are in (or that height tile failed for good).
   function refreshMask(r) {
@@ -256,16 +267,17 @@ export function createEarthRings(scene, renderer, { wantedUrls = new Set(), load
         r.shown = used && have >= (r.shown ? HIDE_AT : SHOW_AT) * r.valid;
         r.hShown = used && hHave >= (r.hShown ? HIDE_AT : SHOW_AT) * r.hValid;
         r.vis += ((r.shown ? 1 : 0) - r.vis) * ease; r.hk += ((r.hShown ? 1 : 0) - r.hk) * ease;
-        const u = r.mat.uniforms; u.uVis.value = r.vis * view.vis; u.uHeightK.value = r.hk; u.uSun.value.copy(view.sun); u.uHazeK.value = view.hazeK; u.uHazeL.value = view.hazeL;
+        const u = r.mat.uniforms; u.uVis.value = r.vis * view.vis; u.uFar.value = view.vis; u.uHeightK.value = r.hk; u.uSun.value.copy(view.sun); u.uHazeK.value = view.hazeK; u.uHazeL.value = view.hazeL;
         u.uTintOn.value = debugTint ? 1 : 0; if (debugTint) u.uTint.value.setHex(DEBUG_TINTS[(MAX_LEVEL - r.level) % 5]);
         r.mesh.visible = u.uVis.value > 0.003; r.stats = { have, valid: r.valid, hHave, hValid: r.hValid };
       }
       // fix A: every used ring with a finer used ring tracks that ring's window every frame, so it is behind the finer
-      // ring as soon as that one is drawn at all (on) and leaves its hole once the finer ring is fully in (done)
+      // ring as soon as that one is drawn at all (on) and leaves its hole once the finer ring is fully in (done); the
+      // finer ring's own fade-in (uInnerVis) sets how much of the pair it covers (FRAG's one-layer blend)
       for (const r of rings) {
         const finer = want.filter((L) => L > r.level), inner = want.includes(r.level) && finer.length && rings.find((q) => q.level === Math.min(...finer)), u = r.mat.uniforms;
         const st = inner ? innerState(inner) : { on: false, done: false };
-        u.uInnerOn.value = st.on ? 1 : 0; u.uInnerDone.value = st.done ? 1 : 0;
+        u.uInnerOn.value = st.on ? 1 : 0; u.uInnerDone.value = st.done ? 1 : 0; u.uInnerVis.value = inner ? inner.vis : 0;
         if (!inner) continue;
         const w = innerWindow(inner.win, r.win);
         u.tInner.value = inner.mask; u.uInnerCOff.value.copy(inner.mat.uniforms.uCOff.value); u.uInnerScale.value = w.scale; u.uInnerMin.value.set(w.min[0], w.min[1]);
