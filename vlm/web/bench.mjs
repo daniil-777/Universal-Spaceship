@@ -89,6 +89,21 @@ export async function benchVision({ modelDir, device = 'webgpu', minCos = 0.99, 
   }
   return rows;
 }
+// Task 13 — `pilot-eye`: ORT-web (wasm, 1 thread) latency of an export_onnx.py folder: encoder median/min/p90 after 8 warm-up
+// runs, heads median (R13 gate: 160x96 encoder median <= 10 ms, heads <= 1 ms; 224x128 is the alternate only if <= 16 ms)
+export async function benchPilotEye({ dir, runs = 80 }) {
+  const ort = await import('onnxruntime-web'); ort.env.wasm.numThreads = 1;
+  const q = (a, p) => { const s = [...a].sort((x, y) => x - y); return s[Math.min(s.length - 1, Math.floor(p * (s.length - 1)))]; };
+  const load = (f) => ort.InferenceSession.create(new Uint8Array(fs.readFileSync(path.join(dir, f))), { executionProviders: ['wasm'] });
+  const enc = await load('encoder.onnx'), hd = await load('heads.onnx');
+  const [W, H] = (JSON.parse(fs.readFileSync(path.join(dir, 'parity.json'), 'utf8')).size || '160x96').split('x').map(Number), x = new ort.Tensor('float32', new Float32Array(3 * H * W).fill(0.1), [1, 3, H, W]);
+  for (let i = 0; i < 8; i++) await enc.run({ pixels: x });
+  const te = [], th = []; let map = null;
+  for (let i = 0; i < runs; i++) { const t0 = performance.now(); map = (await enc.run({ pixels: x })).map; te.push(performance.now() - t0); }
+  const dt = new ort.Tensor('float32', new Float32Array([1, 1]), [1, 2]);
+  for (let i = 0; i < runs; i++) { const t0 = performance.now(); await hd.run({ m0: map, m1: map, m2: map, dt }); th.push(performance.now() - t0); }
+  return { size: `${W}x${H}`, encoder: { median_ms: med(te), min_ms: Math.min(...te), p90_ms: q(te, 0.9), runs }, heads: { median_ms: med(th) } };
+}
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const cmd = process.argv[2], modelDir = arg('model-dir'), device = arg('device', 'webgpu'), minCos = +arg('min-cos', 0.99);
   if (cmd === 'narrator' && arg('vision') === 'all') {
@@ -105,6 +120,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     if (arg('texts-out')) fs.writeFileSync(arg('texts-out'), JSON.stringify(texts, null, 1));
     if (bad.length) { console.log('G2 FAIL: ' + bad.join('; ')); process.exit(1); }
     console.log('G2 transformers.js OK');
+  } else if (cmd === 'pilot-eye') { console.log(JSON.stringify(await benchPilotEye({ dir: arg('dir'), runs: +arg('runs', 80) })));
   } else { console.log('usage: bench.mjs narrator --model-dir <folder> [--device webgpu|cpu] [--tokens 40] [--decoder q4f16|q4|fp16|fp32] [--vision q8|q4|int8|fp16|all] [--max-ms-per-token 12] [--min-cos 0.99] [--texts-out <json>]'); process.exit(2); }
   process.exit(0);
 }
