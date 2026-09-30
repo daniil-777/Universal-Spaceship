@@ -15,7 +15,7 @@ test('clean: words and Jaccard ignore case and punctuation', () => {
   assert.deepEqual(words('The Nearest feature, is a town.'), ['the', 'nearest', 'feature', 'is', 'a', 'town']);
   assert.equal(jaccard('The nearest ground is a town.', 'The nearest ground is a city.'), 5 / 7);
   assert.equal(jaccard('', ''), 0);
-  assert.deepEqual(CAPS, { describe: 3, safety: 2, ask: 2 });
+  assert.deepEqual(CAPS, { describe: 3, safety: 4, ask: 2 });
 });
 test('clean: commits only finished sentences while streaming; a decimal point is not an end', () => {
   const g = createSentenceGate({ max: 3 });
@@ -37,11 +37,12 @@ test('clean: a sentence that opens like a kept one (3 words) and shares >= 0.4 o
   assert.deepEqual(out, ['The camera follows the ship from about 100 km.', "The nearest hazard is a flock of birds at 1 o'clock in the image, near the middle."]); assert.equal(stop, true); assert.equal(g.reason, 'repeat');
   const k = createSentenceGate({ max: 3 }); assert.deepEqual(feedAll(k, 'The ship flies over the sea. The ship turns left toward a rocky coast. ').out, ['The ship flies over the sea.', 'The ship turns left toward a rocky coast.'], 'a shared two-word opening alone is fine');
 });
-test('clean: caps at 3 sentences for Describe and 2 for safety or ask', () => {
-  const text = 'One is here. Two goes there. Three sits low. Four flies high. ';
+test('clean: caps at 3 sentences for Describe, 4 for safety (perception, prediction, verdict with its reason, advice) and 2 for ask', () => {
+  const text = 'One is here. Two goes there. Three sits low. Four flies high. Five lands soon. ';
   const d = createSentenceGate({ max: CAPS.describe }), a = feedAll(d, text);
   assert.deepEqual(a.out, ['One is here.', 'Two goes there.', 'Three sits low.']); assert.equal(a.stop, true); assert.equal(d.reason, 'cap');
-  const s = createSentenceGate({ max: CAPS.safety }); assert.deepEqual(feedAll(s, text).out, ['One is here.', 'Two goes there.']);
+  const s = createSentenceGate({ max: CAPS.safety }); assert.deepEqual(feedAll(s, text).out, ['One is here.', 'Two goes there.', 'Three sits low.', 'Four flies high.']);
+  const q = createSentenceGate({ max: CAPS.ask }); assert.deepEqual(feedAll(q, text).out, ['One is here.', 'Two goes there.']);
 });
 test('clean: finish() trims a dangling fragment and keeps a finished last sentence', () => {
   const g = createSentenceGate({ max: 3 }); feedAll(g, 'The frame shows the ship in space. The frame shows the Moon at');
@@ -50,11 +51,26 @@ test('clean: finish() trims a dangling fragment and keeps a finished last senten
   assert.deepEqual(h.finish().add, ['Clouds drift east.']); assert.equal(h.text, 'A calm sea lies below. Clouds drift east.');
   const r = createSentenceGate({ max: 3 }); feedAll(r, 'Clouds drift east. Clouds drift east.'); assert.deepEqual(r.finish().add, [], 'a repeat at the very end is dropped too');
 });
-test('clean: dropEcho drops sentences that restate the monitor (the pill already shows it)', () => {
-  const g = createSentenceGate({ max: 2, dropEcho: true });
+test('clean: dropEcho drops a bare restated verdict (the pill shows it) but keeps the monitor\'s reasons, prediction and advice (V1-10)', () => {
+  const g = createSentenceGate({ max: 3, dropEcho: true });
   const { out } = feedAll(g, 'Monitor verdict: SAFE. Reason: the corridor edge. The ship holds the middle of the corridor. Rocks drift far to the left. ');
-  assert.deepEqual(out, ['The ship holds the middle of the corridor.', 'Rocks drift far to the left.']);
+  assert.deepEqual(out, ['Reason: the corridor edge.', 'The ship holds the middle of the corridor.', 'Rocks drift far to the left.']);
   const k = createSentenceGate({ max: 2 }); assert.deepEqual(feedAll(k, 'The verdict is SAFE. Then more. ').out, ['The verdict is SAFE.', 'Then more.'], 'off by default');
+  for (const bare of ['The monitor rates this UNSAFE.', 'For the monitor this is CAUTION.', 'Verdict from the monitor: SAFE.', 'The monitor judges the situation SAFE.', 'The verdict is caution.']) {
+    const b = createSentenceGate({ max: 4, dropEcho: true }); assert.deepEqual(feedAll(b, `${bare} The pilot should climb. `).out, ['The pilot should climb.'], bare);
+  }
+});
+test('clean: a trained safety answer keeps its "The monitor rates this … because …" sentence and its advice (V1-10)', () => {
+  const answer = "I see a rock at 10 o'clock in the image. If nothing changes, the monitor expects that a crash is possible. The monitor rates this UNSAFE because of a hazard ahead. The pilot should turn right. ";
+  const g = createSentenceGate({ max: CAPS.safety, dropEcho: true }), { out } = feedAll(g, answer); g.finish();
+  assert.deepEqual(out, ["I see a rock at 10 o'clock in the image.", 'If nothing changes, the monitor expects that a crash is possible.', 'The monitor rates this UNSAFE because of a hazard ahead.', 'The pilot should turn right.']);
+  for (const s of ['With a hazard ahead flagged, the monitor rates this UNSAFE; the pilot should turn right.', 'The monitor flags a hazard ahead and the corridor edge and rates the situation CAUTION.',
+    'For the monitor this is SAFE, with no reason listed, and the pilot should continue.', 'According to the monitor the approach is CAUTION, driven by an unstable approach.', 'Advice: continue.']) {
+    const x = createSentenceGate({ max: CAPS.safety, dropEcho: true }); assert.deepEqual(feedAll(x, `${s} `).out.concat(x.finish().add), [s], s);
+  }
+  const r = createSentenceGate({ max: CAPS.safety, dropEcho: true });
+  const rep = feedAll(r, 'The monitor rates this UNSAFE because of a hazard ahead. The monitor rates this UNSAFE because of a hazard ahead and a fast closing rock. The pilot should climb. ');
+  assert.deepEqual(rep.out, ['The monitor rates this UNSAFE because of a hazard ahead.']); assert.equal(r.reason, 'repeat', 'a restated reason is still a repeat');
 });
 
 test('words: pill labels from decoded heads; Watching while warming up', () => {

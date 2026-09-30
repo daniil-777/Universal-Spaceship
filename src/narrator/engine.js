@@ -10,7 +10,8 @@ const STORE = 'astro.narrator';
 export const DOWNLOAD_MB = 244;
 // the trained prompts: caption_detail, safety, and the VQA "What action is recommended?" (80 training rows)
 export const TASKS = Object.freeze({ describe: NARRATOR_TASKS.describe, safety: NARRATOR_TASKS.safety, now: 'What action is recommended?' });
-export const TOKENS = Object.freeze({ describe: 90, safety: 64, now: 48, ask: 56 });
+// safety: room for the 4 sentences the gate keeps (V1-10)
+export const TOKENS = Object.freeze({ describe: 90, safety: 88, now: 48, ask: 56 });
 
 // ?narratorMock=1 (canned text, no models) is for local QA only: it is ignored on any host but this machine
 const LOCAL = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
