@@ -166,6 +166,14 @@ class TestTrainExportEvaluate(unittest.TestCase):
         train.main(['--data', str(self.root), '--out', str(out), '--steps', '50', '--batch', '4', '--workers', '0', '--device', 'cpu', '--no-pretrained', '--max-minutes', '0'])
         log = read_jsonl(out / 'train_log.jsonl'); self.assertEqual(log[-1]['stopped'], 'time'); self.assertEqual(sum('loss' in r for r in log), 1)
         self.assertTrue((out / 'model.pt').exists())
+    def test_freeze_backbone_trains_only_the_reduction_and_heads(self):
+        from vlm.train.pilot_eye import train
+        out = tmpdir(self); torch.manual_seed(0); ref = PilotEye(pretrained=False).state_dict()  # main() seeds 0 before building the model
+        train.main(['--data', str(self.root), '--out', str(out), '--steps', '3', '--batch', '4', '--workers', '0', '--device', 'cpu', '--no-pretrained', '--freeze-backbone'])
+        ck = torch.load(out / 'model.pt', map_location='cpu'); st = ck['state']; self.assertTrue(ck['freeze_backbone'])
+        bb = [k for k in st if k.startswith('enc.backbone.')]; self.assertTrue(bb)
+        for k in bb: self.assertTrue(torch.equal(st[k], ref[k]), k)  # weights and BatchNorm running stats untouched
+        self.assertFalse(all(torch.equal(st[k], ref[k]) for k in st if k.startswith('heads.')))
     def test_smoke_check_compares_the_first_and_last_losses(self):
         from vlm.train.pilot_eye.train import loss_fell
         self.assertTrue(loss_fell([3.0] * 20 + [1.0] * 20)[0]); self.assertFalse(loss_fell([1.0] * 20 + [3.0] * 20)[0]); self.assertTrue(loss_fell([2.0, 1.0])[0])
