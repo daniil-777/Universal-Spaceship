@@ -44,6 +44,14 @@ class TestNarratorData(unittest.TestCase):
         self.assertEqual(int((inp['input_ids'] == 49190).sum()), 64)
         self.assertTrue(self.p.tokenizer.decode(inp['input_ids'][0]).rstrip().endswith('Assistant:'))
 
+    def test_onnx_deploy_path_greedy(self):
+        from PIL import Image
+        from vlm.train.narrator.generate import OnnxNarrator
+        r = self.ds.rows[0]; inp = encode_prompt(self.p, 'Describe the image in one sentence.', Image.open(frame_path(r['images'][0])))
+        toks = OnnxNarrator(G2, decoder='q4f16', vision='q8').generate(inp, max_new=4)
+        self.assertTrue(1 <= len(toks) <= 4 and all(isinstance(t, int) for t in toks)); self.assertTrue(len(toks) == 4 or toks[-1] == EOU)
+        self.assertTrue(self.p.tokenizer.decode(toks, skip_special_tokens=True).strip())
+
 class TestPaths(unittest.TestCase):
     def test_frame_path(self):
         self.assertEqual(frame_path('raw/r/Z/k.png'), '/Volumes/LaCie/astro-pilot/vlm/raw/r/Z/k.png'); self.assertEqual(frame_path('/a/b.png'), '/a/b.png')
