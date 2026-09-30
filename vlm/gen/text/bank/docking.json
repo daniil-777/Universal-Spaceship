@@ -62,24 +62,24 @@
   "dclosing_above_a": { "kind": "vqa_a", "families": ["D"], "slots": ["closing", "limit"], "forms": [
     "The closing rate of {closing} is above the limit of {limit}.",
     "It closes at {closing}, faster than the limit of {limit}.",
-    "Above the limit: {closing} against {limit}.",
+    "Above the limit: a closing rate of {closing} against a limit of {limit}.",
     "The closing speed is {closing} and the limit is {limit}, so it is too high.",
     "The spacecraft closes at {closing}, beyond its limit of {limit}.",
     "At {closing}, the closing rate exceeds the limit, which is {limit}.",
     "The closing rate is {closing}, higher than the limit of {limit}.",
-    "It is closing faster than allowed: {closing} against a limit of {limit}.",
+    "It closes at {closing}, faster than allowed, with a limit of {limit}.",
     "The closing rate, {closing}, is above the limit of {limit}.",
     "The limit is {limit}, and the spacecraft closes at {closing}, above it."
   ] },
   "dclosing_below_a": { "kind": "vqa_a", "families": ["D"], "slots": ["closing", "limit"], "forms": [
     "The closing rate of {closing} is below the limit of {limit}.",
     "It closes at {closing}, slower than the limit of {limit}.",
-    "Within the limit: {closing} against {limit}.",
+    "Within the limit: a closing rate of {closing} against a limit of {limit}.",
     "The closing speed is {closing} and the limit is {limit}, so it is within bounds.",
     "The spacecraft closes at {closing}, inside its limit of {limit}.",
     "At {closing}, the closing rate stays under the limit, which is {limit}.",
     "The closing rate is {closing}, lower than the limit of {limit}.",
-    "It is closing within the allowed rate: {closing} against a limit of {limit}.",
+    "It closes at {closing}, within the allowed rate, with a limit of {limit}.",
     "The closing rate, {closing}, sits below the limit of {limit}.",
     "The limit is {limit}, and the spacecraft closes at {closing}, below it."
   ] },
@@ -102,7 +102,7 @@
     "Yes, aligned: the error is {att}.",
     "Yes, it points at the port with an error of {att}.",
     "Yes, the attitude is lined up, off by {att}.",
-    "Yes, the attitude error of {att} is small.",
+    "Yes, the attitude error of {att} is within limits.",
     "Yes, it is oriented correctly, {att} off.",
     "Yes; the pointing error is {att}.",
     "Yes, the alignment is good at {att} of error."
@@ -114,7 +114,7 @@
     "No, not aligned: the error is {att}.",
     "No, it points {att} away from the port axis.",
     "No, the attitude is off by {att}.",
-    "No, the attitude error of {att} is too large.",
+    "No, the attitude error of {att} exceeds what docking allows.",
     "No, it is oriented {att} off.",
     "No; the pointing error is {att}.",
     "No, the alignment is out by {att}."

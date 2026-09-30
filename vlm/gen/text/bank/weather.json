@@ -67,7 +67,7 @@
     "Yes, the closest storm cell is {cell_dist} from the ship.",
     "Yes, one is {cell_dist} away.",
     "Yes: a storm cell, {cell_dist} away.",
-    "Yes, a towering storm cloud stands {cell_dist} away.",
+    "Yes, a storm cell sits {cell_dist} from the ship.",
     "Yes, there is a storm cell {cell_dist} from here.",
     "Yes, the storm cell nearest to the ship is {cell_dist} off."
   ] },
@@ -80,7 +80,7 @@
     "No, no storm cell is within range.",
     "No storm cell is close by.",
     "No, there is no thunderstorm around.",
-    "No, the flight path is clear of storm cells.",
+    "No, there is no storm cell within range.",
     "No, there are no storm cells nearby."
   ] },
   "cloud_q": { "kind": "vqa_q", "families": ["A"], "slots": [], "forms": [

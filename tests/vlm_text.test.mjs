@@ -48,8 +48,10 @@ import fs from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { recordTexts, visualSlots } from '../vlm/gen/text/items.js';
 import { makeGazetteer, BASE_NAMES, SENTENCE_WORDS, ROUTE_NAMES, verifyTemplateItem, verifyFreeText } from '../vlm/gen/text/verify.js';
-import { telemetryOf, contextSupplies } from '../vlm/gen/text/context.js';
-import { W, KIND_A } from '../vlm/gen/text/vqa.js';
+import { telemetryOf, contextSupplies, rowContext, REASON_TEXT, ACTION_TEXT } from '../vlm/gen/text/context.js';
+import { REASONS, ACTIONS, OUTCOMES, CAUSES, HAZARD_KINDS, ZOOM_TAGS, TAG_WORDS, PALETTE_NAMES, SAFETY_TEXT_IDS, validateTextFacts } from '../vlm/gen/schema.js';
+import { W, KIND_A, CAUSE_REASONS } from '../vlm/gen/text/vqa.js';
+import { parseClaims, prefOutcome, outcomeAgrees } from '../vlm/gen/text/verify.js';
 const V = (v, unit = null) => ({ v, unit, obs: 'visual' }), C = (v, unit = null) => ({ v, unit, obs: 'context' });
 const IMG = { 'image.palette_0': V('blue'), 'image.palette_1': V('white'), 'image.palette_2': V('grey'), 'image.brightness_bin': V('medium'), 'image.edge_bin': V('textured') };
 const SEV = { SAFE: 0, CAUTION: 1, UNSAFE: 3 };
@@ -90,7 +92,8 @@ const REC = [
   { key: 'Z_t_3', family: 'Z', facts: { 'view.range_km': V(250, 'km'), 'view.gsd_m': V(300, 'm'), 'sun.class': V('twilight'), 'place.country': V('Switzerland'), 'place.nearest': V({ name: 'Zermatt', km: 60, bearing: 190, compass: 'south' }),
     'place.in_view': V([{ name: 'Valais', kind: 'region', region: 'lower right' }]), 'geo.sea_frac': V(0), 'geo.coast_side': V(null), ...IMG }, zoom: { tags: ['HILLS', 'URBAN'], range_bin: 2 }, safety: null }];
 const GAZ = makeGazetteer([...BASE_NAMES, 'Switzerland', 'Valais', 'Zermatt', 'Matterhorn', 'Apia', 'Tokyo', 'Paris', 'Split', 'Point', 'Orange', 'Wind', 'Mobile']);
-const monOf = (r, verdict) => ({ verdict: verdict || r.safety.verdict, severity: SEV[verdict || r.safety.verdict], reasons: verdict ? ['HAZARD_AHEAD'] : [...r.safety.reasons], action: verdict ? 'CONTINUE' : r.safety.best_action, p_ref: null, ttc_bin: 'none', clr_bin: 'none' });
+const SA_ = (r) => r.family === 'S' || r.family === 'A';
+const monOf = (r, verdict) => ({ verdict: verdict || r.safety.verdict, severity: SEV[verdict || r.safety.verdict], reasons: verdict ? ['HAZARD_AHEAD'] : [...r.safety.reasons], action: verdict ? 'CONTINUE' : r.safety.best_action, p_ref: SA_(r) ? r.safety.p_ref : null, ttc_bin: 'none', clr_bin: 'none' });
 const ctxOf = (r, verdict) => ({ telemetry: telemetryOf(r.facts, r.family), monitor: r.safety ? monOf(r, verdict) : null });
 
 test('every form of every template a family or caption can use verifies on the synthetic records (parser recovers exactly the slots)', () => {
@@ -112,15 +115,15 @@ test('every form of every template a family or caption can use verifies on the s
 });
 test('recordTexts: nothing rejected, captions within bounds, one negative, VQA and negatives near 9:1, test split uses held-out forms only', () => {
   let vqa = 0, neg = 0;
-  for (const r of REC) for (const verdict of [null, 'X']) for (const split of ['train', 'test']) for (let s = 1; s <= 6; s++) {
-    const ctx = verdict && r.safety ? ctxOf(r, r.safety.verdict === 'SAFE' ? 'UNSAFE' : 'SAFE') : ctxOf(r), out = recordTexts(r, { bank, gaz: GAZ, rng: mulberry32(s), split, context: ctx });
+  for (const r of REC) for (const split of ['train', 'test']) for (let s = 1; s <= 8; s++) {
+    const ctx = ctxOf(r), out = recordTexts(r, { bank, gaz: GAZ, rng: mulberry32(s), split, context: ctx });
     assert.deepEqual(out.rejected.map((x) => `${x.item.template_id}: ${x.errors}`), [], r.key); assert.deepEqual(out.skipped.filter((x) => x.task !== 'safety'), [], r.key);
     const words = (t) => out.texts.find((x) => x.task === t).answer.split(/\s+/).length;
     assert.ok(words('caption_short') <= 20 && words('caption_detail') >= 40 && words('caption_detail') <= 90, r.key);
     assert.equal(out.texts.filter((t) => t.task === 'negative').length, 1); vqa += out.texts.filter((t) => t.task === 'vqa').length; neg += out.texts.filter((t) => t.task === 'negative').length;
     for (const t of out.texts) {
       assert.ok(t.verified && Array.isArray(t.fact_ids) && t.fact_ids.length && t.generator === 'template' && 'false_premise' in t, `${r.key} ${t.template_id}`);
-      if (split === 'test') String(t.paraphrase_id).split('+').forEach((p, i) => { const tid = t.template_id.split('+')[i]; if (bank[tid] && bank[tid].forms.some((_, j) => heldOut(tid, j))) assert.ok(heldOut(tid, +p), `${tid}#${p}`); });
+      if (split === 'test') String(t.paraphrase_id).split('+').forEach((p, i) => { const tid = t.template_id.split('+')[i]; if (bank[tid] && bank[tid].forms.some((_, j) => heldOut(tid, j))) assert.ok(heldOut(tid, p), `${tid}#${p}`); });
     }
   }
   assert.ok(neg / (vqa + neg) > 0.08 && neg / (vqa + neg) < 0.15, `negative share ${neg / (vqa + neg)}`);
@@ -130,7 +133,7 @@ test('§5.7: an item without needsContext states only visual facts; a needsConte
     const ctx = ctxOf(r), out = recordTexts(r, { bank, gaz: GAZ, rng: mulberry32(9), split: 'train', context: ctx });
     for (const t of out.texts) {
       if (!t.needsContext) assert.ok(verifyFreeText(t.answer, r, { gaz: GAZ, obsRule: true }).verified, `${r.key} ${t.template_id}: ${t.answer}`);
-      else if (t.context_facts.every((id) => contextSupplies(ctx, id))) assert.ok(verifyFreeText(t.answer, r, { gaz: GAZ, obsRule: true, context: ctx }).verified, `${r.key} ${t.answer}`);
+      else if (contextSupplies(t.context_facts, ctx)) assert.ok(verifyFreeText(t.answer, r, { gaz: GAZ, obsRule: true, context: ctx }).verified, `${r.key} ${t.answer}`);
       if (/\b(UNSAFE|SAFE|CAUTION)\b/.test(t.answer)) { assert.ok(t.needsContext && /monitor/i.test(t.answer), t.answer); assert.match(t.answer, new RegExp(ctx.monitor.verdict)); }
       if (t.task.startsWith('caption')) assert.equal(t.needsContext, false);
     }
@@ -165,6 +168,8 @@ test('bank rules: Z detail leads carry {range} and {terrain}; monitor answers na
   for (const [id, t] of T) if (t.kind === 'caption_detail' && t.families.includes('Z')) assert.ok(t.slots.includes('range') && t.slots.includes('terrain'), id);
   for (const [id, t] of T) if (t.slots.includes('clock')) for (const f of t.forms) assert.match(f, /image|frame|picture|screen|view/i, `${id}: the image clock is screen-relative: ${f}`);
   for (const [id, t] of T) if (/^(is_safe|why|what_to_do)(_\w+)?_a$/.test(id) || t.kind === 'safety') for (const f of t.forms) assert.match(f, /monitor/i, `${id}: ${f}`);
+  const CUE = /^(?:it|its|so|best action|advice|recommended|reason|the recommended action|the pilot should|the crew should|the spacecraft should)\b/i;
+  for (const [id, t] of T) for (const f of t.forms) { let seen = false; for (const x of f.split(/(?<=[.!?;])\s+/)) { const mon = /monitor/i.test(x); seen ||= mon; if (/\{(verdict|reason|action)\}|\{outcome\}/.test(x) && t.kind !== 'vqa_q' && !(mon || (seen && CUE.test(x))) && !(id === 'what_if_a')) assert.fail(`${id}: "${x}" states a monitor field without attributing it`); } }
   for (const fam of ['S', 'A', 'L', 'D', 'Z']) {
     assert.ok(T.filter(([, t]) => t.families.includes(fam) && t.kind.startsWith('caption_') && t.kind !== 'caption_part').length >= 2, fam);
     if (fam !== 'Z') assert.ok(T.some(([, t]) => t.kind === 'safety' && t.families.includes(fam)), fam);
@@ -173,4 +178,49 @@ test('bank rules: Z detail leads carry {range} and {terrain}; monitor answers na
   for (const r of REC) for (let k = 1; k <= 8; k++) for (const q of QFAMILIES) if (q.families.includes(r.family)) { const a = q.ask(r, mulberry32(k), { ...ctxOf(r), ...(r.safety ? { monitor: { ...monOf(r), ttc_bin: '1-3 s', clr_bin: '5-15 u' } } : {}) }); if (a) { fired.add(q.id); aids.add(a.aid); } }
   assert.deepEqual(QFAMILIES.map((q) => q.id).filter((id) => !fired.has(id)), [], 'every family fires on some record');
   assert.deepEqual(T.filter(([id, t]) => t.kind === 'vqa_a' && !aids.has(id)).map(([id]) => id), [], 'every answer template is produced');
+});
+test("§5.7 under a corrupted monitor: the prediction is the monitor's p_ref (S/A) or agrees with its verdict (L/D); a cause is one of its reasons", () => {
+  let n = 0;
+  for (const r of REC.filter((x) => x.safety)) for (const verdict of ['SAFE', 'CAUTION', 'UNSAFE']) for (const p_ref of SA_(r) ? [0, 0.5, 1] : [null]) for (const reasons of [[], ['HAZARD_AHEAD'], ['TERRAIN_CLOSE', 'CANNOT_STOP', 'KOS_VIOLATION']]) {
+    const m = { verdict, severity: SEV[verdict], reasons, action: verdict === 'SAFE' ? 'CONTINUE' : 'NONE_SAFE', p_ref, ttc_bin: 'none', clr_bin: 'none' }, ctx = { telemetry: telemetryOf(r.facts, r.family), monitor: m };
+    for (let s = 1; s <= 3; s++) {
+      const out = recordTexts(r, { bank, gaz: GAZ, rng: mulberry32(s), split: 'train', context: ctx });
+      assert.deepEqual(out.rejected.map((x) => `${x.item.template_id}: ${x.errors}`), [], `${r.key} ${verdict}`);
+      for (const t of out.texts) {
+        for (const c of parseClaims(t.answer, GAZ).filter((x) => x.type === 'outcome')) {
+          n++;
+          if (SA_(r)) { assert.equal(c.value, prefOutcome(p_ref), `${r.key} ${t.answer}`); assert.match(t.answer.split(/(?<=[.!?])\s+/).find((x) => x.includes(W.outcome[c.value])), /monitor/i); }
+          else assert.ok(outcomeAgrees(c.value, verdict), `${r.key} ${verdict}: ${t.answer}`);
+        }
+        if (t.family_q === 'most_dangerous') assert.ok(CAUSE_REASONS[r.safety.cause].some((x) => reasons.includes(x)), `${r.key}: ${t.answer}`);
+        if (rowContext(t, ctx, () => 0).keep && t.needsContext) assert.ok(verifyFreeText(t.answer, r, { gaz: GAZ, obsRule: true, context: ctx }).verified, `${r.key} ${verdict}: ${t.answer}`);
+      }
+    }
+  }
+  assert.ok(n > 50, `${n} outcome claims`);
+});
+test('the export rule is one function: contextSupplies(ids, context) and rowContext(item, context, rng)', () => {
+  const r = REC[4], ctx = ctxOf(r), line = `Context: telemetry: IAS 142.3 kt, GS dots -1.6 dots; monitor: CAUTION (severity 1), reasons: GLIDESLOPE_DEVIATION, action: CLIMB, TTC none, clearance none.`;
+  assert.ok(contextSupplies(['ias_kt', 'ils.gs_dots', ...SAFETY_TEXT_IDS], ctx) && contextSupplies(['ias_kt', 'safety.p_ref'], line) && contextSupplies(ctx, 'ias_kt'));
+  assert.ok(!contextSupplies(['vert_mode'], ctx) && !contextSupplies(['safety.verdict'], { telemetry: ctx.telemetry, monitor: null }) && !contextSupplies(['safety.unknown'], ctx) && !contextSupplies(['ias_kt'], null));
+  assert.deepEqual(rowContext({ needsContext: true, context_facts: ['vert_mode'] }, ctx, () => 0.9), { keep: false, withCtx: true });
+  assert.deepEqual(rowContext({ needsContext: false, context_facts: [] }, null, () => 0.9), { keep: true, withCtx: false });
+  assert.deepEqual(rowContext({ needsContext: false, context_facts: [] }, ctx, () => 0.1), { keep: true, withCtx: true });
+  const ids = new Set(); for (const x of REC) for (let s = 1; s <= 6; s++) for (const t of recordTexts(x, { bank, gaz: GAZ, rng: mulberry32(s), context: ctxOf(x) }).texts) t.fact_ids.filter((f) => f.startsWith('safety.')).forEach((f) => ids.add(f));
+  assert.deepEqual([...ids].filter((f) => !SAFETY_TEXT_IDS.includes(f)), []);
+});
+test('shared text constants: the text tables cover the schema enums, TEXT_FACTS validate, every template has a held-out form', () => {
+  const same = (a, b, what) => assert.deepEqual([...a].sort(), [...b].sort(), what);
+  same(Object.keys(REASON_TEXT), REASONS, 'REASON_TEXT'); same(Object.keys(ACTION_TEXT), ACTIONS, 'ACTION_TEXT'); same(Object.keys(W.outcome), [...new Set(Object.values(OUTCOMES).flat())], 'W.outcome');
+  same(Object.keys(W.cause), CAUSES, 'W.cause'); same(Object.keys(KIND_A), HAZARD_KINDS, 'KIND_A'); same(Object.keys(TAG_WORDS), ZOOM_TAGS, 'TAG_WORDS'); same(Object.keys(CAUSE_REASONS), CAUSES, 'CAUSE_REASONS');
+  assert.ok(PALETTE_NAMES.includes('teal') && PALETTE_NAMES.length === 12);
+  const z = { ...REC[8], zoom: { tags: ['MOUNTAINS'], range_bin: 1 } };
+  assert.deepEqual(validateTextFacts(z), { ok: true, errors: [] }); assert.deepEqual(validateTextFacts(REC[0]), { ok: true, errors: [] });
+  const bad = { ...z, facts: { ...z.facts, 'image.brightness_bin': V('dim'), 'geo.coast_side': V('north') } }; delete bad.facts['place.admin1'];
+  assert.deepEqual(validateTextFacts(bad).errors.length, 3);
+  for (const [id, t] of Object.entries(bank)) assert.ok(t.forms.some((_, i) => heldOut(id, i)), id);
+  const mod = { t: { ...bank.sky_a, forms: ['A new first form about {sky} skies.', ...bank.sky_a.forms.slice(1)] } }, f0 = pickForm(mod, 't', () => 0.99, 'train').paraphrase_id;
+  assert.equal(pickForm(bank, 'sky_a', () => 0.99, 'train').paraphrase_id, f0, 'a paraphrase id is the hash of its form, not its position');
+  const a = balanceAnswers(Array.from({ length: 40 }, (_, i) => ({ family_q: 'q', answerKey: i < 30 ? 'a' : 'b', i })), { maxShare: 0.5, rng: mulberry32(1) }), b = balanceAnswers(Array.from({ length: 40 }, (_, i) => ({ family_q: 'q', answerKey: i < 30 ? 'a' : 'b', i })), { maxShare: 0.5, rng: mulberry32(2) });
+  assert.equal(a.length, 20); assert.notDeepEqual(a.map((x) => x.i), b.map((x) => x.i));
 });

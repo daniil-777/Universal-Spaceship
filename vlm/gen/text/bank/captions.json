@@ -102,7 +102,7 @@
     "From {range}, the camera looks at {terrain}, {daylight}.",
     "Aerial view of {terrain} from {range}, {daylight}.",
     "{terrain} below, seen from {range}, {daylight}.",
-    "Imagery of {terrain} from {range}, {daylight}.",
+    "A view from {range} of {terrain}, {daylight}.",
     "{terrain} from {range} away, {daylight}.",
     "A look at {terrain} from {range}, {daylight}.",
     "The camera views {terrain} from {range}, {daylight}."

@@ -3,23 +3,23 @@
 // bank and verified; only verified items are kept (the rest go to the rejection log; `skipped` lists what the facts could
 // not support). Every item carries needsContext and context_facts: the context-class facts it cites (§5.7: its row must
 // carry the Context line, and export.js drops it when that Context does not supply them). VQA picks the families the
-// record's Context supplies first. The Z geo and image facts are the build's (zoomgeo.js, imagefacts.js): place.nearest
-// {name, km, bearing, compass}, place.country, place.admin1, place.in_view [{name, kind, region}], geo.sea_frac,
-// geo.coast_side (left/right/top/bottom), image.palette_0..2, image.brightness_bin (dark/medium/bright), image.edge_bin.
+// record's Context supplies first. The Z geo and image facts are the build's, as schema.js TEXT_FACTS defines them.
+// §5.7 target rule: visual claims come from the facts; context-class claims only as the Context line gives them (the
+// monitor's verdict, reasons, action and, for S/A, its p_ref as the prediction; an L/D outcome only when it agrees with the
+// monitor's verdict), and a visual fact that contradicts the monitor is said.
 import { pickForm, render, polish } from './paraphrase.js';
-import { verifyTemplateItem, factsOf, catSlot, entSlot, countSlot, clockSlot, regionSlot, compassSlot, fmtSlot, ROUTE_NAMES } from './verify.js';
-import { QFAMILIES, makeNegative, NEGATIVE_TYPES, exportable, stationSlot, W, KIND_A, KIND_N, reasonsText } from './vqa.js';
+import { verifyTemplateItem, factsOf, catSlot, entSlot, countSlot, clockSlot, regionSlot, compassSlot, fmtSlot, ROUTE_NAMES, W } from './verify.js';
+import { QFAMILIES, makeNegative, NEGATIVE_TYPES, exportable, stationSlot, predictionOf, KIND_A, KIND_N, reasonsText } from './vqa.js';
+import { PALETTE_NAMES, BRIGHTNESS_BINS, EDGE_BINS, COAST_SIDES, TAG_WORDS } from '../schema.js';
 import { ACTION_TEXT, normContext } from './context.js';
 
 const list = (xs) => (xs.length < 2 ? xs.join('') : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`);
 const pick = (xs, rng) => xs[Math.floor(rng() * xs.length)];
-const BRIGHT = { dark: 'dark', medium: 'of medium brightness', bright: 'bright' };
-const TAG_BASE = [['WATER_DOMINANT', 'mostly open water'], ['MOUNTAINS', 'mountains'], ['HILLS', 'hills'], ['FLAT', 'flat land']];
-const TAG_EXTRA = [['COASTLINE', 'a coastline'], ['MOUNTAINS', 'mountains'], ['HIGH_TERRAIN', 'high ground'], ['URBAN', 'built-up areas'], ['DESERT', 'desert'], ['ICE', 'ice']];
-// every zoom tag but NIGHT (the light slot carries it) in one phrase: "mountains with high ground and ice"
+// every zoom tag but NIGHT (the light slot carries it) in one phrase of schema.js TAG_WORDS: "mountains with high ground and ice"
+const TAG_BASE = ['WATER_DOMINANT', 'MOUNTAINS', 'HILLS', 'FLAT'], TAG_EXTRA = ['COASTLINE', 'MOUNTAINS', 'HIGH_TERRAIN', 'URBAN', 'DESERT', 'ICE'];
 export function terrainPhrase(tags) {
-  const t = new Set(tags || []), base = TAG_BASE.find(([k]) => t.has(k)), extra = TAG_EXTRA.filter(([k]) => t.has(k) && (!base || k !== base[0])).map(([, w]) => w);
-  return base ? (extra.length ? `${base[1]} with ${list(extra)}` : base[1]) : extra.length ? list(extra) : null;
+  const t = new Set(tags || []), base = TAG_BASE.find((k) => t.has(k)), extra = TAG_EXTRA.filter((k) => t.has(k) && k !== base).map((k) => TAG_WORDS[k][0]);
+  return base ? (extra.length ? `${TAG_WORDS[base][0]} with ${list(extra)}` : TAG_WORDS[base][0]) : extra.length ? list(extra) : null;
 }
 // the caption slots of a record, from obs:visual facts only
 export function visualSlots(rec) {
@@ -59,13 +59,12 @@ export function visualSlots(rec) {
     if (p && p.name && p.km > 0 && p.compass) { put('place', entSlot('place.nearest', p.name, ['field', 'name'])); put('place_km', { ...fmtSlot('place.nearest', { v: p.km, unit: 'km' }), derive: ['field', 'km'] }); put('compass', compassSlot('place.nearest', p.compass, ['field', 'compass'])); }
     const iv = v('place.in_view'), fi = Array.isArray(iv) ? iv.findIndex((x) => x.name && x.region && iv.filter((y) => y.name === x.name).length === 1) : -1;
     if (fi >= 0) { put('feature', entSlot('place.in_view', iv[fi].name, ['idx', fi, 'name'])); put('feature_region', regionSlot('place.in_view', iv[fi].region, ['idx', fi, 'region'])); }
-    if (W.daylight[sc]) put('daylight', catSlot('sun.class', sc, W.daylight[sc])); if (W.coast[cs]) put('coast_side', catSlot('geo.coast_side', cs, W.coast[cs]));
+    if (W.daylight[sc]) put('daylight', catSlot('sun.class', sc, W.daylight[sc])); if (COAST_SIDES.includes(cs)) put('coast_side', catSlot('geo.coast_side', cs, W.coast[cs]));
     if (sea !== null && sea >= 0.02 && sea <= 0.98) put('sea', fmtSlot('geo.sea_frac', F['geo.sea_frac'])); if (v('view.gsd_m') > 0) put('gsd', fmtSlot('view.gsd_m', F['view.gsd_m']));
   }
-  const c0 = v('image.palette_0'), c1 = v('image.palette_1'), br = v('image.brightness_bin'), ed = v('image.edge_bin');
-  const c2 = v('image.palette_2');
+  const pal = (k) => (PALETTE_NAMES.includes(v(`image.palette_${k}`)) ? v(`image.palette_${k}`) : null), c0 = pal(0), c1 = pal(1), c2 = pal(2), br = v('image.brightness_bin'), ed = v('image.edge_bin');
   if (c0 && c1 && c0 !== c1) { put('colour_a', catSlot('image.palette_0', c0, c0)); put('colour_b', catSlot('image.palette_1', c1, c1)); if (c2 && c2 !== c0 && c2 !== c1) put('colour_c', catSlot('image.palette_2', c2, c2)); }
-  if (BRIGHT[br] && ed) { put('brightness', catSlot('image.brightness_bin', br, BRIGHT[br])); put('texture', catSlot('image.edge_bin', ed, ed)); }
+  if (BRIGHTNESS_BINS.includes(br) && EDGE_BINS.includes(ed)) { put('brightness', catSlot('image.brightness_bin', br, W.bright[br])); put('texture', catSlot('image.edge_bin', ed, ed)); }
   return S;
 }
 const textOf = (slots) => Object.fromEntries(Object.entries(slots).map(([k, s]) => [k, typeof s === 'string' ? s : s.text]));
@@ -95,17 +94,17 @@ function contextFacts(ids, rec) { const F = factsOf(rec); return ids.filter((id)
 const contradicts = (rec, m) => ['S', 'A'].includes(rec.family) && m.reasons.some((r) => r === 'HAZARD_AHEAD' || r === 'HAZARD_CLOSING_FAST') && factsOf(rec)['hazards.count_in_frame'] && factsOf(rec)['hazards.count_in_frame'].v === 0;
 function contraSeg(bank, rng, split) { const s = countSlot('hazards.count_in_frame', 0, 'hazard'), f = pickForm(bank, 'contra', rng, split); return { text: polish(render(f.form, { none_seen: s.text })), slots: [s], pid: f.paraphrase_id }; }
 const PERC = { S: [['perc_hazard', ['a_kind', 'clock']], ['perc_count', ['hazards']]], A: [['perc_hazard', ['a_kind', 'clock']], ['perc_count', ['hazards']]], L: [['perc_gear', ['gear']]], D: [['perc_docking', ['dphase', 'station_dist']]] };
+// perception (visual) -> prediction (the monitor's for S/A; an agreeing outcome for L/D; else none) -> the monitor's verdict,
+// reasons and action -> the contradiction a visual fact makes, if any
 function safetyChain(rec, S, m, bank, rng, split) {
-  const o = rec.safety.action_outcome && rec.safety.action_outcome.CONTINUE, perc = (PERC[rec.family] || []).find(([, need]) => need.every((k) => S[k]));
-  if (!perc || !W.outcome[o]) return null;
+  const perc = (PERC[rec.family] || []).find(([, need]) => need.every((k) => S[k])); if (!perc) return null;
   const none = m.action === 'NONE_SAFE', chain = m.reasons.length ? (none ? 'safety_chain_nonesafe' : `safety_chain_${rec.family === 'S' || rec.family === 'A' ? 'sa' : rec.family.toLowerCase()}`) : none ? null : 'safety_chain_noreason';
   if (!chain || !bank[chain]) return null;
-  const pf = pickForm(bank, perc[0], rng, split), outcome = catSlot('safety.action_outcome', o, W.outcome[o], ['field', 'CONTINUE']), of = pickForm(bank, 'what_if_a', rng, split), cf = pickForm(bank, chain, rng, split);
-  const words_ = { perception: polish(render(pf.form, textOf(S))), prediction: polish(render(of.form, { outcome: outcome.text })), verdict: m.verdict, reason: reasonsText(m.reasons), action: ACTION_TEXT[m.action] };
-  const slots = [...perc[1].map((k) => S[k]), outcome], pids = [pf.paraphrase_id, of.paraphrase_id, cf.paraphrase_id];
-  let answer = polish(render(cf.form, words_));
-  const contra = contradicts(rec, m); if (contra) { const c = contraSeg(bank, rng, split); answer = `${answer} ${c.text}`; slots.push(...c.slots); pids.push(c.pid); }
-  return { answer, slots, template_id: `${perc[0]}+what_if_a+${chain}${contra ? '+contra' : ''}`, paraphrase_id: pids.join('+') };
+  const pf = pickForm(bank, perc[0], rng, split), segs = [polish(render(pf.form, textOf(S)))], slots = perc[1].map((k) => S[k]), pids = [pf.paraphrase_id], tids = [perc[0]], p = predictionOf(rec, m);
+  if (p && bank[p.pred]) { const of = pickForm(bank, p.pred, rng, split); segs.push(polish(render(of.form, { outcome: p.slot.text }))); slots.push(p.slot); pids.push(of.paraphrase_id); tids.push(p.pred); }
+  const cf = pickForm(bank, chain, rng, split); segs.push(polish(render(cf.form, { verdict: m.verdict, reason: reasonsText(m.reasons), action: ACTION_TEXT[m.action] }))); pids.push(cf.paraphrase_id); tids.push(chain);
+  if (contradicts(rec, m)) { const c = contraSeg(bank, rng, split); segs.push(c.text); slots.push(...c.slots); pids.push(c.pid); tids.push('contra'); }
+  return { answer: segs.join(' '), slots, template_id: tids.join('+'), paraphrase_id: pids.join('+') };
 }
 export function recordTexts(rec, { bank, gaz, rng, split = 'train', context = null }) {
   const texts = [], rejected = [], skipped = [], ctx = normContext(context), m = ctx && ctx.monitor, S = visualSlots(rec);
@@ -129,7 +128,7 @@ export function recordTexts(rec, { bank, gaz, rng, split = 'train', context = nu
   }
   if (rec.safety && m) {
     const c = safetyChain(rec, S, m, bank, rng, split);
-    if (c) keep({ task: 'safety', prompt: 'Is the situation safe? Explain.', ...c, ...base }, ['safety.verdict', 'safety.reasons', 'safety.best_action', 'safety.action_outcome']);
+    if (c) keep({ task: 'safety', prompt: 'Is the situation safe? Explain.', ...c, ...base }, ['safety.verdict', 'safety.reasons', 'safety.best_action']);
     else skipped.push({ task: 'safety', why: 'no perception or chain template fits' });
   }
   const cands = [];

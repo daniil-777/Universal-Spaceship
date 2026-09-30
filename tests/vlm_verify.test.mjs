@@ -47,6 +47,7 @@ test('negatives: absent hazard, wrong number and wrong place pass; a negative wh
 
 // ---- the verifier beyond the brief's cases ----
 import { runTeacher } from '../vlm/gen/text/teacher.js';
+import { corruptMonitor } from '../vlm/gen/text/context.js';
 const t2 = (text, g = gaz) => parseClaims(text, g).map((c) => [c.type, c.type === 'range' ? [c.lo, c.hi, c.unit] : c.value]);
 const drec = { family: 'D', facts: { station_distance_bin: F('2-20 m', null, 'visual'), rho_m: F(8.2, 'm'), jets_failed: F(['P6']), papi_whites_cam: F(null, 'count', 'visual') }, safety: { verdict: 'UNSAFE', reasons: ['KOS_VIOLATION'], best_action: 'NONE_SAFE', safe_actions: [] } };
 test('ranges: bins read as intervals; a monitor-attributed bin must equal the Context bin; string bin facts count', () => {
@@ -68,13 +69,13 @@ test('§5.7 obsRule: without Context only visual facts; a Context supplies its t
 test('parser: "no safe action" is an action, not SAFE; reason words count only beside a verdict, a cause or the monitor', () => {
   assert.deepEqual(t2('The monitor rates this UNSAFE because of a keep-out sphere violation and finds no safe action.'), [['verdict', 'UNSAFE'], ['reason', 'KOS_VIOLATION'], ['action', 'NONE_SAFE']]);
   assert.equal(verifyFreeText('The monitor rates this UNSAFE because of a keep-out sphere violation and finds no safe action.', drec, { gaz, context: { monitor: { verdict: 'UNSAFE', reasons: ['KOS_VIOLATION'], action: 'NONE_SAFE' } } }).verified, true);
-  assert.deepEqual(t2('A tailwind of about 5 kt and severe turbulence.'), [['number', 5]]);
+  assert.deepEqual(t2('A tailwind of about 5 kt and severe turbulence.'), [['category', 'tail'], ['number', 5], ['category', 'severe']], 'wind and turbulence facts, not reasons');
   assert.deepEqual(t2('It is unsafe because of a tailwind.').map((c) => c[0]), ['verdict', 'reason']);
 });
 test('parser: acronyms and bodies are terms, not places; a sentence-initial common word is not a place; your N o\'clock is the pilot bearing', () => {
   const g = makeGazetteer(['PAPI', 'Earth', 'Split', 'Orange', 'Zermatt']);
   assert.deepEqual(t2('The PAPI shows two white and two red lights; the Earth is in view.', g), [['count', 2], ['count', 2]]);
-  assert.deepEqual(t2('Split the wind into components. Orange and blue dominate. The view is near Split.', g), [['entity', 'Split']]);
+  assert.deepEqual(t2('Split the wind into components. Orange and blue dominate. The view is near Split.', g).filter((c) => c[0] !== 'category'), [['entity', 'Split']]);
   assert.deepEqual(t2('A comet at your 1 o\'clock; the rock sits at 2 o\'clock in the image.'), [['bearing_clock', 1], ['clock', 2]]);
   const brec = { ...rec, facts: { ...rec.facts, 'hazard.0.bearing_clock': F(1, 'clock') } };
   assert.equal(verifyFreeText('The rock is at your 1 o\'clock and in the upper right of the image.', brec, { gaz }).verified, true, 'box_px 730,130 lies in the upper right');
@@ -89,4 +90,29 @@ test('teacher: only visual facts are sent, output is verified as a Context-free 
   assert.equal(ok.length, 1); assert.equal(ok[0].generator.model, 'm'); assert.match(ok[0].generator.prompt_sha256, /^[0-9a-f]{64}$/);
   await runTeacher([rec], { send: async () => { throw new Error('401 for key sk-k'); }, model: 'm', priceIn: 3, priceOut: 15, yesSpend: true, env: { ANTHROPIC_API_KEY: 'sk-k' }, log: (s) => logs.push(s), gaz });
   assert.ok(!logs.join('\n').includes('sk-k') && logs.some((l) => l.includes('[redacted]')));
+});
+test("monitor attribution is per sentence; a monitor-attributed action must be the monitor's (GT safe_actions do not leak in)", () => {
+  const r = { family: 'S', facts: rec.facts, safety: { ...rec.safety, safe_actions: ['CLIMB', 'TURN_LEFT'] } }, mon = { monitor: { verdict: 'SAFE', reasons: [], action: 'CONTINUE' } };
+  assert.equal(verifyFreeText('The monitor rates this SAFE. The situation is UNSAFE.', r, { gaz, context: mon }).verified, true, 'second sentence is checked against the safety block');
+  assert.equal(verifyFreeText('The monitor rates this SAFE. The situation is SAFE.', r, { gaz, context: mon }).verified, false);
+  assert.equal(verifyFreeText('The monitor rates this SAFE. It advises the pilot to continue.', r, { gaz, context: mon }).verified, true, 'a continuation sentence stays the monitor\'s');
+  assert.equal(verifyFreeText('The monitor advises the pilot to turn left.', r, { gaz, context: mon }).verified, false, 'TURN_LEFT is a GT safe action, not the monitor\'s');
+  assert.equal(verifyFreeText('The monitor advises the pilot to continue.', r, { gaz, context: { monitor: { ...mon.monitor, action: 'CLIMB' } } }).verified, false, 'continue after an advice cue is an action claim');
+});
+test('outcomes, categories and R9 descriptors are claims; a number binds to the quantity noun of its clause', () => {
+  const s = { family: 'S', facts: { ...rec.facts, 'hazard.0.size_bin': F('medium', null, 'visual'), 'sun.lit': F(1, null, 'visual'), 'image.palette_0': F('blue', null, 'visual'), 'image.palette_1': F('white', null, 'visual') }, safety: rec.safety };
+  const ok = (t, r = s, o = {}) => verifyFreeText(t, r, { gaz, ...o }).verified;
+  assert.ok(ok('A medium-sized rock in direct sunlight; the image is mostly blue and white.') && !ok('A tiny rock.') && !ok('The rock is in shadow.') && !ok('The image is mostly red.'));
+  assert.ok(!ok('A badly damaged, burning rock.') && !ok('A stunning view of a rock.'));
+  const mon = (p_ref) => ({ monitor: { verdict: 'UNSAFE', reasons: ['HAZARD_AHEAD'], action: 'CLIMB', p_ref, ttc_bin: 'none', clr_bin: 'none' } });
+  assert.ok(ok('The monitor expects that, if nothing changes, a crash is certain.', s, { context: mon(1) }) && !ok('The monitor expects that, if nothing changes, a crash is certain.', s, { context: mon(0.5) }));
+  assert.ok(!ok('If nothing changes, the aircraft touches down and completes the landing.', s, { context: mon(1) }), 'an L outcome on an S record');
+  const l = { family: 'L', facts: { ias_kt: F(60, 'kt'), 'wind.head_kt': F(-11, 'kt'), 'wind.cross_kt': F(3, 'kt') }, safety: { verdict: 'UNSAFE', reasons: [], best_action: 'NONE_SAFE', action_outcome: { CONTINUE: 'overrun' } } };
+  assert.ok(ok('A tailwind of about 10 kt with about 3 kt of crosswind from the right.', l) && !ok('A tailwind of about 60 kt with about 3 kt of crosswind from the right.', l), 'about 60 kt is the IAS, not the tailwind');
+  assert.ok(!ok('If nothing changes, the aircraft overruns the end of the runway.', l, { context: { monitor: { verdict: 'SAFE', reasons: [], action: 'CONTINUE', p_ref: null } }, obsRule: true }), 'an outcome the monitor verdict contradicts');
+});
+test('corruptMonitor copies the donor tuple whole (p_ref included) and refuses a pool of another family', () => {
+  const m = { verdict: 'UNSAFE', severity: 3, reasons: ['HAZARD_AHEAD'], action: 'CLIMB', p_ref: 1, ttc_bin: '1-3 s', clr_bin: '<5 u' }, pool = [{ family: 'S', verdict: 'SAFE', severity: 0, reasons: [], action: 'CONTINUE', p_ref: 0, ttc_bin: 'none', clr_bin: 'none' }];
+  const c = corruptMonitor(m, { rng: () => 0.01, confusion: null, pool, family: 'S' }); assert.deepEqual([c.verdict, c.action, c.p_ref], ['SAFE', 'CONTINUE', 0]);
+  assert.throws(() => corruptMonitor(m, { rng: () => 0.01, confusion: null, pool, family: 'A' }), /pool entry of family S/);
 });

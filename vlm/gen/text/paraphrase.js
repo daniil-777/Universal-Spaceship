@@ -1,5 +1,6 @@
 // vlm/gen/text/paraphrase.js — the static paraphrase bank (spec §5.3): slot protection, 20 % held-out paraphrase ids for
-// the test split, rendering that refuses undefined, NaN and empty slots. checkBank also lints what the rules forbid
+// the test split (at least one per template; a paraphrase id is the hash of the form's text, so it survives edits to the
+// other forms), rendering that refuses undefined, NaN and empty slots. checkBank also lints what the rules forbid
 // outside slots: digits, proper nouns, claim words the verifier would read (numbers, counts, o'clock, regions, compass,
 // verdict/action/reason words in anything but a question) and "about" in front of a number slot (fmtSlot says it).
 import fs from 'node:fs';
@@ -23,7 +24,12 @@ const PROPER_OK = new Set(['I', 'Earth', 'Moon', 'Sun', 'PAPI', 'ILS']);
 const EMPTY_GAZ = makeGazetteer([]);
 export const slotsOf = (form) => [...new Set([...form.matchAll(/\{([a-z_]+)\}/g)].map((m) => m[1]))].sort();
 const fnv = (s) => { let h = 0x811c9dc5; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; } return h; };
-export const heldOut = (templateId, i) => fnv(`${templateId}#${i}`) % 5 === 0;
+export const formId = (form) => fnv(form).toString(16).padStart(8, '0');
+// held-out ids per template: forms whose id hashes to 0 mod 5, or the smallest id when none does
+const HELD = new Map(), heldOf = (forms) => { const ids = forms.map(formId), h = ids.filter((x) => parseInt(x, 16) % 5 === 0); return { ids, held: new Set(h.length ? h : [ids.reduce((a, b) => (a < b ? a : b))]) }; };
+const register = (id, forms) => { const r = HELD.get(id); if (!r || r.ids.length !== forms.length || r.ids.some((x, i) => x !== formId(forms[i]))) HELD.set(id, heldOf(forms)); return HELD.get(id); };
+// heldOut(templateId, paraphrase id or form index); a template the process has not loaded falls back to the id's own hash
+export const heldOut = (templateId, key) => { const r = HELD.get(templateId); if (!r) return (typeof key === 'number' ? fnv(`${templateId}#${key}`) : parseInt(key, 16)) % 5 === 0; return r.held.has(typeof key === 'number' ? r.ids[key] : key); };
 function lintForm(id, t, f) {
   const e = [], bare = f.replace(/\{[a-z_]+\}/g, 'Xslot');
   if (/\d/.test(f.replace(/\{[a-z_]+\}/g, ''))) e.push(`${id}: "${f}" has a digit outside a slot`);
@@ -34,7 +40,8 @@ function lintForm(id, t, f) {
     const c = w.replace(/^[^\p{L}]+|[^\p{L}'-]+$/gu, '').replace(/'s$/, '');
     if (i > 0 && /^\p{Lu}/u.test(c) && c !== 'Xslot' && !PROPER_OK.has(c) && !/^[\p{Lu}-]+$/u.test(c) && !/[.!?:;]["')]*$/.test(words[i - 1]) && !SENTENCE_SLOTS.has(slotBefore(f, i))) e.push(`${id}: "${f}" has the proper noun "${c}" outside a slot`);
   });
-  const claims = parseClaims(bare, EMPTY_GAZ).filter((c) => c.type !== 'unknown_entity' && !(QUESTION.has(t.kind) && ['verdict', 'action', 'reason'].includes(c.type)));
+  // category and outcome words are checked by meaning against the record, so a yes/no answer may spell them out
+  const claims = parseClaims(bare, EMPTY_GAZ).filter((c) => c.type !== 'unknown_entity' && c.type !== 'category' && c.type !== 'outcome' && !(QUESTION.has(t.kind) && ['verdict', 'action', 'reason'].includes(c.type)));
   for (const c of claims) e.push(`${id}: "${f}" states a ${c.type} (${JSON.stringify(c.value ?? [c.lo, c.hi])}) outside a slot`);
   return e;
 }
@@ -57,9 +64,13 @@ export function render(form, slots) {
 export const polish = (s) => s.replace(/\s+/g, ' ').replace(/\s+([,.;:!?])/g, '$1').trim().replace(/(^|[.!?]\s+)(\p{Ll})/gu, (m, a, b) => a + b.toUpperCase());
 // the test split (and OOD) draws only held-out paraphrase ids; train and val never do
 export function pickForm(bank, templateId, rng, split) {
-  const t = bank[templateId], test = split === 'test' || split === 'ood', ids = t.forms.map((_, i) => i).filter((i) => (test ? heldOut(templateId, i) : !heldOut(templateId, i))), pool = ids.length ? ids : t.forms.map((_, i) => i);
-  const i = pool[Math.floor(rng() * pool.length)]; return { form: t.forms[i], paraphrase_id: i };
+  const t = bank[templateId], r = register(templateId, t.forms), test = split === 'test' || split === 'ood', pool = t.forms.map((_, i) => i).filter((i) => r.held.has(r.ids[i]) === test);
+  const i = pool[Math.floor(rng() * pool.length)]; return { form: t.forms[i], paraphrase_id: r.ids[i] };
 }
-export function loadBank(dir) { const b = {}; for (const f of fs.readdirSync(dir).filter((n) => n.endsWith('.json')).sort()) Object.assign(b, JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'))); return b; }
+export function loadBank(dir) {
+  const b = {}; for (const f of fs.readdirSync(dir).filter((n) => n.endsWith('.json')).sort()) Object.assign(b, JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')));
+  for (const [id, t] of Object.entries(b)) register(id, t.forms);
+  return b;
+}
 let DEFAULT = null;
 export const defaultBank = () => DEFAULT || (DEFAULT = loadBank(fileURLToPath(new URL('./bank/', import.meta.url))));

@@ -119,7 +119,7 @@
     "How does this play out with no change?",
     "What is the outcome if the current plan continues?"
   ] },
-  "what_if_a": { "kind": "vqa_a", "families": ["S", "A", "L", "D"], "slots": ["outcome"], "forms": [
+  "what_if_a": { "kind": "vqa_a", "families": ["L", "D"], "slots": ["outcome"], "forms": [
     "If nothing changes, {outcome}.",
     "Left as it is, {outcome}.",
     "Without any change, {outcome}.",
@@ -203,67 +203,67 @@
     "The monitor estimates the clearance as {clr_bin}.",
     "The nearest obstacle is {clr_bin} away, according to the monitor."
   ] },
-  "safety_chain_sa": { "kind": "safety", "families": ["S", "A"], "slots": ["perception", "prediction", "verdict", "reason", "action"], "forms": [
-    "{perception} {prediction} The monitor rates this {verdict} because of {reason}. The pilot should {action}.",
-    "{perception} {prediction} Verdict from the monitor: {verdict}, due to {reason}. Best action: {action}.",
-    "{perception} {prediction} The monitor says {verdict} and cites {reason}, so the pilot should {action}.",
-    "{perception} {prediction} The monitor judges the situation {verdict} on account of {reason}; its advice is to {action}.",
-    "{perception} {prediction} According to the monitor this is {verdict}, driven by {reason}. It advises the pilot to {action}.",
-    "{perception} {prediction} The monitor flags {reason} and rates the situation {verdict}. The recommended action is to {action}.",
-    "{perception} {prediction} Monitor verdict: {verdict}. Reason: {reason}. Advice: {action}.",
-    "{perception} {prediction} The monitor calls this {verdict} because of {reason} and suggests the pilot {action}.",
-    "{perception} {prediction} With {reason} flagged, the monitor rates this {verdict}; the pilot should {action}.",
-    "{perception} {prediction} The rating of the monitor is {verdict}, citing {reason}. Its advice: {action}.",
-    "{perception} {prediction} The monitor sees {reason} and rates this {verdict}. Recommended: {action}.",
-    "{perception} {prediction} For the monitor this is {verdict}, owing to {reason}, and the pilot should {action}."
+  "safety_chain_sa": { "kind": "safety", "families": ["S", "A"], "slots": ["verdict", "reason", "action"], "forms": [
+    "The monitor rates this {verdict} because of {reason}. The pilot should {action}.",
+    "Verdict from the monitor: {verdict}, due to {reason}. Best action: {action}.",
+    "The monitor says {verdict} and cites {reason}, so the pilot should {action}.",
+    "The monitor judges the situation {verdict} on account of {reason}; its advice is to {action}.",
+    "According to the monitor this is {verdict}, driven by {reason}. It advises the pilot to {action}.",
+    "The monitor flags {reason} and rates the situation {verdict}. The recommended action is to {action}.",
+    "Monitor verdict: {verdict}. Reason: {reason}. Advice: {action}.",
+    "The monitor calls this {verdict} because of {reason} and suggests the pilot {action}.",
+    "With {reason} flagged, the monitor rates this {verdict}; the pilot should {action}.",
+    "The rating of the monitor is {verdict}, citing {reason}. Its advice: {action}.",
+    "The monitor sees {reason} and rates this {verdict}. Recommended: {action}.",
+    "For the monitor this is {verdict}, owing to {reason}, and the pilot should {action}."
   ] },
-  "safety_chain_l": { "kind": "safety", "families": ["L"], "slots": ["perception", "prediction", "verdict", "reason", "action"], "forms": [
-    "{perception} {prediction} The monitor rates this approach {verdict} because of {reason}. The pilot should {action}.",
-    "{perception} {prediction} Verdict from the monitor: {verdict}, due to {reason}. Best action: {action}.",
-    "{perception} {prediction} The monitor says {verdict} and cites {reason}, so the crew should {action}.",
-    "{perception} {prediction} The monitor judges the landing {verdict} on account of {reason}; its advice is to {action}.",
-    "{perception} {prediction} According to the monitor the approach is {verdict}, driven by {reason}. It advises the pilot to {action}.",
-    "{perception} {prediction} The monitor flags {reason} and rates the approach {verdict}. The recommended action is to {action}.",
-    "{perception} {prediction} Monitor verdict: {verdict}. Reason: {reason}. Advice: {action}.",
-    "{perception} {prediction} The monitor calls this landing {verdict} because of {reason} and suggests the pilot {action}.",
-    "{perception} {prediction} With {reason} flagged, the monitor rates the approach {verdict}; the pilot should {action}.",
-    "{perception} {prediction} For the monitor this approach is {verdict}, owing to {reason}, and the crew should {action}."
+  "safety_chain_l": { "kind": "safety", "families": ["L"], "slots": ["verdict", "reason", "action"], "forms": [
+    "The monitor rates this approach {verdict} because of {reason}. The pilot should {action}.",
+    "Verdict from the monitor: {verdict}, due to {reason}. Best action: {action}.",
+    "The monitor says {verdict} and cites {reason}, so the crew should {action}.",
+    "The monitor judges the landing {verdict} on account of {reason}; its advice is to {action}.",
+    "According to the monitor the approach is {verdict}, driven by {reason}. It advises the pilot to {action}.",
+    "The monitor flags {reason} and rates the approach {verdict}. The recommended action is to {action}.",
+    "Monitor verdict: {verdict}. Reason: {reason}. Advice: {action}.",
+    "The monitor calls this landing {verdict} because of {reason} and suggests the pilot {action}.",
+    "With {reason} flagged, the monitor rates the approach {verdict}; the pilot should {action}.",
+    "For the monitor this approach is {verdict}, owing to {reason}, and the crew should {action}."
   ] },
-  "safety_chain_d": { "kind": "safety", "families": ["D"], "slots": ["perception", "prediction", "verdict", "reason", "action"], "forms": [
-    "{perception} {prediction} The monitor rates this docking {verdict} because of {reason}. The crew should {action}.",
-    "{perception} {prediction} Verdict from the monitor: {verdict}, due to {reason}. Best action: {action}.",
-    "{perception} {prediction} The monitor says {verdict} and cites {reason}, so the spacecraft should {action}.",
-    "{perception} {prediction} The monitor judges the approach {verdict} on account of {reason}; its advice is to {action}.",
-    "{perception} {prediction} According to the monitor the docking is {verdict}, driven by {reason}. It advises the crew to {action}.",
-    "{perception} {prediction} The monitor flags {reason} and rates the docking {verdict}. The recommended action is to {action}.",
-    "{perception} {prediction} Monitor verdict: {verdict}. Reason: {reason}. Advice: {action}.",
-    "{perception} {prediction} The monitor calls this approach {verdict} because of {reason} and suggests the crew {action}.",
-    "{perception} {prediction} With {reason} flagged, the monitor rates the docking {verdict}; the crew should {action}.",
-    "{perception} {prediction} For the monitor this docking is {verdict}, owing to {reason}, and the spacecraft should {action}."
+  "safety_chain_d": { "kind": "safety", "families": ["D"], "slots": ["verdict", "reason", "action"], "forms": [
+    "The monitor rates this docking {verdict} because of {reason}. The crew should {action}.",
+    "Verdict from the monitor: {verdict}, due to {reason}. Best action: {action}.",
+    "The monitor says {verdict} and cites {reason}, so the spacecraft should {action}.",
+    "The monitor judges the approach {verdict} on account of {reason}; its advice is to {action}.",
+    "According to the monitor the docking is {verdict}, driven by {reason}. It advises the crew to {action}.",
+    "The monitor flags {reason} and rates the docking {verdict}. The recommended action is to {action}.",
+    "Monitor verdict: {verdict}. Reason: {reason}. Advice: {action}.",
+    "The monitor calls this approach {verdict} because of {reason} and suggests the crew {action}.",
+    "With {reason} flagged, the monitor rates the docking {verdict}; the crew should {action}.",
+    "For the monitor this docking is {verdict}, owing to {reason}, and the spacecraft should {action}."
   ] },
-  "safety_chain_noreason": { "kind": "safety", "families": ["S", "A", "L", "D"], "slots": ["perception", "prediction", "verdict", "action"], "forms": [
-    "{perception} {prediction} The monitor rates this {verdict} and cites no reason. The pilot should {action}.",
-    "{perception} {prediction} Verdict from the monitor: {verdict}, with no reason listed. Best action: {action}.",
-    "{perception} {prediction} The monitor says {verdict} without naming a cause, so the pilot should {action}.",
-    "{perception} {prediction} The monitor judges the situation {verdict}; its advice is to {action}.",
-    "{perception} {prediction} According to the monitor this is {verdict}, and nothing specific is flagged. It advises the pilot to {action}.",
-    "{perception} {prediction} The monitor flags nothing specific and rates the situation {verdict}. The recommended action is to {action}.",
-    "{perception} {prediction} Monitor verdict: {verdict}. No reason is given. Advice: {action}.",
-    "{perception} {prediction} The monitor calls this {verdict} and suggests the pilot {action}.",
-    "{perception} {prediction} With no cause flagged, the monitor rates this {verdict}; the pilot should {action}.",
-    "{perception} {prediction} For the monitor this is {verdict}, with no reason listed, and the pilot should {action}."
+  "safety_chain_noreason": { "kind": "safety", "families": ["S", "A", "L", "D"], "slots": ["verdict", "action"], "forms": [
+    "The monitor rates this {verdict} and cites no reason. The pilot should {action}.",
+    "Verdict from the monitor: {verdict}, with no reason listed. Best action: {action}.",
+    "The monitor says {verdict} without naming a cause, so the pilot should {action}.",
+    "The monitor judges the situation {verdict}; its advice is to {action}.",
+    "According to the monitor this is {verdict}, and nothing specific is flagged. It advises the pilot to {action}.",
+    "The monitor flags nothing specific and rates the situation {verdict}. The recommended action is to {action}.",
+    "Monitor verdict: {verdict}. No reason is given. Advice: {action}.",
+    "The monitor calls this {verdict} and suggests the pilot {action}.",
+    "With no cause flagged, the monitor rates this {verdict}; the pilot should {action}.",
+    "For the monitor this is {verdict}, with no reason listed, and the pilot should {action}."
   ] },
-  "safety_chain_nonesafe": { "kind": "safety", "families": ["S", "A", "L", "D"], "slots": ["perception", "prediction", "verdict", "reason", "action"], "forms": [
-    "{perception} {prediction} The monitor rates this {verdict} because of {reason}, and it finds {action}.",
-    "{perception} {prediction} Verdict from the monitor: {verdict}, due to {reason}. It reports {action}.",
-    "{perception} {prediction} The monitor says {verdict} and cites {reason}; it sees {action} for the pilot.",
-    "{perception} {prediction} The monitor judges the situation {verdict} on account of {reason}, with {action} available.",
-    "{perception} {prediction} According to the monitor this is {verdict}, driven by {reason}, and there is {action}.",
-    "{perception} {prediction} The monitor flags {reason} and rates the situation {verdict}. It finds {action}.",
-    "{perception} {prediction} Monitor verdict: {verdict}. Reason: {reason}. Actions: {action}.",
-    "{perception} {prediction} The monitor calls this {verdict} because of {reason} and reports {action}.",
-    "{perception} {prediction} With {reason} flagged, the monitor rates this {verdict}; it lists {action}.",
-    "{perception} {prediction} For the monitor this is {verdict}, owing to {reason}, and there is {action} left."
+  "safety_chain_nonesafe": { "kind": "safety", "families": ["S", "A", "L", "D"], "slots": ["verdict", "reason", "action"], "forms": [
+    "The monitor rates this {verdict} because of {reason}, and it finds {action}.",
+    "Verdict from the monitor: {verdict}, due to {reason}. It reports {action}.",
+    "The monitor says {verdict} and cites {reason}; it sees {action} for the pilot.",
+    "The monitor judges the situation {verdict} on account of {reason}, with {action} available.",
+    "According to the monitor this is {verdict}, driven by {reason}, and there is {action}.",
+    "The monitor flags {reason} and rates the situation {verdict}. It finds {action}.",
+    "Monitor verdict: {verdict}. Reason: {reason}. The monitor finds {action}.",
+    "The monitor calls this {verdict} because of {reason} and reports {action}.",
+    "With {reason} flagged, the monitor rates this {verdict}; it lists {action}.",
+    "For the monitor this is {verdict}, owing to {reason}, and there is {action} left."
   ] },
   "perc_hazard": { "kind": "safety_part", "families": ["S", "A"], "slots": ["a_kind", "clock"], "forms": [
     "I see {a_kind} at {clock} in the image.",
@@ -324,5 +324,29 @@
     "The picture, though, contains {none_seen}.",
     "Still, the frame holds {none_seen}.",
     "But in this view there are {none_seen}."
+  ] },
+  "pred_mon": { "kind": "safety_part", "families": ["S", "A"], "slots": ["outcome"], "forms": [
+    "The monitor expects that, if nothing changes, {outcome}.",
+    "According to the monitor, if nothing changes, {outcome}.",
+    "The monitor predicts that, left as it is, {outcome}.",
+    "If nothing changes, the monitor expects that {outcome}.",
+    "In the view of the monitor, on the current course, {outcome}.",
+    "The monitor judges that without any change {outcome}.",
+    "Going by the monitor, if the current path is held, {outcome}.",
+    "The monitor reckons that, unless something changes, {outcome}.",
+    "Per the monitor, with no intervention, {outcome}.",
+    "The monitor's prediction: if nothing changes, {outcome}."
+  ] },
+  "what_if_mon_a": { "kind": "vqa_a", "families": ["S", "A"], "slots": ["outcome"], "forms": [
+    "According to the monitor, if nothing changes, {outcome}.",
+    "The monitor expects that, left as it is, {outcome}.",
+    "The monitor predicts that, without any change, {outcome}.",
+    "If the current path is held, the monitor expects that {outcome}.",
+    "In the view of the monitor, should nothing change, {outcome}.",
+    "The monitor judges that with no intervention {outcome}.",
+    "Going by the monitor, on the current course, {outcome}.",
+    "The monitor reckons that, if no one intervenes, {outcome}.",
+    "Per the monitor, if things carry on unchanged, {outcome}.",
+    "The monitor's answer: unless something changes, {outcome}."
   ] }
 }

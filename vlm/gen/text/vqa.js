@@ -2,7 +2,9 @@
 // monitor-attributed is_safe, why, what_to_do, monitor_ttc and monitor_clearance read the row's Context monitor) and returns
 // the bank template ids, the prompt and answer slots, hidden fact checks (the polarity of a yes/no answer), the cited fact
 // ids and an answerKey for rejection sampling; null when its facts are missing or the answer would be ambiguous.
-import { fmtSlot, factsOf, catSlot, entSlot, countSlot, clockSlot, regionSlot, compassSlot, rangeSlot, rangeText, roundNice, verifyTemplateItem, parseClaims, checkClaim, ROUTE_NAMES, NOUNS, countPhrase, numText, unitText } from './verify.js';
+import { fmtSlot, factsOf, catSlot, entSlot, countSlot, clockSlot, regionSlot, compassSlot, rangeSlot, rangeText, roundNice, verifyTemplateItem, parseClaims, checkClaim, ROUTE_NAMES, NOUNS, countPhrase, numText, unitText, W, outcomeSlot, prefOutcome, outcomeAgrees } from './verify.js';
+import { mulberry32 } from '../../../src/mathx.js';
+export { W };
 import { REASON_TEXT, ACTION_TEXT, TTC_RANGE, CLR_RANGE_U, normContext } from './context.js';
 import { defaultBank, pickForm, render, polish } from './paraphrase.js';
 
@@ -10,26 +12,6 @@ const val = (F, id) => (F[id] && F[id].v !== null && F[id].v !== undefined ? F[i
 const list = (xs) => (xs.length < 2 ? xs.join('') : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`);
 export const KIND_A = Object.freeze({ rock: 'a rock', comet: 'a comet', satellite: 'a satellite', airliner: 'an airliner', birds: 'a flock of birds' });
 export const KIND_N = Object.freeze({ rock: 'rock', comet: 'comet', satellite: 'satellite', airliner: 'airliner', birds: 'flock of birds' });
-export const W = Object.freeze({
-  size: { tiny: 'tiny', small: 'small', medium: 'medium-sized', large: 'large' },
-  side: { left: 'on the left side of the image', centre: 'near the middle of the image', right: 'on the right side of the image' },
-  sky: { clear: 'clear', fair: 'fair', cloudy: 'cloudy', storm: 'stormy' }, turb: { LIGHT: 'light', MOD: 'moderate', SEVERE: 'severe' },
-  world: { mountains: 'a mountain range', pillars: 'a field of tall rock pillars', meshy: 'a range of steep pillar-shaped peaks', newyork: 'a city skyline', london: 'a city skyline', moscow: 'a city skyline', dubai: 'a city skyline', mega: 'a city skyline' },
-  band: { slow: 'below the normal speed band', normal: 'inside the normal speed band', overspeed: 'above the never-exceed speed' },
-  vert: { ALT: 'holding altitude before the glideslope', GS: 'descending on the glideslope', FLARE: 'in the flare just above the runway', ROLLOUT: 'rolling out on the runway', STOP: 'stopped on the runway', GA: 'climbing away in a go-around' },
-  phase: { TRANSFER: 'the transfer', 'H1 ACQ': 'the approach to the first hold', H1: 'the first hold', CORRIDOR: 'the corridor approach', H2: 'the second hold', FINAL: 'the final approach', BREAKOUT: 'a breakout', DEPART: 'the departure' },
-  clouds: { FEW: 'a few clouds', SCT: 'scattered clouds', BKN: 'broken cloud', OVC: 'an overcast layer', NSC: 'no significant cloud', SKC: 'no significant cloud', NONE: 'no significant cloud' },
-  time: { day: 'daylight', dusk: 'dusk light', night: 'darkness' }, vis: { cavok: 'clear visibility', haze: 'haze', fog: 'fog' },
-  papi: ['well below the glide path', 'slightly below the glide path', 'on the glide path', 'slightly above the glide path', 'well above the glide path'],
-  gate: { lateral: 'the lateral mode', vertical: 'the vertical mode', loc: 'the localizer', gs: 'the glideslope', speed: 'the speed', vs: 'the sink rate', gear: 'the gear' },
-  relief: { MOUNTAINS: 'mountainous', HILLS: 'hilly', FLAT: 'mostly flat' }, coast: { left: 'left', right: 'right', top: 'upper', bottom: 'lower' },
-  daylight: { day: 'in full daylight', golden: 'in low sunlight', twilight: 'in twilight', night: 'at night' },
-  outcome: { clear: 'the flight stays clear of everything', crash_possible: 'a crash is possible', crash_certain: 'a crash is certain', landed: 'the aircraft touches down and completes the landing',
-    go_around: 'the approach ends in a go-around', hard: 'the aircraft lands hard', excursion: 'the aircraft runs off the side of the runway', overrun: 'the aircraft overruns the end of the runway',
-    short: 'the aircraft touches down short of the runway', tailstrike: 'the tail strikes the runway', crash: 'the aircraft crashes', capture: 'the spacecraft docks with the station',
-    breakout: 'the approach ends in a breakout', fail: 'the docking fails' },
-  cause: { rock: 'the rock', comet: 'the comet', satellite: 'the satellite', airliner: 'the airliner', birds: 'the flock of birds', terrain: 'the terrain', building: 'a building', roof: 'a rooftop',
-    overstress: 'overloading the airframe', ground: 'the ground', runway: 'running off the runway', station: 'the station itself' } });
 export const reasonsText = (rs) => list(rs.map((r) => REASON_TEXT[r]));
 const BIN_U = [5, 15, 40], BIN_M = [95, 285, 760];
 const binOf = (x, edges) => edges.filter((e) => x >= e).length;
@@ -172,22 +154,35 @@ export const QFAMILIES = [
     return m.reasons.length ? Q('why_q', 'why_a', { reason: reasonSlot(m) }, ['safety.reasons'], m.reasons[0], { monitor: true }) : Q('why_q', 'why_none_a', { verdict: verdictSlot(m) }, ['safety.reasons', 'safety.verdict'], 'none', { monitor: true }); }),
   fam('what_to_do', 'safety', FLIGHT, (r, rng, ctx) => { const m = mon(ctx); if (!r.safety || !m) return null;
     return Q('what_to_do_q', m.action === 'NONE_SAFE' ? 'what_to_do_none_a' : 'what_to_do_a', { action: actionSlot(m) }, ['safety.best_action'], m.action, { monitor: true }); }),
-  fam('if_nothing_changes', 'safety', FLIGHT, (r, rng, ctx) => { const o = r.safety && r.safety.action_outcome && r.safety.action_outcome.CONTINUE; if (!o || !W.outcome[o] || !mon(ctx)) return null;
-    return Q('what_if_q', 'what_if_a', { outcome: catSlot('safety.action_outcome', o, W.outcome[o], ['field', 'CONTINUE']) }, ['safety.action_outcome'], o, { monitor: true }); }),
-  fam('most_dangerous', 'safety', FLIGHT, (r, rng, ctx) => { const c = r.safety && r.safety.cause; if (!c || !W.cause[c] || !mon(ctx)) return null;
+  // §5.7 target rule (controller ruling): S/A read the outcome off the monitor's p_ref and say it is the monitor's; L/D state
+  // the safety block's outcome only when it agrees with the monitor's verdict; a cause is named only when it is one of the
+  // monitor's reasons (and a hazard only when its kind is in the frame)
+  fam('if_nothing_changes', 'safety', FLIGHT, (r, rng, ctx) => { const p = predictionOf(r, mon(ctx)); return p ? Q('what_if_q', p.aid, { outcome: p.slot }, [p.slot.fact_id], p.slot.value, { monitor: true }) : null; }),
+  fam('most_dangerous', 'safety', FLIGHT, (r, rng, ctx) => { const c = r.safety && r.safety.cause, m = mon(ctx), k = val(factsOf(r), 'kinds_in_frame');
+    if (!c || !W.cause[c] || !m || !(CAUSE_REASONS[c] || []).some((x) => m.reasons.includes(x)) || (KIND_A[c] && !(Array.isArray(k) && k.includes(c)))) return null;
     return Q('danger_q', 'danger_a', { threat: catSlot('safety.cause', c, W.cause[c]) }, ['safety.cause'], c, { monitor: true }); }),
   fam('monitor_ttc', 'safety', SA, (r, rng, ctx) => { const m = mon(ctx), t = m && TTC_RANGE[m.ttc_bin]; return t ? Q('mttc_q', 'mttc_a', { ttc: monRange('safety.ttc_s', t, 's') }, ['safety.ttc_s'], m.ttc_bin, { monitor: true }) : null; }),
   fam('monitor_clearance', 'safety', SA, (r, rng, ctx) => { const m = mon(ctx), c = m && CLR_RANGE_U[m.clr_bin];
     return c ? Q('mclr_q', 'mclr_a', { clr_bin: monRange('safety.clearance', [c[0] * 19, c[1] * 19], 'm') }, ['safety.clearance'], m.clr_bin, { monitor: true }) : null; }),
 ];
+export const CAUSE_REASONS = Object.freeze({ rock: ['HAZARD_AHEAD', 'HAZARD_CLOSING_FAST'], comet: ['HAZARD_AHEAD', 'HAZARD_CLOSING_FAST'], satellite: ['HAZARD_AHEAD', 'HAZARD_CLOSING_FAST'],
+  airliner: ['HAZARD_AHEAD', 'HAZARD_CLOSING_FAST'], birds: ['HAZARD_AHEAD', 'HAZARD_CLOSING_FAST'], terrain: ['TERRAIN_CLOSE', 'PULL_UP'], building: ['BUILDING_CLOSE'], roof: ['BUILDING_CLOSE'], overstress: ['OVERSTRESS'],
+  ground: ['UNSTABLE_APPROACH', 'HIGH_SINK_RATE', 'GLIDESLOPE_DEVIATION'], runway: ['RUNWAY_EDGE', 'CANNOT_STOP'], station: ['KOS_VIOLATION', 'LATERAL_MISALIGNMENT', 'CLOSING_TOO_FAST', 'ATTITUDE_ERROR'] });
+// the prediction a row may state next to monitor m: {aid, slot} or null (S/A from p_ref, L/D the agreeing safety outcome)
+export function predictionOf(r, m) {
+  if (!r.safety || !m) return null;
+  if (r.family === 'S' || r.family === 'A') { const o = prefOutcome(m.p_ref); return o ? { aid: 'what_if_mon_a', pred: 'pred_mon', slot: outcomeSlot(o, 'monitor') } : null; }
+  const o = r.safety.action_outcome && r.safety.action_outcome.CONTINUE;
+  return o && W.outcome[o] && outcomeAgrees(o, m.verdict) ? { aid: 'what_if_a', pred: 'what_if_a', slot: outcomeSlot(o, 'gt') } : null;
+}
 export function stationSlot(F) {
   const b = val(F, 'station_distance_bin'), m = typeof b === 'string' ? /^(<|>)?(\d+)(?:-(\d+))? m$/.exec(b) : null; if (!m) return null;
   const [lo, hi] = m[1] === '<' ? [0, +m[2]] : m[1] === '>' ? [+m[2], Infinity] : [+m[2], +m[3]];
   return { ...rangeSlot('station_distance_bin', F.station_distance_bin, lo, hi, 'm'), value: b };
 }
 // rejection sampling per question family (spec §5.2): each answer keeps at most the count that holds its share at or under
-// maxShare, and a family with a single answer is dropped as degenerate
-export function balanceAnswers(items, { maxShare = 0.5 } = {}) {
+// maxShare (a seeded random subset of each answer), and a family with a single answer is dropped as degenerate
+export function balanceAnswers(items, { maxShare = 0.5, rng = mulberry32(1) } = {}) {
   const byQ = new Map(); for (const it of items) (byQ.get(it.family_q) || byQ.set(it.family_q, []).get(it.family_q)).push(it);
   const out = [];
   for (const group of byQ.values()) {
@@ -195,7 +190,7 @@ export function balanceAnswers(items, { maxShare = 0.5 } = {}) {
     if (byA.size < 2) continue;
     const n = [...byA.values()].map((l) => l.length), kept = (M) => n.reduce((a, x) => a + Math.min(x, M), 0);
     let M = Math.max(...n); while (M > 1 && M / kept(M) > maxShare + 1e-12) M--;
-    for (const l of byA.values()) out.push(...l.slice(0, M));
+    for (const l of byA.values()) { const x = [...l]; for (let i = x.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [x[i], x[j]] = [x[j], x[i]]; } out.push(...x.slice(0, M)); }
   }
   return out;
 }

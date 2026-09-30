@@ -2,14 +2,14 @@
   "neg_absent_q": { "kind": "negative_q", "families": ["S", "A"], "slots": ["kind", "side"], "forms": [
     "Is the {kind} on the {side}?",
     "Is the {kind} on the {side} of the frame?",
-    "The {kind} on the {side}: how far away is it?",
-    "What colour is the {kind} on the {side}?",
+    "Is the {kind} on the {side} far away?",
+    "Is the {kind} on the {side} a threat to the ship?",
     "Is the {kind} to the {side} of the ship getting closer?",
     "Does the {kind} on the {side} pose a threat?",
-    "How big is the {kind} on the {side} of the image?",
+    "Is the {kind} on the {side} of the image large?",
     "Should the pilot avoid the {kind} on the {side}?",
     "Is that {kind} on the {side} moving?",
-    "Can you describe the {kind} on the {side}?"
+    "Can you see the {kind} on the {side}?"
   ] },
   "neg_absent_a": { "kind": "negative_a", "families": ["S", "A"], "slots": ["kind_none", "hazards"], "forms": [
     "No, I see {kind_none} in the frame; it shows {hazards}.",
@@ -29,7 +29,7 @@
     "Can you confirm {count_stated} in the image?",
     "So we have {count_stated} in view?",
     "The image holds {count_stated}, yes?",
-    "With {count_stated} in the frame, which one is nearest?",
+    "Are {count_stated} really in the frame?",
     "Is it true that the picture shows {count_stated}?",
     "I see {count_stated} here; is that right?",
     "The view contains {count_stated}, does it not?",
@@ -50,13 +50,13 @@
   "neg_dist_q": { "kind": "negative_q", "families": ["S", "A"], "slots": ["dist_stated"], "forms": [
     "The nearest hazard is {dist_stated} away, right?",
     "Is the nearest hazard {dist_stated} from the ship?",
-    "With the nearest hazard {dist_stated} away, is there time to react?",
+    "Is the nearest hazard really {dist_stated} away?",
     "So the closest hazard lies {dist_stated} off?",
     "The gap to the nearest hazard is {dist_stated}, correct?",
     "Can you confirm the nearest hazard is {dist_stated} away?",
     "Is it true that the nearest hazard sits {dist_stated} from us?",
     "The ship is {dist_stated} from the nearest hazard, yes?",
-    "Given the nearest hazard at {dist_stated}, should the pilot worry?",
+    "Is the gap to the nearest hazard {dist_stated}?",
     "Is the closest hazard {dist_stated} out?"
   ] },
   "neg_dist_a": { "kind": "negative_a", "families": ["S", "A"], "slots": ["dist_true"], "forms": [
@@ -75,11 +75,11 @@
     "Is {what} {speed_stated}?",
     "{what} is {speed_stated}, right?",
     "Can you confirm that {what} is {speed_stated}?",
-    "With {what} at {speed_stated}, is that normal?",
+    "Does {what} read {speed_stated}?",
     "So {what} reads {speed_stated}?",
     "Is it true that {what} is {speed_stated}?",
     "{what} is {speed_stated}, correct?",
-    "Given {what} of {speed_stated}, what comes next?",
+    "Is {what} really {speed_stated}?",
     "Am I right that {what} is {speed_stated}?",
     "{what} stands at {speed_stated}, yes?"
   ] },
@@ -98,13 +98,13 @@
   "neg_papi_q": { "kind": "negative_q", "families": ["L"], "slots": ["papi_stated"], "forms": [
     "The PAPI shows {papi_stated} lights, right?",
     "Does the PAPI show {papi_stated} lights?",
-    "With {papi_stated} PAPI lights, is the aircraft on the glide path?",
+    "Is the PAPI showing {papi_stated} lights?",
     "I see {papi_stated} lights on the PAPI; is that correct?",
     "Can you confirm {papi_stated} PAPI lights?",
     "So the PAPI reads {papi_stated}?",
     "Is it true that the PAPI has {papi_stated} lights?",
     "The PAPI is showing {papi_stated} lights, correct?",
-    "Given {papi_stated} PAPI lights, what should the pilot do?",
+    "Are there {papi_stated} lights on the PAPI?",
     "The PAPI has {papi_stated} lights lit, yes?"
   ] },
   "neg_papi_a": { "kind": "negative_a", "families": ["L"], "slots": ["papi_white", "papi_red"], "forms": [
@@ -123,12 +123,12 @@
     "The station is {station_stated} away, right?",
     "We are {station_stated} from the station, right?",
     "Is the docking port {station_stated} off?",
-    "With the station {station_stated} away, is it time to slow down?",
+    "Is the station really {station_stated} away?",
     "Can you confirm the station is {station_stated} away?",
     "So the port lies {station_stated} from the spacecraft?",
     "The spacecraft is {station_stated} from the port, correct?",
     "Is it true that the station sits {station_stated} away?",
-    "Given the station at {station_stated}, how long until docking?",
+    "Is the docking port {station_stated} from the spacecraft?",
     "Is the station {station_stated} from us?"
   ] },
   "neg_station_a": { "kind": "negative_a", "families": ["D"], "slots": ["station_dist"], "forms": [
@@ -147,12 +147,12 @@
     "Was this view taken from {range_stated}?",
     "The camera is {range_stated} from the scene, right?",
     "Is the viewing range {range_stated}?",
-    "Seen from {range_stated}, which country is this?",
+    "Is this view seen from {range_stated}?",
     "Can you confirm this is a view from {range_stated}?",
     "So the camera sits {range_stated} away?",
     "Is it true that the viewpoint is {range_stated} out?",
     "This image comes from a range of {range_stated}, correct?",
-    "From {range_stated} up, what does the land look like?",
+    "Is the ground {range_stated} from the camera?",
     "Is the camera {range_stated} from the ground it looks at?"
   ] },
   "neg_range_a": { "kind": "negative_a", "families": ["Z"], "slots": ["range_true"], "forms": [
@@ -171,13 +171,13 @@
     "Is this {wrong}?",
     "This view shows {wrong}, right?",
     "Are we looking at {wrong}?",
-    "Which part of {wrong} is this?",
+    "Is this part of {wrong}?",
     "Is the camera over {wrong}?",
     "Can you confirm this is {wrong}?",
-    "How far from here is the middle of {wrong}?",
+    "Is the middle of {wrong} in this view?",
     "Is {wrong} in this image?",
     "So this area is {wrong}?",
-    "What does {wrong} look like from up here?"
+    "Does this image show {wrong} from above?"
   ] },
   "neg_place_a": { "kind": "negative_a", "families": ["Z"], "slots": ["place"], "forms": [
     "No. The view is near {place}.",
@@ -195,12 +195,12 @@
     "Is this the {wrong_route} route?",
     "The ship is flying the {wrong_route} route, right?",
     "Are we on the {wrong_route} route?",
-    "On the {wrong_route} route, what comes next?",
+    "Does this frame come from the {wrong_route} route?",
     "Can you confirm this is the {wrong_route} route?",
     "So this frame comes from the {wrong_route} route?",
     "Is it true that the ship follows the {wrong_route} route?",
     "This view belongs to the {wrong_route} route, correct?",
-    "How far along the {wrong_route} route is the ship?",
+    "Is the ship partway along the {wrong_route} route?",
     "Is the ship over the {wrong_route} route here?"
   ] },
   "neg_route_a": { "kind": "negative_a", "families": ["A"], "slots": ["route"], "forms": [

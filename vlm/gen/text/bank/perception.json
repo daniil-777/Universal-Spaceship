@@ -277,14 +277,14 @@
   ] },
   "sun_shadow_a": { "kind": "vqa_a", "families": ["S", "D"], "slots": [], "forms": [
     "It is in shadow.",
-    "The scene is in shadow, out of direct sunlight.",
-    "Direct sunlight does not reach the scene.",
-    "It is dark, in shadow.",
+    "The scene is in shadow.",
+    "The scene lies in shadow.",
+    "The scene here lies in shadow.",
     "The Sun is hidden; the scene is in shadow.",
     "The view is in shadow.",
-    "Shadow: the Sun does not light the scene.",
+    "Shadow: the Sun is hidden from the scene.",
     "It is in shadow, not sunlit.",
     "The frame lies in shadow.",
-    "Direct sunlight is blocked here; it is in shadow."
+    "Here the scene is in shadow."
   ] }
 }

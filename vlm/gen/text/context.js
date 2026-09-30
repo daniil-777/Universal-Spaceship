@@ -1,7 +1,8 @@
 // vlm/gen/text/context.js — the one Context line of spec §5.7 (telemetry exact, monitor = Pilot Eye's tuple), rendered by
 // build.mjs and at runtime by vlm/web/narrator.js, parsed back by the verifier; gt+noise corruption for rows without oof.
-// Browser-loadable (no imports). contextSupplies() is the §5.7 export rule: the telemetry supplies its own fact ids, and a
-// monitor tuple supplies every safety.* id (controller ruling: "What happens if nothing changes?" rows included).
+// Browser-loadable. contextSupplies() / rowContext() are THE §5.7 export rule (export.js imports them): the telemetry
+// supplies its own fact ids, and a monitor tuple supplies the safety.* ids text cites (SAFETY_TEXT_IDS).
+import { SAFETY_TEXT_IDS } from '../schema.js';
 export const REASON_TEXT = Object.freeze({ HAZARD_AHEAD: 'a hazard ahead', HAZARD_CLOSING_FAST: 'a hazard closing fast', TERRAIN_CLOSE: 'terrain close by', BUILDING_CLOSE: 'buildings close by',
   CORRIDOR_EDGE: 'the corridor edge', STALL: 'a stall', OVERSTRESS: 'overstress', SEVERE_TURBULENCE: 'severe turbulence', STORM_CELL: 'a storm cell', PULL_UP: 'ground proximity',
   UNSTABLE_APPROACH: 'an unstable approach', LOCALIZER_DEVIATION: 'a localizer deviation', GLIDESLOPE_DEVIATION: 'a glideslope deviation', SPEED_OUT_OF_BAND: 'speed outside the band',
@@ -50,17 +51,25 @@ export function normContext(ctx) {
   const c = typeof ctx === 'string' ? parseContext(ctx) : ctx;
   return { monitor: c.monitor || null, ids: new Set((c.telemetry || []).map((t) => (Array.isArray(t) ? t[2] : null)).filter(Boolean)) };
 }
-export function contextSupplies(ctx, factId) {
+// contextSupplies(factIds, context): every id is supplied (an id string works too; the older (context, factId) order is accepted)
+export function contextSupplies(a, b) {
+  const [ids, ctx] = typeof a === 'string' && !a.startsWith('Context:') ? [[a], b] : Array.isArray(a) ? [a, b] : [typeof b === 'string' ? [b] : b, a];
   const c = normContext(ctx);
-  return !!c && (c.ids.has(factId) || (!!c.monitor && factId.startsWith('safety.')));
+  return (ids || []).every((id) => !!c && (c.ids.has(id) || (!!c.monitor && SAFETY_TEXT_IDS.includes(id))));
 }
+// the Narrator row of one text item: kept only when its Context supplies every context-class fact it cites, and it carries
+// the Context line when it needs it, else with p = 0.5 (§5.7)
+export const rowContext = (item, context, rng) => ({ keep: !item.needsContext || contextSupplies(item.context_facts || [], context), withCtx: !!item.needsContext || rng() < 0.5 });
 const BINS = { ttc: ['<1 s', '1-3 s', '3-6 s', '>6 s'], clr: ['<5 u', '5-15 u', '15-40 u', '>40 u'] };
 const shift = (list, v, rng) => { const i = list.indexOf(v); if (i < 0 || rng() >= 0.2) return v; return list[Math.max(0, Math.min(list.length - 1, i + (rng() < 0.5 ? -1 : 1)))]; };
-export function corruptMonitor(m, { rng, confusion = null, pool }) {
+// the pool holds tuples of the record's own family: given `family` (the build passes it), every pool entry must carry the
+// same `family`, or corruptMonitor throws
+export function corruptMonitor(m, { rng, confusion = null, pool, family = null }) {
+  if (family) for (const p of pool) if (p.family !== family) throw new Error(`corruptMonitor: pool entry of family ${p.family} for a ${family} record`);
   const verdicts = ['SAFE', 'CAUTION', 'UNSAFE'], row = confusion ? confusion[m.verdict] : Object.fromEntries(verdicts.map((v) => [v, v === m.verdict ? 0.75 : 0.125]));
   let r = rng(), verdict = m.verdict; for (const v of verdicts) { r -= row[v]; if (r <= 0) { verdict = v; break; } }
   const same = pool.filter((p) => p.verdict === verdict), src = verdict === m.verdict || !same.length ? m : same[Math.floor(rng() * same.length)];
   // no same-family tuple with the drawn verdict: the tuple stays whole (a verdict without its severity, reasons and action is
   // not a monitor output), and only the bins shift
-  return { verdict: src.verdict, severity: src.severity, reasons: [...src.reasons], action: src.action, p_ref: m.p_ref, ttc_bin: shift(BINS.ttc, m.ttc_bin, rng), clr_bin: shift(BINS.clr, m.clr_bin, rng) };
+  return { verdict: src.verdict, severity: src.severity, reasons: [...src.reasons], action: src.action, p_ref: src.p_ref, ttc_bin: shift(BINS.ttc, m.ttc_bin, rng), clr_bin: shift(BINS.clr, m.clr_bin, rng) };
 }

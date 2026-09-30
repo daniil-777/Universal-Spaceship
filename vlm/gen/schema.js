@@ -32,6 +32,47 @@ export const NOMINAL_FRAME_DT = Object.freeze({ S: { steps: 3, s: 0.2 }, A: { st
 export const FRAME_DT_STEPS_RANGE = Object.freeze({ S: [2, 4], A: [2, 4], L: [22, 38], D: [19, 21] });
 export const STEP_S = Object.freeze({ S: 1 / 15, A: 1 / 15, L: 1 / 120, D: 0.1 });
 
+// ---- the text contract (controller ruling, T7 fix round 1): one definition for the text layer (T7), the build (T11: zoomgeo.js,
+// imagefacts.js, export.js) and the slot evaluation (T15). Image facts are computed from narrator_frame at build.
+export const PALETTE_NAMES = Object.freeze(['black', 'grey', 'white', 'red', 'orange', 'yellow', 'green', 'teal', 'blue', 'purple', 'pink', 'brown']);
+// mean luminance of narrator_frame in [0, 1]: dark < 0.25 <= medium < 0.6 <= bright
+export const BRIGHTNESS_BINS = Object.freeze(['dark', 'medium', 'bright']);
+export const BRIGHTNESS_EDGES = Object.freeze([0.25, 0.6]);
+export const EDGE_BINS = Object.freeze(['smooth', 'textured', 'highly textured']);
+export const COAST_SIDES = Object.freeze(['left', 'right', 'top', 'bottom']);
+// zoom tag -> the phrases text states it with; the first is the caption phrase, and slot evaluation credits any of them
+export const TAG_WORDS = Object.freeze({ WATER_DOMINANT: ['mostly open sea', 'open sea'], COASTLINE: ['a coastline', 'coastline'], MOUNTAINS: ['mountains', 'mountainous'],
+  HILLS: ['hills', 'hilly'], FLAT: ['flat land', 'mostly flat'], HIGH_TERRAIN: ['high ground'], URBAN: ['city areas', 'city'], DESERT: ['desert'], ICE: ['ice'], NIGHT: ['at night', 'night'] });
+// the build-time facts the text layer reads, all obs visual and required for their families. Shapes: place = {name, km,
+// bearing (deg from north), compass (one of the 8 compass words)} | null; features = [{name, kind, region (3x3 phrase)}];
+// frac = number in [0, 1]; palette / brightness / edge / coast = one of PALETTE_NAMES / BRIGHTNESS_BINS / EDGE_BINS / COAST_SIDES
+// (coast may be null); place.admin1 is the admin-1 name at the view centre (T11 writes it; text asks "which region is this")
+const ALL = FAMILIES;
+export const TEXT_FACTS = Object.freeze({ 'place.nearest': { families: ['Z'], shape: 'place' }, 'place.country': { families: ['Z'], shape: 'name' }, 'place.admin1': { families: ['Z'], shape: 'name' },
+  'place.in_view': { families: ['Z'], shape: 'features' }, 'geo.sea_frac': { families: ['Z'], shape: 'frac' }, 'geo.coast_side': { families: ['Z'], shape: 'coast' },
+  'image.palette_0': { families: ALL, shape: 'palette' }, 'image.palette_1': { families: ALL, shape: 'palette' }, 'image.palette_2': { families: ALL, shape: 'palette' },
+  'image.brightness_bin': { families: ALL, shape: 'brightness' }, 'image.edge_bin': { families: ALL, shape: 'edge' } });
+// safety.* ids text items cite; a Context line with a monitor supplies them (§5.7, controller ruling)
+export const SAFETY_TEXT_IDS = Object.freeze(['safety.verdict', 'safety.reasons', 'safety.best_action', 'safety.action_outcome', 'safety.cause', 'safety.p_ref', 'safety.ttc_s', 'safety.clearance']);
+const COMPASS8 = ['north', 'north-east', 'east', 'south-east', 'south', 'south-west', 'west', 'north-west'];
+const REGION9 = ['upper left', 'upper centre', 'upper right', 'middle left', 'centre', 'middle right', 'lower left', 'lower centre', 'lower right'];
+const SHAPE = { place: (v) => v === null || (v && typeof v.name === 'string' && v.km >= 0 && Number.isFinite(v.bearing) && COMPASS8.includes(v.compass)),
+  name: (v) => v === null || (typeof v === 'string' && v.length > 0), features: (v) => Array.isArray(v) && v.every((x) => x && typeof x.name === 'string' && typeof x.kind === 'string' && REGION9.includes(x.region)),
+  frac: (v) => typeof v === 'number' && v >= 0 && v <= 1, coast: (v) => v === null || COAST_SIDES.includes(v), palette: (v) => PALETTE_NAMES.includes(v),
+  brightness: (v) => BRIGHTNESS_BINS.includes(v), edge: (v) => EDGE_BINS.includes(v) };
+export function validateTextFacts(rec) {
+  const e = [], facts = (rec && rec.facts) || {};
+  for (const [id, spec] of Object.entries(TEXT_FACTS)) {
+    if (!spec.families.includes(rec.family)) continue;
+    const f = facts[id];
+    if (!f) { e.push(`${id} missing`); continue; }
+    if (f.obs !== 'visual') e.push(`${id} obs ${f.obs} (visual expected)`);
+    if (!SHAPE[spec.shape](f.v)) e.push(`${id} = ${JSON.stringify(f.v)} is not a ${spec.shape}`);
+  }
+  if (rec.family === 'Z' && !(rec.zoom && Array.isArray(rec.zoom.tags) && rec.zoom.tags.every((t) => ZOOM_TAGS.includes(t)))) e.push('zoom.tags missing or not ZOOM_TAGS');
+  return { ok: e.length === 0, errors: e };
+}
+
 export const fact = (v, unit, obs) => ({ v, unit, obs });
 export const recordKey = (family, run, episode, step) => `${family}_${run}_${String(episode).padStart(5, '0')}_${String(step).padStart(6, '0')}`;
 export const rangeBin = (km) => RANGE_EDGES_KM.filter((e) => km >= e).length;
