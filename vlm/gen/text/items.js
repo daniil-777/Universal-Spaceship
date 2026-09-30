@@ -42,6 +42,9 @@ export function visualSlots(rec) {
   if (W.world[world]) put('terrain', catSlot('world', world, W.world[world])); if (W.sky[sky]) put('sky', catSlot('weather.preset', sky, W.sky[sky]));
   if (v('in_tunnel') === true) put('tunnel', catSlot('in_tunnel', true, 'inside a tunnel')); if (cloud !== null && cloud >= 0.5) put('cloud', catSlot('air.in_cloud', true, 'inside cloud', ['gt', 0.25]));
   const gear = v('cfg.gear'), w = v('papi_whites_cam'), t = v('scene.time'), vis = v('scene.vis');
+  // T10-v: the camera closing in inside a cloud deck (L); the lead template swaps to cap_l_cloud when this is set,
+  // since it out-slots (and so out-ranks in richest()) the plain cap_l_lead
+  if (v('scene.in_cloud') === true) put('in_cloud', catSlot('scene.in_cloud', true, 'inside cloud'));
   if (gear) put('gear', catSlot('cfg.gear', gear, gear === 'down' ? 'down' : gear === 'up' ? 'up' : 'in transit'));
   if (w !== null) { put('papi_white', countSlot('papi_whites_cam', w, 'white')); put('papi_red', countSlot('papi_whites_cam', 4 - w, 'red', ['papi_red'])); put('papi_path', catSlot('papi_whites_cam', w, W.papi[w])); }
   if (v('windsock.from_deg') !== null) put('sock', fmtSlot('windsock.from_deg', F['windsock.from_deg']));

@@ -143,6 +143,18 @@
     "The landing at the spaceport is seen from just behind the aircraft. It takes place in {light} and with {visibility} over the airfield.",
     "Behind the aircraft, the chase camera captures the landing at the spaceport. The scene around the runway shows {light} with {visibility}."
   ] },
+  "cap_l_cloud": { "kind": "caption_detail", "families": ["L"], "slots": ["in_cloud", "light", "visibility"], "forms": [
+    "This chase-camera view follows the aircraft during its landing at the spaceport. The camera is {in_cloud}, in {light} with {visibility}, and the scene beyond it is hidden from view.",
+    "The camera sits just behind the aircraft during its landing at the spaceport. It is {in_cloud}, in {light} with {visibility}, and the view ahead is hidden.",
+    "Seen from behind, the aircraft is landing at the spaceport. The camera is {in_cloud}, in {light} with {visibility}, and the airfield below is hidden from sight.",
+    "The frame shows the landing aircraft from the chase camera behind it. The camera is {in_cloud}, in {light} with {visibility}, so the scene beyond stays hidden.",
+    "A chase view of the aircraft landing at the spaceport. The camera is {in_cloud}, flown in {light} with {visibility}, and the view around it is obscured.",
+    "From its position just behind the aircraft, the camera shows the landing at the spaceport. It is {in_cloud}, in {light} with {visibility}, and the scene is hidden from view.",
+    "The aircraft is landing at the spaceport, seen from the chase camera behind it. The camera is {in_cloud}, in {light} with {visibility}, and the runway ahead is hidden.",
+    "This frame follows the aircraft from behind during the landing at the spaceport. The camera is {in_cloud}, in {light} with {visibility}, and the view beyond is obscured.",
+    "The landing at the spaceport is seen from just behind the aircraft. The camera is {in_cloud}, in {light} with {visibility}, and the scene ahead stays hidden.",
+    "Behind the aircraft, the chase camera captures the landing at the spaceport. It is {in_cloud}, in {light} with {visibility}, and the view is obscured."
+  ] },
   "cap_d_lead": { "kind": "caption_detail", "families": ["D"], "slots": ["dphase", "station_dist"], "forms": [
     "This chase-camera view shows the spacecraft during {dphase}, {station_dist} from the station. The camera sits just behind the spacecraft and follows it.",
     "The camera follows the spacecraft from just behind it during {dphase}. The station is {station_dist} away from it at this moment.",

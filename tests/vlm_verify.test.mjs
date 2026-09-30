@@ -33,6 +33,17 @@ test('verifier catches wrong numbers, wrong places and unknown capitalised names
   assert.equal(verifyFreeText('The rock is at 9 o\'clock.', rec, { gaz }).verified, false);
   assert.equal(verifyFreeText('Zermatt is to the south.', zrec, { gaz }).verified, false);
 });
+// T10-v adversarial: the fog/cloud visibility gate (landing.js) nulls papi_whites_cam and windsock.from_deg once the
+// chase camera is inside cloud; the verifier must reject a claim about either on such a record, while still accepting
+// the in-cloud claim itself and a claim about the aircraft's own visual facts (cfg.gear stays visible, close in)
+const F2 = (v, unit, obs) => ({ v, unit, obs });
+const lrec = { family: 'L', facts: { papi_whites_cam: F2(null, 'count', 'visual'), 'windsock.from_deg': F2(null, 'deg', 'visual'), 'scene.in_cloud': F2(true, null, 'visual'), 'cfg.gear': F2('down', null, 'visual') }, safety: null };
+test('T10-v: an in-cloud L record rejects a PAPI or windsock claim (their facts are null) and accepts the in-cloud claim', () => {
+  assert.equal(verifyFreeText('The PAPI shows two white and two red lights, placing the aircraft on the glide path.', lrec, { gaz }).verified, false);
+  assert.equal(verifyFreeText('A windsock by the runway indicates wind from about 250 degrees.', lrec, { gaz }).verified, false);
+  assert.equal(verifyFreeText('The camera is inside cloud.', lrec, { gaz }).verified, true);
+  assert.equal(verifyFreeText('The landing gear is down.', lrec, { gaz }).verified, true, "cfg.gear stays a real visual fact close to the chase camera");
+});
 test('template text is checked twice: slot intervals contain the facts, and the parser recovers exactly the slot set', () => {
   const slot = fmtSlot('hazard.0.dist_u', rec.facts['hazard.0.dist_u']);
   const item = { task: 'vqa', prompt: 'How far is the nearest rock?', answer: `The nearest rock is ${slot.text} away.`, slots: [slot], fact_ids: ['hazard.0.dist_u'] };

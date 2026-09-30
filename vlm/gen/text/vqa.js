@@ -81,8 +81,15 @@ export const QFAMILIES = [
     if (!storms.length) return Q('storm_q', 'storm_no_a', {}, ['weather.cells'], 'no', { checks: [yes('weather.cells', 0, ['count_type', 1])] });
     const d = Math.min(...storms.map((c) => c.dist_u)), s = { ...fmtSlot('weather.cells', { v: d, unit: 'u' }, { system: sys(rng) }), derive: ['min_dist_type', 1] };
     return Q('storm_q', 'storm_yes_a', { cell_dist: s }, ['weather.cells'], 'yes'); }),
-  fam('in_cloud', 'weather', ['A'], (r) => { const v = val(factsOf(r), 'air.in_cloud'); if (v === null || (v > 0.02 && v < 0.5)) return null;
-    return Q('cloud_q', v >= 0.5 ? 'cloud_yes_a' : 'cloud_no_a', {}, ['air.in_cloud'], v >= 0.5 ? 'yes' : 'no', { checks: [yes('air.in_cloud', v >= 0.5, ['gt', 0.25])] }); }),
+  // T10-v: extended to L via scene.in_cloud (a plain boolean — no fuzzy middle band, unlike A's 0-1 density); the
+  // aircraft/spaceport wording lives in its own cloud_l_* templates so it never says "the ship"
+  fam('in_cloud', 'weather', ['A', 'L'], (r) => {
+    const F = factsOf(r);
+    if (r.family === 'L') { const v = val(F, 'scene.in_cloud'); if (typeof v !== 'boolean') return null;
+      return Q('cloud_l_q', v ? 'cloud_l_yes_a' : 'cloud_l_no_a', {}, ['scene.in_cloud'], v ? 'yes' : 'no', { checks: [yes('scene.in_cloud', v)] }); }
+    const v = val(F, 'air.in_cloud'); if (v === null || (v > 0.02 && v < 0.5)) return null;
+    return Q('cloud_q', v >= 0.5 ? 'cloud_yes_a' : 'cloud_no_a', {}, ['air.in_cloud'], v >= 0.5 ? 'yes' : 'no', { checks: [yes('air.in_cloud', v >= 0.5, ['gt', 0.25])] });
+  }),
   // air data (A)
   fam('stall_margin_bin', 'air', ['A'], (r) => { const F = factsOf(r), m = val(F, 'air.stall_margin_deg'); if (m === null || m < 0) return null; const { b, s } = binSlot('air.stall_margin_deg', F['air.stall_margin_deg'], m, [2, 5, 10], 'deg');
     return Q('stall_q', 'stall_a', { stall_margin: s }, ['air.stall_margin_deg'], b); }),

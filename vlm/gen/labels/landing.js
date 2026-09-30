@@ -32,6 +32,18 @@ export function pixelBox(cam, [lo, hi], W, H) {
 export const CAPTURE_W = 896, CAPTURE_H = 504, MIN_SIDE_PX = 2;
 export const boxVisible = (cam, box, W, H) => { const b = pixelBox(cam, box, W, H); return !!b && Math.max((b[2] - b[0]) * CAPTURE_W / W, (b[3] - b[1]) * CAPTURE_H / H) >= MIN_SIDE_PX; };
 const sameBits = (a, b) => a.every((v, i) => Object.is(v, b[i]));
+// T10-v: fog transmittance gate. The page's fog is exponential-squared (lights.js:49, closed in by the cloud deck per
+// scene.js:93): transmittance(rho, d) = exp(-(rho*d)^2). A camera-visual fact of an object is non-null only when its box
+// is in frame (boxVisible) and this transmittance, at the distance from the camera eye to the object's nearest point,
+// is >= T_VIS; T_VIS is the same 10% cutoff for the PAPI, the windsock and the aircraft itself (d there is the chase
+// camera's distance to the aircraft, since the page has no separate box for it).
+export const T_VIS = 0.1;
+export const transmittance = (rho, d) => Math.exp(-((rho * d) ** 2));
+const dist3 = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+const clamp1 = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+// the nearest point of an axis-aligned box [lo, hi] to a point p, for the fog-distance measurement
+const distToBox = (p, [lo, hi]) => dist3(p, [0, 1, 2].map((i) => clamp1(p[i], lo[i], hi[i])));
+const visibleThroughFog = (cam, box, W, H, eye, rho) => boxVisible(cam, box, W, H) && transmittance(rho, distToBox(eye, box)) >= T_VIS;
 
 export function landingNow(sim) {
   const f = sim.flight, A = f.air, st = sim.gnc.st, d = st.dev || {}, P = sim.gnc.params, ft = A.hRA / FT, wc = sim.wind.components(10);
@@ -43,7 +55,7 @@ export function landingNow(sim) {
     stopNeedM: f.wow && A.gs > 5 ? A.gs * A.gs / (2 * 2.5) : 0, runwayLeftM: RWY.length - f.p[0], retard: !!st.retard };
 }
 
-export function landingFacts(sim, cam, { W = 896, H = 504, scene = {} } = {}) {
+export function landingFacts(sim, cam, { W = 896, H = 504, scene = {}, fogDensity = 0 } = {}) {
   const F = {}, put = (id, v, unit, obs) => { F[id] = fact(v, unit, obs); }, f = sim.flight, A = f.air, st = sim.gnc.st, d = st.dev || {}, w = sim.rep.cond.wind, wc = sim.wind.components(10);
   put('mode', st.mode, null, 'context'); put('lat_mode', st.lat, null, 'context'); put('vert_mode', st.vert, null, 'context');
   put('pos.x_m', r2(f.p[0]), 'm', 'context'); put('pos.z_m', r2(f.p[2]), 'm', 'context'); put('alt_ft', r2(f.p[1] / FT), 'ft', 'context'); put('ra_ft', r2(Math.max(0, A.hRA / FT)), 'ft', 'context');
@@ -52,14 +64,18 @@ export function landingFacts(sim, cam, { W = 896, H = 504, scene = {} } = {}) {
   put('att.pitch_deg', r2(A.theta / DEG), 'deg', 'context'); put('att.bank_deg', r2(A.phi / DEG), 'deg', 'context'); put('att.heading_deg', Math.round(((A.psi / DEG) + RWY.heading + 360) % 360), 'deg', 'context');
   put('att.alpha_deg', r2(A.alpha / DEG), 'deg', 'context'); put('att.beta_deg', r2(A.beta / DEG), 'deg', 'context'); put('att.fpa_deg', r2(A.gamma / DEG), 'deg', 'context');
   put('ils.loc_dots', d.locValid ? r2(d.loc) : null, 'dots', 'context'); put('ils.gs_dots', d.gsValid ? r2(d.gs) : null, 'dots', 'context');
-  put('papi_whites_cam', boxVisible(cam, PAPI_BOX, W, H) ? papiWhites(cameraPosition(cam)) : null, 'count', 'visual');
-  put('windsock.from_deg', boxVisible(cam, SOCK_BOX, W, H) ? w.dir : null, 'deg', 'visual');
-  put('cfg.gear', f.gear > 0.99 ? 'down' : f.gear > 0.01 ? 'transit' : 'up', null, 'visual'); put('cfg.spoilers', r2(f.spoil), null, 'visual');
+  const eye = cameraPosition(cam), papiVis = visibleThroughFog(cam, PAPI_BOX, W, H, eye, fogDensity), sockVis = visibleThroughFog(cam, SOCK_BOX, W, H, eye, fogDensity);
+  put('papi_whites_cam', papiVis ? papiWhites(eye) : null, 'count', 'visual');
+  put('windsock.from_deg', sockVis ? w.dir : null, 'deg', 'visual');
+  // the aircraft's own visual facts: no separate box on the page, so the gate is transmittance alone at the chase
+  // camera's distance to the aircraft (it is always framed by the chase view)
+  const acVis = transmittance(fogDensity, dist3(eye, f.p)) >= T_VIS;
+  put('cfg.gear', acVis ? (f.gear > 0.99 ? 'down' : f.gear > 0.01 ? 'transit' : 'up') : null, null, 'visual'); put('cfg.spoilers', acVis ? r2(f.spoil) : null, null, 'visual');
   put('thrust', r2(f.spool), null, 'context'); put('wow', f.wow, null, 'context');
   put('wind.metar', `${String(w.dir).padStart(3, '0')}${String(w.kt).padStart(2, '0')}${w.gust ? 'G' + w.gust : ''}KT`, null, 'context');
   put('wind.head_kt', r2(wc.head), 'kt', 'context'); put('wind.cross_kt', r2(wc.cross), 'kt', 'context'); put('wind.turb', w.turb, null, 'context');
   put('gates', { ...st.gates }, null, 'context');
-  for (const k of ['time', 'vis', 'clouds', 'rain']) put(`scene.${k}`, scene[k] ?? null, null, 'visual');
+  for (const k of ['time', 'vis', 'clouds', 'rain', 'in_cloud']) put(`scene.${k}`, scene[k] ?? null, null, 'visual');
   return F;
 }
 

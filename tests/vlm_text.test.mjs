@@ -74,9 +74,9 @@ const REC = [
     'weather.preset': V('clear'), 'world': V('newyork'), 'route': V('newyork'), 'in_tunnel': V(true), ...IMG }, safety: saf('SAFE', [], 'CONTINUE', 'clear') },
   { key: 'L_t_1', family: 'L', facts: { vert_mode: C('GS'), ias_kt: C(142.3, 'kt'), 'ils.loc_dots': C(0.3, 'dots'), 'ils.gs_dots': C(-1.6, 'dots'), papi_whites_cam: V(1, 'count'), 'windsock.from_deg': V(250, 'deg'), 'cfg.gear': V('down'),
     'cfg.spoilers': V(0), 'wind.head_kt': C(12.4, 'kt'), 'wind.cross_kt': C(-6.1, 'kt'), gates: C({ lateral: true, vertical: true, loc: true, gs: false, speed: true, vs: true, gear: true }), wow: C(false),
-    'scene.time': V('day'), 'scene.vis': V('cavok'), 'scene.clouds': V('SCT030'), 'scene.rain': V(true), ...IMG }, safety: saf('CAUTION', ['GLIDESLOPE_DEVIATION'], 'CLIMB', 'landed') },
+    'scene.time': V('day'), 'scene.vis': V('cavok'), 'scene.clouds': V('SCT030'), 'scene.rain': V(true), 'scene.in_cloud': V(false), ...IMG }, safety: saf('CAUTION', ['GLIDESLOPE_DEVIATION'], 'CLIMB', 'landed') },
   { key: 'L_t_2', family: 'L', facts: { vert_mode: C('ROLLOUT'), ias_kt: C(60, 'kt'), 'ils.loc_dots': C(null, 'dots'), 'ils.gs_dots': C(null, 'dots'), papi_whites_cam: V(null, 'count'), 'windsock.from_deg': V(null, 'deg'), 'cfg.gear': V('down'),
-    'cfg.spoilers': V(0.9), 'wind.head_kt': C(-11, 'kt'), 'wind.cross_kt': C(3, 'kt'), wow: C(true), 'scene.time': V('night'), 'scene.vis': V('fog'), 'scene.clouds': V('OVC003'), ...IMG }, safety: saf('UNSAFE', ['CANNOT_STOP'], 'NONE_SAFE', 'overrun', 'runway') },
+    'cfg.spoilers': V(0.9), 'wind.head_kt': C(-11, 'kt'), 'wind.cross_kt': C(3, 'kt'), wow: C(true), 'scene.time': V('night'), 'scene.vis': V('fog'), 'scene.clouds': V('OVC003'), 'scene.in_cloud': V(false), ...IMG }, safety: saf('UNSAFE', ['CANNOT_STOP'], 'NONE_SAFE', 'overrun', 'runway') },
   { key: 'D_t_1', family: 'D', facts: { phase: V('FINAL'), station_distance_bin: V('2-20 m'), rho_m: C(8.2, 'm'), closing_cms: C(12.1, 'cm/s'), corridor_limit_cms: C(8, 'cm/s'), speed_limit_cms: C(30, 'cm/s'), in_cone: C(true),
     att_err_deg: C(0.6, 'deg'), jets_failed: C(['P6']), fuel_frac: C(0.62), breakout_available: C(true), 'sun.lit': V(1), earth_in_frame: V(false), ...IMG }, safety: saf('CAUTION', ['CLOSING_TOO_FAST'], 'SLOW_DOWN', 'capture') },
   { key: 'D_t_2', family: 'D', facts: { phase: V('H1'), station_distance_bin: V('100-400 m'), rho_m: C(212, 'm'), closing_cms: C(-0.5, 'cm/s'), corridor_limit_cms: C(null, 'cm/s'), speed_limit_cms: C(74.6, 'cm/s'), in_cone: C(false),
@@ -87,12 +87,17 @@ const REC = [
   { key: 'Z_t_2', family: 'Z', facts: { 'view.range_km': V(1200, 'km'), 'view.gsd_m': V(1250, 'm'), 'sun.class': V('night'), 'place.country': V(null), 'place.nearest': V({ name: 'Apia', km: 2480, bearing: 275, compass: 'west' }),
     'place.in_view': V([]), 'geo.sea_frac': V(1), 'geo.coast_side': V(null), ...IMG }, zoom: { tags: ['WATER_DOMINANT', 'NIGHT'], range_bin: 3 }, safety: null },
   { key: 'L_t_3', family: 'L', facts: { vert_mode: C('GS'), ias_kt: C(150, 'kt'), 'ils.loc_dots': C(-1.8, 'dots'), 'ils.gs_dots': C(0.4, 'dots'), papi_whites_cam: V(2, 'count'), 'cfg.gear': V('up'), 'cfg.spoilers': V(0),
-    'wind.head_kt': C(5, 'kt'), 'wind.cross_kt': C(9, 'kt'), gates: C({ lateral: true, vertical: true, loc: true, gs: true, speed: true, vs: true, gear: true }), wow: C(false), 'scene.time': V('dusk'), 'scene.vis': V('haze'), ...IMG },
+    'wind.head_kt': C(5, 'kt'), 'wind.cross_kt': C(9, 'kt'), gates: C({ lateral: true, vertical: true, loc: true, gs: true, speed: true, vs: true, gear: true }), wow: C(false), 'scene.time': V('dusk'), 'scene.vis': V('haze'), 'scene.in_cloud': V(false), ...IMG },
     safety: saf('UNSAFE', ['LOCALIZER_DEVIATION', 'UNSTABLE_APPROACH'], 'GO_AROUND', 'go_around') },
   { key: 'D_t_3', family: 'D', facts: { phase: V('CORRIDOR'), station_distance_bin: V('20-100 m'), rho_m: C(55, 'm'), closing_cms: C(3.2, 'cm/s'), corridor_limit_cms: C(8, 'cm/s'), speed_limit_cms: C(20, 'cm/s'), in_cone: C(false),
     att_err_deg: C(1.1, 'deg'), jets_failed: C([]), fuel_frac: C(0.9), breakout_available: C(true), ...IMG }, safety: saf('CAUTION', ['LATERAL_MISALIGNMENT'], 'HOLD_POSITION', 'breakout') },
   { key: 'Z_t_3', family: 'Z', facts: { 'view.range_km': V(250, 'km'), 'view.gsd_m': V(300, 'm'), 'sun.class': V('twilight'), 'place.country': V('Switzerland'), 'place.nearest': V({ name: 'Zermatt', km: 60, bearing: 190, compass: 'south' }),
-    'place.in_view': V([{ name: 'Valais', kind: 'region', region: 'lower right' }]), 'geo.sea_frac': V(0), 'geo.coast_side': V(null), ...IMG }, zoom: { tags: ['HILLS', 'URBAN'], range_bin: 2 }, safety: null }];
+    'place.in_view': V([{ name: 'Valais', kind: 'region', region: 'lower right' }]), 'geo.sea_frac': V(0), 'geo.coast_side': V(null), ...IMG }, zoom: { tags: ['HILLS', 'URBAN'], range_bin: 2 }, safety: null },
+  // T10-v: an in-cloud L record — the fog/cloud visibility gate nulls papi_whites_cam and windsock.from_deg (far from
+  // the chase camera), while cfg.gear stays visible (close to it); scene.in_cloud true picks the cap_l_cloud lead
+  { key: 'L_t_4', family: 'L', facts: { vert_mode: C('GS'), ias_kt: C(138, 'kt'), 'ils.loc_dots': C(0.2, 'dots'), 'ils.gs_dots': C(-0.4, 'dots'), papi_whites_cam: V(null, 'count'), 'windsock.from_deg': V(null, 'deg'), 'cfg.gear': V('down'),
+    'cfg.spoilers': V(0), 'wind.head_kt': C(8, 'kt'), 'wind.cross_kt': C(-4, 'kt'), gates: C({ lateral: true, vertical: true, loc: true, gs: true, speed: true, vs: true, gear: true }), wow: C(false),
+    'scene.time': V('night'), 'scene.vis': V('fog'), 'scene.clouds': V('OVC003'), 'scene.rain': V(true), 'scene.in_cloud': V(true), ...IMG }, safety: saf('CAUTION', ['GLIDESLOPE_DEVIATION'], 'CLIMB', 'landed') }];
 const GAZ = makeGazetteer([...BASE_NAMES, 'Switzerland', 'Valais', 'Zermatt', 'Matterhorn', 'Apia', 'Tokyo', 'Paris', 'Split', 'Point', 'Orange', 'Wind', 'Mobile']);
 const SA_ = (r) => r.family === 'S' || r.family === 'A';
 const monOf = (r, verdict) => ({ verdict: verdict || r.safety.verdict, severity: SEV[verdict || r.safety.verdict], reasons: verdict ? ['HAZARD_AHEAD'] : [...r.safety.reasons], action: verdict ? 'CONTINUE' : r.safety.best_action, p_ref: SA_(r) ? r.safety.p_ref : null, ttc_bin: 'none', clr_bin: 'none' });
@@ -278,5 +283,25 @@ test('round 3: bank wording — jet counts agree, the nearest-hazard answers say
   assert.ok(bank.nearest_clock_a.forms.includes('The nearest hazard in view sits at {clock} in the image.'));
   for (const id of ['nearest_kind_a', 'nearest_side_a', 'nearest_clock_a']) {
     assert.ok(!bank[id].forms.some((f) => /^The (?:nearest|closest) hazard (?:is|sits)/.test(f)), id);
+  }
+});
+
+// T10-v: an in-cloud L record — the papi/sock caption parts and VQA never fire (their facts are null), the detail
+// caption uses cap_l_cloud (richer than cap_l_lead, so richest() always picks it once scene.in_cloud is true), and the
+// in_cloud VQA family answers yes for L too
+test('T10-v: an in-cloud L record states no PAPI or windsock text and its detail caption carries the in-cloud lead', () => {
+  const l4 = REC.find((r) => r.key === 'L_t_4'), ctx = ctxOf(l4);
+  const S = visualSlots(l4);
+  assert.equal(S.papi_white, undefined); assert.equal(S.papi_red, undefined); assert.equal(S.papi_path, undefined); assert.equal(S.sock, undefined);
+  assert.ok(S.in_cloud, 'the in_cloud slot is set');
+  for (let s = 1; s <= 8; s++) {
+    const out = recordTexts(l4, { bank, gaz: GAZ, rng: mulberry32(s), split: 'train', context: ctx });
+    assert.deepEqual(out.rejected.map((x) => `${x.item.template_id}: ${x.errors}`), []);
+    const detail = out.texts.find((t) => t.task === 'caption_detail');
+    assert.match(detail.template_id, /^cap_l_cloud\+/, `seed ${s}: ${detail.template_id}`);
+    assert.match(detail.answer, /inside cloud/); assert.match(detail.answer, /hidden|obscured/);
+    assert.ok(!out.texts.some((t) => /papi|windsock/i.test(t.answer)), `seed ${s}: a text mentions the PAPI or the windsock while in cloud`);
+    const cloudVqa = out.texts.find((t) => t.family_q === 'in_cloud');
+    if (cloudVqa) { assert.equal(cloudVqa.answerKey, 'yes'); assert.match(cloudVqa.answer, /cloud/i); assert.match(cloudVqa.template_id, /^cloud_l_/); }
   }
 });

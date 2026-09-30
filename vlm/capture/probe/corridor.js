@@ -77,9 +77,12 @@ function spaceOf(ap, cam) {
   ap.scene.traverse((m) => { if (!moon && m.isMesh && m.name === 'moon' && m.visible) { m.geometry.computeBoundingSphere(); const c = m.geometry.boundingSphere.center.clone().applyMatrix4(m.matrixWorld); moon = projectSphere(cam, [c.x, c.y, c.z], m.geometry.boundingSphere.radius * m.matrixWorld.getMaxScaleOnAxis(), 896, 504).inFrame; } });
   return { sunLit: s.sunLit, body: o.body, lat: o.lat, lon: o.lon, moonInFrame: moon, earthInFrame: null };
 }
+// A's own scene fog (src/app.js:267,307): a THREE.Fog set for the whole atmospheric flight, near/far by terrain; S never
+// has one (space). T10-v gates hazard visibility on it, at the density (here: near/far) the page actually rendered with.
+const sceneFog = (ap) => { const f = ap.scene && ap.scene.fog; return f ? { near: f.near, far: f.far } : null; };
 export function label(st, { cNear }) {
   const ap = st.ap, cam = camOf(ap.camera), t0 = rt(), { safety, safety_eye } = corridorLabel(st.env, { cNear, pilot: st.family === 'S' ? ppoPilot(ap.agent) : null }), t1 = rt();
-  const facts = corridorFacts(st.env, cam, { sky: st.p.sky ?? null, route: st.p.route ?? null, space: spaceOf(ap, cam) });
+  const facts = corridorFacts(st.env, cam, { sky: st.p.sky ?? null, route: st.p.route ?? null, space: spaceOf(ap, cam), fog: sceneFog(ap) });
   return { facts, safety, safety_eye, cam, ms: { rollout: t1 - t0, facts: rt() - t1 } };
 }
 export function restore(st) { delete st.env.step; delete st.env.reset; return true; }

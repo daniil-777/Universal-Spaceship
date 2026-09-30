@@ -8,7 +8,6 @@
 // the kick and take the injection clip right after it.
 import { landingFacts, landingNow, landingBranches, stepOf, applyLandingKick } from '../../gen/labels/landing.js';
 import { createLandingSim } from '../../../src/landing/sim.js';
-import { fact } from '../../gen/schema.js';
 const FT = 0.3048, r2 = (x) => +x.toFixed(2);
 const camOf = (c) => ({ mode: 'chase', fov_deg: c.fov, aspect: c.aspect, near: c.near, far: c.far, matrixWorldInverse: Array.from(c.matrixWorldInverse.elements), projectionMatrix: Array.from(c.projectionMatrix.elements) });
 export const landingTrig = (sim, trig) => !sim.flight.wow && sim.flight.air.hRA / FT <= trig.value;
@@ -17,7 +16,10 @@ export const landingTrig = (sim, trig) => !sim.flight.wow && sim.flight.air.hRA 
 // 1 about 12 m in; scene.js:93). The camera is in cloud when k >= 0.5, i.e. between the deck's base and top.
 export const IN_CLOUD_FOG = 0.012;
 export const inCloudOf = (density, fogD) => fogD !== null && fogD < IN_CLOUD_FOG && (density - fogD) / (IN_CLOUD_FOG - fogD) >= 0.5;
-const inCloud = (st) => { const f = st.L.scene.scene && st.L.scene.scene.fog; return !!f && inCloudOf(f.density, st.fogD); };
+// the live fog density the page is rendering with this frame (scene.js:93 closes it in inside a cloud deck); 0 when the
+// scene carries no fog object at all
+const liveFogDensity = (st) => { const f = st.L.scene.scene && st.L.scene.scene.fog; return f ? f.density : 0; };
+const inCloud = (st) => inCloudOf(liveFogDensity(st), st.fogD);
 // the injection record (provenance.injection): step = steps run when the kick lands, as replayLanding counts them
 export function armLanding(sim, inj, onFire) {
   const step0 = sim.step; let fired = false;
@@ -57,9 +59,12 @@ export function capture(st) {
 }
 export function snap(st) {
   // scene.clouds is the page's METAR cloud group (conditions(): "-RA " + FEW|SCT|BKN|OVC with the base, or NSC), the form the
-  // text layer's TEXT_FACTS 'clouds' shape reads; scene.in_cloud (visual, T10-b) says the f2 camera is inside the deck
-  const sim = st.sim, f = sim.flight, cam = camOf(st.L.scene.camera), sc = { time: st.p.time, vis: st.p.vis, clouds: st.cond.clouds ?? null, rain: st.p.rain };
-  const facts = { ...landingFacts(sim, cam, { scene: sc }), 'scene.in_cloud': fact(inCloud(st), null, 'visual') };
+  // text layer's TEXT_FACTS 'clouds' shape reads; scene.in_cloud (visual, T10-b) says the f2 camera is inside the deck.
+  // landingFacts gets the live fog density too (T10-v), so papi_whites_cam, windsock.from_deg and the aircraft's own
+  // visual facts (cfg.gear, cfg.spoilers) are nulled once the fog or the in-cloud closing-in hides them.
+  const sim = st.sim, f = sim.flight, cam = camOf(st.L.scene.camera);
+  const sc = { time: st.p.time, vis: st.p.vis, clouds: st.cond.clouds ?? null, rain: st.p.rain, in_cloud: inCloud(st) };
+  const facts = landingFacts(sim, cam, { scene: sc, fogDensity: liveFogDensity(st) });
   const s = { step: stepOf(sim), now: landingNow(sim), facts, airborne: !f.wow, retard: !!sim.gnc.st.retard, p: Array.from(f.p), v: Array.from(f.v) };
   st.snaps.push(s); return s.step;
 }

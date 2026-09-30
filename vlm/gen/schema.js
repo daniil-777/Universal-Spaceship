@@ -54,7 +54,7 @@ export const TEXT_FACTS = Object.freeze({ 'place.nearest': { families: ['Z'], sh
   'place.in_view': { families: ['Z'], shape: 'features' }, 'geo.sea_frac': { families: ['Z'], shape: 'frac' }, 'geo.coast_side': { families: ['Z'], shape: 'coast' },
   'image.palette_0': { families: ALL, shape: 'palette' }, 'image.palette_1': { families: ALL, shape: 'palette' }, 'image.palette_2': { families: ALL, shape: 'palette' },
   'image.brightness_bin': { families: ALL, shape: 'brightness' }, 'image.edge_bin': { families: ALL, shape: 'edge' },
-  'scene.clouds': { families: ['L'], shape: 'clouds' } });
+  'scene.clouds': { families: ['L'], shape: 'clouds' }, 'scene.in_cloud': { families: ['L'], shape: 'bool' } });
 // safety.* ids text items cite; a Context line with a monitor supplies them (§5.7, controller ruling)
 export const SAFETY_TEXT_IDS = Object.freeze(['safety.verdict', 'safety.reasons', 'safety.best_action', 'safety.action_outcome', 'safety.cause', 'safety.p_ref', 'safety.ttc_s', 'safety.clearance']);
 const COMPASS8 = ['north', 'north-east', 'east', 'south-east', 'south', 'south-west', 'west', 'north-west'];
@@ -63,7 +63,8 @@ const SHAPE = { place: (v) => v === null || (v && typeof v.name === 'string' && 
   name: (v) => v === null || (typeof v === 'string' && v.length > 0), features: (v) => Array.isArray(v) && v.every((x) => x && typeof x.name === 'string' && typeof x.kind === 'string' && REGION9.includes(x.region)),
   frac: (v) => typeof v === 'number' && v >= 0 && v <= 1, coast: (v) => v === null || COAST_SIDES.includes(v), palette: (v) => PALETTE_NAMES.includes(v),
   brightness: (v) => BRIGHTNESS_BINS.includes(v), edge: (v) => EDGE_BINS.includes(v),
-  clouds: (v) => v === null || (typeof v === 'string' && /^(?:-RA )?(?:NSC|SKC|(?:FEW|SCT|BKN|OVC)\d{3})$/.test(v)) };
+  clouds: (v) => v === null || (typeof v === 'string' && /^(?:-RA )?(?:NSC|SKC|(?:FEW|SCT|BKN|OVC)\d{3})$/.test(v)),
+  bool: (v) => typeof v === 'boolean' };
 export function validateTextFacts(rec) {
   const e = [], facts = (rec && rec.facts) || {};
   for (const [id, spec] of Object.entries(TEXT_FACTS)) {

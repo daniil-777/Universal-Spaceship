@@ -118,5 +118,41 @@
     "No, this frame is not taken from inside cloud.",
     "No, the ship is not in cloud.",
     "No: the ship flies in clear air."
+  ] },
+  "cloud_l_q": { "kind": "vqa_q", "families": ["L"], "slots": [], "forms": [
+    "Is the aircraft inside a cloud?",
+    "Is the aircraft flying through cloud?",
+    "Is the view obscured by cloud around the aircraft?",
+    "Are we in cloud?",
+    "Is the aircraft flying in cloud rather than clear air?",
+    "Is there cloud all around the aircraft?",
+    "Is the aircraft in the clouds right now?",
+    "Is this frame taken from inside cloud?",
+    "Is the aircraft enveloped in cloud?",
+    "Is the aircraft in cloud at this moment?"
+  ] },
+  "cloud_l_yes_a": { "kind": "vqa_a", "families": ["L"], "slots": [], "forms": [
+    "Yes, the aircraft is inside cloud.",
+    "Yes, it is flying through cloud.",
+    "Yes. Cloud surrounds the aircraft.",
+    "Yes, we are in cloud.",
+    "In cloud, yes.",
+    "Yes, there is cloud all around.",
+    "Yes, the aircraft is in the clouds.",
+    "Yes, this is from inside cloud.",
+    "Yes, the aircraft is enveloped in cloud.",
+    "Yes: the aircraft is flying in cloud."
+  ] },
+  "cloud_l_no_a": { "kind": "vqa_a", "families": ["L"], "slots": [], "forms": [
+    "No, the aircraft is in clear air.",
+    "No, it is not flying through cloud.",
+    "No. There is no cloud around the aircraft.",
+    "No, we are clear of cloud.",
+    "Clear air, not cloud.",
+    "No, the air around the aircraft is clear.",
+    "No, the aircraft is out of the clouds.",
+    "No, this frame is not taken from inside cloud.",
+    "No, the aircraft is not in cloud.",
+    "No: the aircraft flies in clear air."
   ] }
 }

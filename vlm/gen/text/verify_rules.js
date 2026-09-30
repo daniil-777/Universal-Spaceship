@@ -138,7 +138,9 @@ const CAT = { size: (F, v) => idsWhere(F, (id, x) => /^hazard\.\d+\.size_bin$/.t
   sky: (F, v) => is('weather.preset', v)(F), skyclear: (F) => [...is('weather.preset', 'clear')(F), ...cloudIs(['NSC', 'SKC', 'NONE'])(F)],
   overcast: cloudIs(['BKN', 'OVC']), rain: rainCheck, storm: stormCheck, stormcloud: stormCloudCheck,
   snow: (F) => tagCheck(F, 'ICE').filter((id) => id === 'zoom.tags'),
-  stars: () => [], tunnel: (F) => is('in_tunnel', true)(F), incloud: (F) => idsWhere(F, (id, x) => id === 'air.in_cloud' && x > 0.25),
+  stars: () => [], tunnel: (F) => is('in_tunnel', true)(F),
+  // T10-v: L's scene.in_cloud is already a boolean (the page's own closing-in-fog reading); A's air.in_cloud is a 0-1 density
+  incloud: (F) => idsWhere(F, (id, x) => (id === 'air.in_cloud' && x > 0.25) || (id === 'scene.in_cloud' && x === true)),
   colour: (F, vs) => idsWhere(F, (id, x) => /^image\.palette_\d$/.test(id) && vs.includes(x)), light: lightCheck,
   bright: (F, v) => is('image.brightness_bin', v)(F), texture: (F, v) => is('image.edge_bin', v)(F), vis: (F, v) => is('scene.vis', v)(F),
   phase: (F, v) => is('phase', v)(F), lphase: (F, v) => is('vert_mode', v)(F), papi: (F, v) => is('papi_whites_cam', v)(F),

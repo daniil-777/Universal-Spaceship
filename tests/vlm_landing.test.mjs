@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createLandingSim, drawConditions } from '../src/landing/sim.js';
 import { AIRPORT } from '../src/landing/airport.js';
 import { FT } from '../src/landing/vehicle.js';
-import { landingNow, landingLabel, landingBranches, stepOf, applyLandingKick, lOutcome, replayLanding, papiWhites, landingFacts, PAPI_BOX, SOCK_BOX } from '../vlm/gen/labels/landing.js';
+import { landingNow, landingLabel, landingBranches, stepOf, applyLandingKick, lOutcome, replayLanding, papiWhites, landingFacts, PAPI_BOX, SOCK_BOX, transmittance, T_VIS } from '../vlm/gen/labels/landing.js';
 import { landingSafety } from '../vlm/gen/safety.js';
 import { lookAtCamera, project } from '../vlm/gen/labels/camera.js';
 import { OBS, OUTCOMES } from '../vlm/gen/schema.js';
@@ -114,4 +114,25 @@ test('PAPI and windsock facts need their pixel box in frame with its longest sid
   const far = cam([pc[0] - 6000, 320, pc[2]], pc);
   assert.equal(typeof F(far)['papi_whites_cam'].v, 'number', '6 km out the bar is about 2.6 px at 896x504');
   assert.equal(F(far, { W: 448, H: 252 })['papi_whites_cam'].v, F(far)['papi_whites_cam'].v, 'the 2 px rule is measured at the 896x504 capture resolution whatever W, H');
+});
+// T10-v: a visual fact is non-null only when its box is in frame AND the exponential-squared fog transmittance at the
+// object's distance is >= T_VIS (src/landing/lights.js:49's vFog law, at the density the page actually rendered with)
+test('fog transmittance gate: rho 0 is fully visible; the page\'s 1 km fog density nulls a 3 km PAPI; the page\'s max in-cloud density stays visible at chase range', () => {
+  assert.equal(transmittance(0, 12000), 1, 'no fog: full transmittance at any distance');
+  assert.ok(transmittance(0.0016, 3000) < T_VIS, '1 km fog (src/landing/scene.js VIS.fog) at 3 km is below T_VIS');
+  assert.ok(transmittance(0.012, 80) >= T_VIS, 'the max in-cloud density (probe/landing.js IN_CLOUD_FOG) stays visible at the ~80 m chase distance');
+  const sim = createLandingSim(drawConditions(3, { final: true })), pc = PAPI_BOX[0].map((v, i) => (v + PAPI_BOX[1][i]) / 2);
+  const clear = cam([pc[0] - 150, 8, pc[2]], pc);
+  assert.equal(typeof landingFacts(sim, clear)['papi_whites_cam'].v, 'number', 'default fogDensity 0 leaves the existing boxVisible-only behaviour unchanged');
+  const farInFog = cam([pc[0] - 3000, 160, pc[2]], pc);
+  assert.equal(typeof landingFacts(sim, farInFog)['papi_whites_cam'].v, 'number', '3 km out with no fog is still visible (box alone, review focus)');
+  assert.equal(landingFacts(sim, farInFog, { fogDensity: 0.0016 })['papi_whites_cam'].v, null, 'the same 3 km PAPI is nulled once 1 km fog is in effect');
+  const P = sim.flight.p, chase = cam([P[0] - 78, P[1] + 16, P[2]], [P[0] + 30, P[1], P[2]]);
+  assert.equal(typeof landingFacts(sim, chase, { fogDensity: 0.012 })['cfg.gear'].v, 'string', 'the aircraft stays visible to the chase camera at the max in-cloud density');
+});
+test('the scene facts loop also carries scene.in_cloud (null when the caller does not supply it)', () => {
+  const sim = createLandingSim(drawConditions(3, { final: true }));
+  const F = landingFacts(sim, cam([0, 100, 0], [1, 100, 0]), { scene: { time: 'night', vis: 'fog', clouds: 'OVC003', rain: 1, in_cloud: true } });
+  assert.equal(F['scene.in_cloud'].v, true); assert.equal(F['scene.in_cloud'].obs, 'visual');
+  assert.equal(landingFacts(sim, cam([0, 100, 0], [1, 100, 0]))['scene.in_cloud'].v, null);
 });

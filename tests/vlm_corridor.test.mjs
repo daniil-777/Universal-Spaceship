@@ -128,6 +128,48 @@ test('space visual facts: a value the page does not provide stays null (never fa
   const k = corridorFacts(e, cam, { sky: 'space', route: null, space: { sunLit: 1, body: 'earth', lat: 10, lon: 20, earthInFrame: false, moonInFrame: true } });
   assert.equal(k.earth_in_frame.v, false); assert.equal(k.moon_in_frame.v, true); assert.equal(k['orbit.body'].v, 'earth'); assert.equal(k['sun.lit'].v, 1);
 });
+// T10-v: the atmospheric corridor's scene fog is a THREE.Fog (linear/smoothstep, src/app.js:267,307 — near/far by
+// terrain), not the landing's exponential-squared FogExp2. Without a `fog` option corridorFacts is unchanged (R3);
+// with one, a hazard beyond its far plane is no longer counted as visible even though it still projects into frame.
+test('T10-v: a scene fog gate on hazard visibility — no fog is unchanged; a hazard past the far plane is hidden; one inside the near plane stays visible', () => {
+  const e = new SpaceEnv(4, { level: 1, count: 1, comets: 0 }); e.setComets(0); e.setCount(1); e.spawnAsteroids(); e.reset();
+  // a.p keeps a small x offset (well inside the space corridor's +-60 u wraparound, ENV.xHalf) so hazardGeometry's
+  // wrapX leaves it alone; the camera (unrelated to the ship's own pose, as the clock test above does) looks straight
+  // at the hazard from a controlled distance, near or beyond the fog's near/far plane
+  const a = e.asteroids[0], s = e.ship; a.kind = 3; a.r = 2; for (let i = 0; i < 3; i++) { a.p[i] = s.p[i]; a.v[i] = 0; } a.p[0] += 30; e.step([0, 0, 0, 0]);
+  const H = [a.p[0], a.p[1], a.p[2]], camAt = (d) => lookAtCamera({ eye: [H[0] - d, H[1], H[2]], target: H, up: [0, 1, 0], fovDeg: 50, aspect: 896 / 504, near: 0.1, far: 9000 });
+  const noFog = corridorFacts(e, camAt(600), { sky: 'storm', route: 'alps' });
+  assert.equal(noFog['hazard.0.in_frame'].v, true, 'no fog option: boxVisible-only behaviour is unchanged even 600 u out');
+  assert.equal(noFog['hazards.count_in_frame'].v, 1);
+  const farFog = corridorFacts(e, camAt(600), { sky: 'storm', route: 'alps', fog: { near: 70, far: 560 } });
+  assert.equal(farFog['hazard.0.in_frame'].v, false, 'the same hazard, 600 u out, is past the linear-fog far plane (560)');
+  assert.equal(farFog['hazard.0.kind'].obs, 'context', 'kind stays a known ground truth, just no longer a visual claim'); assert.equal(farFog['hazard.0.box_px'].v, null);
+  assert.equal(farFog['hazard.0.side'].v, null); assert.equal(farFog['hazard.0.clock'].v, null); assert.equal(farFog['hazard.0.size_bin'].v, null);
+  assert.equal(farFog['hazards.count_in_frame'].v, 0); assert.deepEqual(farFog['kinds_in_frame'].v, []);
+  const nearFog = corridorFacts(e, camAt(50), { sky: 'storm', route: 'alps', fog: { near: 70, far: 560 } });
+  assert.equal(nearFog['hazard.0.in_frame'].v, true, 'the same hazard at 50 u, inside the fog near plane, stays visible');
+  assert.equal(nearFog['hazards.count_in_frame'].v, 1);
+});
+// T10-v live check (t10v-smoke, alps storm): the corridor's scene fog (near 70 u) never fires on real hazard distances
+// (all under ~62 u in 22 captured records), yet frames at air.in_cloud ~1 are a near-total whiteout in which a hazard
+// ~4-10 u from the camera is still a faint blur but one >= ~24 u is not visible at all. A's own volumetric storm cloud,
+// not the linear scene fog, is what actually hides a hazard at gameplay range, so it gates too: air.in_cloud >= 0.5 and
+// beyond IN_CLOUD_VIS_U (12 u, between the two measured clusters) is not visible.
+test('T10-v: a storm\'s volumetric cloud (air.in_cloud) hides a hazard beyond the measured close range even though the linear scene fog does not reach that far', () => {
+  const e = new SpaceEnv(4, { level: 1, count: 1, comets: 0 }); e.setComets(0); e.setCount(1); e.spawnAsteroids(); e.reset();
+  const a = e.asteroids[0], s = e.ship; a.kind = 3; a.r = 1; for (let i = 0; i < 3; i++) { a.p[i] = s.p[i]; a.v[i] = 0; } a.p[0] += 24; e.step([0, 0, 0, 0]);
+  const H = [a.p[0], a.p[1], a.p[2]], cam = lookAtCamera({ eye: [H[0] - 24, H[1], H[2]], target: H, up: [0, 1, 0], fovDeg: 50, aspect: 896 / 504, near: 0.1, far: 9000 });
+  e.weather = { cloudAt: () => 1, cellsNear: () => [] };
+  const inStorm = corridorFacts(e, cam, { sky: 'storm', route: 'alps' });
+  assert.equal(inStorm['hazard.0.in_frame'].v, false, 'a hazard 24 u out is past the measured in-cloud visible range, even with no scene fog at all');
+  assert.equal(inStorm['hazards.count_in_frame'].v, 0);
+  e.weather = { cloudAt: () => 0.2, cellsNear: () => [] };
+  const clearAir = corridorFacts(e, cam, { sky: 'storm', route: 'alps' });
+  assert.equal(clearAir['hazard.0.in_frame'].v, true, 'below the 0.5 in-cloud threshold the same hazard stays visible');
+  e.weather = { cloudAt: () => 1, cellsNear: () => [] };
+  const a2 = lookAtCamera({ eye: [H[0] - 6, H[1], H[2]], target: H, up: [0, 1, 0], fovDeg: 50, aspect: 896 / 504, near: 0.1, far: 9000 });
+  assert.equal(corridorFacts(e, a2, { sky: 'storm', route: 'alps' })['hazard.0.in_frame'].v, true, 'the same in-cloud storm still shows a hazard close to the camera (the measured ~4-10 u cluster)');
+});
 test('worlds.js ROUTES equals src/terrain.js ROUTES (parsed as text: terrain.js imports three)', () => {
   const src = fs.readFileSync(new URL('../src/terrain.js', import.meta.url), 'utf8'), body = /export const ROUTES = \{([\s\S]*?)\n\};/.exec(src)[1].replace(/\/\/[^\n]*/g, '');
   assert.deepEqual(JSON.parse(JSON.stringify(ROUTES)), new Function(`return {${body}};`)());
