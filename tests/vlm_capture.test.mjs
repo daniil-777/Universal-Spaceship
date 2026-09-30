@@ -13,6 +13,7 @@ import { withSpares, nextSpare } from '../vlm/capture/zplan.mjs';
 import { zLocation, replaceDiscarded } from '../vlm/capture/families.mjs';
 import { settleView, SLOT } from '../vlm/capture/episode_zoom.mjs';
 import { groundOf, CAM_CLEAR_KM } from '../vlm/capture/probe/zoom.js';
+import { settleReal } from '../vlm/capture/session.mjs';
 import { createLocalFrame, cameraPose } from '../src/earthtiles.js';
 import { fact } from '../vlm/gen/schema.js';
 
@@ -119,4 +120,13 @@ test('fix 9: settleView captures at the end of the fixed slot and drops with a d
   assert.match((await settleView(fakeIO({ stableAfter: 5000 }))).why, /^not steady within the 1600-frame slot/);
   assert.match((await settleView(fakeIO({ lostAtEnd: true }))).why, /^gate lost at the slot end/);
   await assert.rejects(settleView(fakeIO({ stallAt: 300 })), /stall/, 'a stall propagates to runZoomLocation, which logs it as its own reason');
+});
+test('fix round 1 (boot race): settleReal waits for ready or real quiet with the clock paused; a finishing request restarts the quiet time', async () => {
+  const S = (readyAfter) => { let k = 0; return { inflight: 0, done: 0, page: { evaluate: async () => ++k > readyAfter } }; };
+  assert.equal(await settleReal(S(3), 'x', { quietMs: 5000 }), true, 'ready arrives without any frame');
+  const quiet = S(Infinity), t0 = Date.now(); assert.equal(await settleReal(quiet, 'x', { quietMs: 60 }), false); assert.ok(Date.now() - t0 >= 60);
+  const busy = S(Infinity), t1 = Date.now(), tick = setInterval(() => { busy.done++; }, 20); setTimeout(() => clearInterval(tick), 150);
+  assert.equal(await settleReal(busy, 'x', { quietMs: 60 }), false); assert.ok(Date.now() - t1 >= 150 + 60 - 25, 'quiet counts from the last finished request');
+  const stop = { error: new Error('429 from tiles.maps.eox.at: stopping without retry') };
+  await assert.rejects(settleReal(S(Infinity), 'x', { stop, quietMs: 60 }), /429/);
 });

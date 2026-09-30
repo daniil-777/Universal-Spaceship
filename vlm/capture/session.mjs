@@ -35,11 +35,27 @@ export async function waitIdle(S, check = null, { timeoutMs = 10000, stop = null
     await sleep(5);
   }
 }
-// the §7.2 per-frame wait holds from boot on: every pumped frame follows network idle, so the policy and texture fetches
-// land on the same fake tick in every run; `stop` (the drive's latch) makes a 403/429 during boot surface as StopDrive
+// Waits, with the clock paused, until the page is ready (true) or has been quiet for quietMs of real time: no request in
+// flight and none finished (false). Network idle alone is not enough: the page keeps working after a response arrives
+// (app.js parses and decodes the policy before __ap.ready), and a frame pumped during that work lands ready one fake tick
+// later in some runs (fix round 1: seen as a +16 ms provenance.clock and different pixels in one of four S runs).
+export async function settleReal(S, readyExpr, { stop = null, quietMs = BOOT_QUIET_MS } = {}) {
+  let seen = S.done, since = Date.now();
+  for (;;) {
+    if (await S.page.evaluate(readyExpr)) return true;
+    if (stop && stop.error) throw stop.error;
+    if (S.inflight > 0) { await waitIdle(S, null, { stop }); seen = S.done; since = Date.now(); continue; }
+    if (S.done !== seen) { seen = S.done; since = Date.now(); } else if (Date.now() - since >= quietMs) return false;
+    await sleep(10);
+  }
+}
+export const BOOT_QUIET_MS = 1000;
+// the §7.2 per-frame wait holds from boot on, and a boot frame is pumped only when the page has settled without becoming
+// ready (it waits on a fake timer, app.js:404's 30 ms), so ready lands on the same fake tick in every run; `stop` (the
+// drive's latch) makes a 403/429 during boot surface as StopDrive
 export async function boot(S, url, readyExpr, mode, stop = null) {
   await S.page.goto(url, { waitUntil: 'load', timeout: 180000 }); await waitIdle(S, null, { stop });
-  for (let i = 0; i < 4000; i++) { if (await S.page.evaluate(readyExpr)) return; await waitIdle(S, null, { stop }); await frame(S, mode); }
+  for (let i = 0; i < 4000; i++) { if (await settleReal(S, readyExpr, { stop })) return; await frame(S, mode); }
   if (stop && stop.error) throw stop.error;
   throw new Discard('boot: the ready flag never set');
 }
