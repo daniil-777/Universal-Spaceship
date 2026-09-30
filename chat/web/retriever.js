@@ -8,10 +8,18 @@ by from up about into than then so if not no yes please tell explain there here 
 hi hey hello thanks thank ok okay`.split(/\s+/));
 const WORD = /[a-z0-9]+/g;
 
+// a light plural stemmer (the same rules as chat/retrieval.py plural())
+export function plural(w) {
+  if (w.length > 4 && w.endsWith('ies')) return w.slice(0, -3) + 'y';
+  if (w.length > 4 && ['ches', 'shes', 'xes', 'sses'].some((e) => w.endsWith(e))) return w.slice(0, -2);
+  if (w.length > 3 && w.endsWith('s') && !['ss', 'us', 'is'].some((e) => w.endsWith(e))) return w.slice(0, -1);
+  return w;
+}
+
 export function tokens(text) {
   const out = [];
   for (let w of String(text).toLowerCase().match(WORD) || []) {
-    if (w.length > 3 && w.endsWith('s') && !w.endsWith('ss')) w = w.slice(0, -1);
+    w = plural(w);
     if (!STOP.has(w)) out.push(w);
   }
   return out;

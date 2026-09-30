@@ -6,7 +6,7 @@ import argparse, json, sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from chat.prompt import NAMES
-from chat.rewards import ABSTAIN, LEAK, comp_grounded
+from chat.rewards import ABSTAIN, LEAK, comp_grounded, questions
 
 ARCHETYPES = {'qa_chain', 'tour', 'deep_dive', 'kid', 'recruiter', 'troubleshoot', 'space_general', 'unknown', 'off_topic', 'chit_chat',
               'adversarial', 'skeptic'}
@@ -45,7 +45,7 @@ def check(d, facts, brief=None):
         if words(c) > cap: e.append(f'turn {i} too long ({words(c)} > {cap} words)')
         ids = x.get('facts', [])
         if not isinstance(ids, list) or len(ids) > MAX_FACTS or any(f not in facts for f in ids): e.append(f'turn {i} facts {ids}')
-        lead, q = x.get('lead'), c.count('?')
+        lead, q = x.get('lead'), questions(c)
         if lead not in LEADS: e.append(f'turn {i} lead {lead}')
         elif lead == 'question' and q != 1: e.append(f'turn {i} lead question but {q} question marks')
         elif lead == 'suggestion' and q > 1: e.append(f'turn {i} suggestion with {q} question marks')
@@ -58,7 +58,7 @@ def check(d, facts, brief=None):
             if words(ab) > MAX_ABSTAIN: e.append(f'turn {i} abstain too long')
             if not ABSTAIN.search(ab): e.append(f"turn {i} abstain must say it is not in the notes (e.g. \"that's not in my flight notes\")")
             if comp_grounded(ab, [], ' '.join(users)) < 1: e.append(f'turn {i} abstain cites a number/flag/key')
-            if ab.count('?') > 1: e.append(f'turn {i} abstain asks > 1 question')
+            if questions(ab) > 1: e.append(f'turn {i} abstain asks > 1 question')
     return e
 
 def load_jsonl(p):

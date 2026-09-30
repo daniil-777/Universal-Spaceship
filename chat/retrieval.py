@@ -1,6 +1,6 @@
 """chat/retrieval.py — CAPCOM's fact retriever: BM25 over the knowledge-base facts, the same arithmetic as chat/web/retriever.js
 (the browser side), so training rows see exactly the facts the page will show. Tokens: lowercase ASCII words and numbers,
-stop words dropped, a plural 's' stripped; a fact is indexed as title + text + keywords twice. The query is the visitor's
+stop words dropped, plurals stemmed (plural()); a fact is indexed as title + text + keywords twice. The query is the visitor's
 message plus the previous visitor message at weight PREV_W (follow-ups such as "and how fast is it?"). Ties break by id."""
 import json, math, re
 from pathlib import Path
@@ -12,10 +12,17 @@ by from up about into than then so if not no yes please tell explain there here 
 hi hey hello thanks thank ok okay'''.split())
 _WORD = re.compile(r"[a-z0-9]+")
 
+def plural(w):
+    """A light plural stemmer (the same rules as retriever.js): -ies -> y, -ches/-shes/-xes/-sses -> drop es, -s -> drop (not -ss/-us/-is)."""
+    if len(w) > 4 and w.endswith('ies'): return w[:-3] + 'y'
+    if len(w) > 4 and w.endswith(('ches', 'shes', 'xes', 'sses')): return w[:-2]
+    if len(w) > 3 and w.endswith('s') and not w.endswith(('ss', 'us', 'is')): return w[:-1]
+    return w
+
 def tokens(text):
     out = []
     for w in _WORD.findall(text.lower()):
-        if len(w) > 3 and w.endswith('s') and not w.endswith('ss'): w = w[:-1]
+        w = plural(w)
         if w not in STOP: out.append(w)
     return out
 

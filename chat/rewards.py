@@ -19,6 +19,9 @@ CUE = re.compile(r"\b(try|open|switch|press|click|tap|want to|would you like|how
                  r"toggle|pick|jump|watch|ask me|curious|shall we|next)\b", re.I)
 LEAK = re.compile(r"<\|im_|<\|endoftext|^(?:user|assistant|system|capcom)\s*:|\n(?:user|assistant|system)\s*:|^notes:|\nnotes:|^state:|\nstate:", re.I)
 SMALL = {str(i) for i in range(11)}
+QMARK = re.compile(r'\?(?![A-Za-z_])')  # a question mark, not the '?' that starts a URL flag such as ?scenario=landing
+
+def questions(text): return len(QMARK.findall(text))
 
 def norm_num(s):
     s = s.replace(',', '')
@@ -43,10 +46,10 @@ def comp_grounded(answer, notes, user):
     return max(0.0, 1.0 - 0.5 * len(bad))
 
 def comp_lead(answer, expected=True):
-    q = answer.count('?'); s = sentences(answer); last = s[-1] if s else ''
+    q = questions(answer); s = sentences(answer); last = s[-1] if s else ''
     if not expected: return 1.0 if q == 0 else 0.5
     if q >= 2: return 0.0
-    return 1.0 if last.endswith('?') or CUE.search(last) else 0.0
+    return 1.0 if QMARK.search(last) or CUE.search(last) else 0.0
 
 def comp_first(answer):
     s = sentences(answer)
