@@ -4,13 +4,14 @@
 // luminance in [0, 1] at BRIGHTNESS_EDGES, the colour names are PALETTE_NAMES.
 // Each name has one or more RGB anchors and a pixel takes the name of its nearest anchor. The brief's single-anchor table
 // had "navy" where PALETTE_NAMES has "pink"; with navy gone a dark sea (about 12/32/70) would be nearest to black, so
-// blue also anchors a navy and a sky blue, grey a dark grey, green a dark green and brown a tan (T7 dropped "tan").
+// blue also anchors a navy and a sky blue, grey a dark and a light grey, green a dark green and brown a tan (T7 dropped "tan").
+// The light grey (G4): without it a fog frame (about 200/202/205) was nearer the pink anchor than white and named pink.
 import sharp from 'sharp';
 import { fact, PALETTE_NAMES, BRIGHTNESS_BINS, BRIGHTNESS_EDGES, EDGE_BINS } from './schema.js';
 
-export const PALETTE = Object.freeze({ black: [[15, 15, 15]], grey: [[128, 128, 128], [80, 80, 80]], white: [[240, 240, 240]], red: [[200, 40, 40]], orange: [[230, 130, 30]],
+export const PALETTE = Object.freeze({ black: [[15, 15, 15]], grey: [[128, 128, 128], [80, 80, 80], [190, 190, 190]], white: [[240, 240, 240]], red: [[200, 40, 40]], orange: [[230, 130, 30]],
   yellow: [[230, 210, 60]], green: [[60, 150, 60], [30, 80, 40]], teal: [[40, 150, 150]], blue: [[40, 80, 200], [20, 30, 80], [120, 160, 220]], purple: [[120, 60, 150]],
-  pink: [[235, 150, 190]], brown: [[120, 80, 40], [180, 140, 100]] });
+  pink: [[240, 140, 180]], brown: [[120, 80, 40], [180, 140, 100]] });
 const ANCHORS = PALETTE_NAMES.flatMap((name, k) => PALETTE[name].map((rgb) => [k, ...rgb]));
 export const EDGE_EDGES = Object.freeze([0.05, 0.15]);
 export const SOBEL_THRESHOLD = 160;

@@ -93,6 +93,7 @@ test('image facts: the 12 PALETTE_NAMES, brightness bins on mean luminance in [0
   assert.equal(imageFactsOf(flat([40, 40, 40]), 20, 10)['image.brightness_bin'].v, 'dark');
   assert.equal(imageFactsOf(flat([110, 110, 110]), 20, 10)['image.brightness_bin'].v, 'medium');
   assert.equal(imageFactsOf(flat([200, 200, 200]), 20, 10)['image.brightness_bin'].v, 'bright');
+  for (const [rgb, name] of [[[200, 202, 205], 'grey'], [[225, 228, 232], 'white'], [[235, 145, 185], 'pink'], [[150, 180, 220], 'blue'], [[190, 160, 120], 'brown']]) assert.equal(imageFactsOf(flat(rgb), 20, 10)['image.palette_0'].v, name, `${rgb} (a light-grey fog frame was named pink)`);
   const sea = imageFactsOf(flat([12, 32, 70]), 20, 10); assert.equal(sea['image.palette_0'].v, 'blue', 'a dark sea is blue, not black'); assert.equal(sea['image.edge_bin'].v, 'smooth');
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'apv-if-')), file = path.join(dir, 'x.png'), W = 896, H = 504, px = Buffer.alloc(W * H * 3);
   for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) px.set(((x >> 4) + (y >> 4)) % 2 ? [230, 130, 30] : [15, 15, 15], (y * W + x) * 3);
