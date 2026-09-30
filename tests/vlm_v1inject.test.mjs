@@ -16,7 +16,10 @@ test('V1-3: the kind draw follows INJECT_WEIGHTS (UNSAFE-producing kinds weighte
     INJECTIONS[f].forEach((e, i) => { const k = e.kind + (e.band ? `:${e.band}` : ''), got = (seen[k] || 0) / n; assert.ok(Math.abs(got - W[i] / sum) < 0.015, `${f} ${k}: ${got.toFixed(3)} vs ${(W[i] / sum).toFixed(3)}`); });
   }
   assert.ok(INJECT_WEIGHTS.L[INJECTIONS.L.findIndex((e) => e.kind === 'hflare')] >= 3 && INJECT_WEIGHTS.L[INJECTIONS.L.findIndex((e) => e.kind === 'lateral_25')] >= 3);
-  assert.ok(INJECT_WEIGHTS.D[INJECTIONS.D.findIndex((e) => e.kind === 'closing_plus_0.2')] >= 3);
+  const wD = (k, band) => INJECT_WEIGHTS.D[INJECTIONS.D.findIndex((e) => e.kind === k && (!band || e.band === band))];
+  assert.ok(wD('inbound') <= 0.75 && wD('abort') <= 1, 'inbound (~24 records, v0) and abort (~11 CAUTION records, v1-smoke) runs dilute UNSAFE');
+  assert.ok(wD('closing_plus_0.2') >= 4.5 && wD('radial_plus_0.08') >= 4.5, 'contact kicks: ~1 UNSAFE + 1 SAFE twin each, the reliable UNSAFE source (v1-smoke 12 of 14 landed)');
+  assert.ok(wD('lateral_drift', 'kos') <= 0.5, 'v1-smoke: 2 of 6 KOS drifts gave an UNSAFE record; 3 never landed, 1 docked');
   // S/A: one entry, the same draw sequence as v0 (rate draw, then the index draw)
   const a = mulberry32(5), b = mulberry32(5); for (let i = 0; i < 200; i++) { const d = drawInjection('S', a); const hit = b() < INJECT_RATE.S; if (hit) b(); assert.equal(!!d, hit); if (d) b(); }
 });
@@ -24,4 +27,7 @@ test('V1-3: while a runtime kick is pending, L keeps at most 4 clean samples bef
   assert.equal(freeSlots(12, 0, false), 12); assert.equal(freeSlots(12, 3, true), 8, 'v0: one slot kept back for the kick');
   assert.equal(freeSlots(12, 0, true, PRE_KICK.L), 4); assert.equal(freeSlots(12, 4, true, PRE_KICK.L), 0);
   assert.equal(freeSlots(12, 0, true, PRE_KICK.D), 0); assert.equal(freeSlots(12, 1, false, PRE_KICK.D), 11, 'after the kick the whole run is open again');
+  // a drawn runtime kick that the oracle says never lands (a dud: v1-smoke D lateral_drift runs gave 12 clean records each) keeps
+  // only the pre-kick allowance
+  assert.equal(freeSlots(12, 0, false, PRE_KICK.D, true), 0); assert.equal(freeSlots(12, 0, false, PRE_KICK.L, true), 4); assert.equal(freeSlots(12, 4, false, PRE_KICK.L, true), 0);
 });
