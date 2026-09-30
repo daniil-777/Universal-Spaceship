@@ -3,7 +3,7 @@
 // (T10-g), the Z capture protocol (T9-a), the EOX budget per run (T9-b), the visibility-gate limitations (T10v / T10-j) and
 // the verifier's free-text limitations with their measured rates (T7-d). The gate constants are quoted from
 // vlm/gen/labels/landing.js (T_VIS) and corridor_facts.js (IN_CLOUD_A, IN_CLOUD_VIS_U).
-const J = (x) => JSON.stringify(x);
+const J = (x) => JSON.stringify(x), SPEC32 = Object.freeze({ Z: 800, S: 1200, A: 1600, L: 800, D: 600 });
 const table = (o) => (Object.keys(o || {}).length ? '| key | value |\n|---|---|\n' + Object.entries(o).map(([k, v]) => `| ${k} | ${typeof v === 'object' ? J(v) : v} |`).join('\n') : '(none)');
 const pct = (x) => (x === null || x === undefined ? 'n/a' : `${(100 * x).toFixed(2)} %`);
 export function datasheet(s, m) {
@@ -16,7 +16,7 @@ export function datasheet(s, m) {
     'Training and evaluating two in-browser models for Astro Pilot: Pilot Eye (a per-frame safety monitor on 3 frames at 160x96) and Narrator (a SmolVLM-256M captioner and VQA model with a Context line). Created by the Astro Pilot project.',
     '## 2 Composition',
     'Records per family | split | safety_eye verdict (Z: zoom):', table(s.counts),
-    `Sizes used against spec §3.2 (R17): ${J(m.sizes)}.`,
+    `Sizes against spec §3.2 (R17; v0 reports them and does not apply the §11.3 size rule, ruling T3H-1): records built per family ${J(m.captured || {})} of §3.2 ${J(SPEC32)}; planned sizes from the G4 projection ${J(m.sizes)}.`,
     `Natural verdict mix per family x world (n, and summed sampler_weight): ${J(s.naturalMix)}.`,
     `A keeps its natural, UNSAFE-heavy mix (ruling T10-h; the class-balanced weights balance it at sampling time): raw ${J(a.raw_mix)}, natural sampler-weighted ${J(a.natural_mix_sampler_weighted)}; per route x behaviour ${J(a.by_route_policy)}.`,
     `Minimal pairs: ${J(s.pairs)}. Pixel-identical pairs are kept for training and Narrator but excluded from the paired-verdict metric.`,

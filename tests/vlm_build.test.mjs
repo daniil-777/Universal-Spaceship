@@ -134,6 +134,7 @@ test('text stats: reject rates per family and per template component; distinct-n
 test('the datasheet has the 7 sections and the amendment B records', () => {
   const md = datasheet({ counts: {}, text: { rejectRate: 0.01, parserFalseReject: 0 }, upstream: {}, naturalMix: {}, pairs: {} }, { name: 'x', date: 'd', runs: ['r'], git_sha: 's', licence: 'open', capture_mode: 'clock', sizes: null, c_near: 2.5, eye: EYE, playwright: '1.63.0' });
   for (let i = 1; i <= 7; i++) assert.match(md, new RegExp(`^## ${i} `, 'm'));
+  assert.match(datasheet({ counts: {}, text: {}, upstream: {}, naturalMix: {}, pairs: {} }, { name: 'x', date: 'd', runs: ['r'], eye: EYE, captured: { S: 700 } }), /records built per family \{"S":700\} of §3.2/);
   for (const s of [...EYE.hidden, 'closingRhoM 11', '1600-frame slot', '80,000', '12 u', 'T_VIS 0.1', 'axial < 0.5 m', 'scene.in_cloud']) assert.ok(md.includes(s), s);
 });
 test('a record of a page without .done is left out; an A twin needs its own .done and its original page\'s, not the twin page start', async () => {
