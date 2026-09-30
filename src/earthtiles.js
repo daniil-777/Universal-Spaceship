@@ -2,9 +2,10 @@
 // imagery source serves which level, Terrarium elevation decoding, the level of detail for a viewing distance and the
 // rings' tile windows; then the local frame, the Sun in it, the telescope camera's pose, panning and the clip planes.
 import { julianDay, gmst, sunEci, moonEci } from './ephem.js';
-export const R_KM = 6371, MAX_LAT = 85.0511287798066, MIN_LEVEL = 4, MAX_LEVEL = 18, RING_TILES = 8, HEIGHT_TILES = 4, MAX_HEIGHT_LEVEL = 13;
-// From test/probe_earthtiles.mjs (2026-09-28): the newest Sentinel-2 cloudless mosaic, and Esri's placeholder for
-// missing deep imagery (the same 2521-byte JPEG over every open-ocean tile at levels 17-18).
+export const R_KM = 6371, MAX_LAT = 85.0511287798066, MIN_LEVEL = 4, MAX_LEVEL = 19, RING_TILES = 8, HEIGHT_TILES = 4, MAX_HEIGHT_LEVEL = 13;
+// From test/probe_earthtiles.mjs (2026-09-28, confirmed at z19 on 2026-09-29): the newest Sentinel-2 cloudless
+// mosaic, and Esri's placeholder for missing deep imagery (the same 2521-byte JPEG over every open-ocean tile at
+// levels 17-19).
 export const EOX_YEAR = 2025;
 export const ESRI_BLANK = { bytes: 2521, sha1: '1660d86a87f57ef0ff580822e0e62f0feb48deee' };
 const DEG = Math.PI / 180, KM_PER_PX0 = 156.54303392804097, EQUATOR_KM = 40075.016686;
@@ -34,6 +35,9 @@ export const HEIGHT_SOURCE = { name: 'AWS Terrain Tiles', credit: 'elevation: AW
 export const ZOOM_CREDIT = [...SOURCES, HEIGHT_SOURCE].map((s) => s.credit).join(' · ');
 export const sourceForLevel = (z) => SOURCES.find((s) => z <= s.maxLevel) || SOURCES[SOURCES.length - 1];
 export const tileUrl = (src, z, x, y) => src.url(z, mod(x, 2 ** z), y);
+// The z of a tile URL: every source's path ends in three numbers (…/{z}/{y}/{x} or, for Terrarium, …/{z}/{x}/{y}),
+// z always first, so it needs no per-host parsing.
+export const tileLevelOf = (url) => { const m = /\/(\d+)\/\d+\/\d+(?:\.\w+)?(?:\?.*)?$/.exec(url); return m ? +m[1] : NaN; };
 export const heightLevel = (z) => Math.max(0, Math.min(z - 1, MAX_HEIGHT_LEVEL));
 export const decodeTerrarium = (r, g, b) => Math.max(0, r * 256 + g + b / 256 - 32768);
 
@@ -83,6 +87,16 @@ export function windowTiles(win, size) {
   }
   return out.sort((a, b) => a.d - b.d);
 }
+// Where the next finer ring's window sits in a coarser ring's uv: iu = (uv − min) · scale runs 0..1 across the finer ring.
+// wrap = the world's width in that uv: below level 3 a ring's 8 tiles span the globe more than once, so the x offset is
+// taken modulo wrap and every copy of the coarse ring under the finer ring counts as under it.
+export function innerWindow(inner, outer) {
+  const scale = 2 ** (inner.level - outer.level);
+  return { scale, min: [(inner.x0 / scale - outer.x0) / RING_TILES, (inner.y0 / scale - outer.y0) / RING_TILES], wrap: 2 ** outer.level / RING_TILES };
+}
+// A coarser ring stays behind the next finer ring wherever that one is drawn at all (on), and leaves a hole in its interior
+// only once the finer ring's imagery AND relief have fully faded in (done): flat ground never shows ahead of the relief.
+export const innerState = ({ vis, hk }) => ({ on: vis > 0.003, done: vis > 0.999 && hk > 0.999 });
 
 const wrap180 = (lon) => mod(lon + 180, 360) - 180;
 export const KM_PER_DEG = 40075.016 / 360;
