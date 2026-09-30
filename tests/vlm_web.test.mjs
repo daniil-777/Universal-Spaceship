@@ -8,7 +8,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createFrameRing, pickAction, gridIndex, decodeHeads, prepareFrame, createPilotEye, ACTIONS } from '../vlm/web/pilot-eye.js';
 import { templateSentence } from '../vlm/web/templates.js';
-import { monitorFromHeads, contextLine, createNarrator, squareImage, NARRATOR_EOS } from '../vlm/web/narrator.js';
+import { monitorFromHeads, contextLine, createNarrator, squareImage, narratorFrame, NARRATOR_EOS, NARRATOR_TASKS } from '../vlm/web/narrator.js';
 import { vlmFile, checkPort } from '../vlm/web/serve.mjs';
 import { renderContext, parseContext } from '../vlm/gen/text/context.js';
 import { REASONS } from '../vlm/gen/schema.js';
@@ -45,6 +45,29 @@ test('decodeHeads follows the reason order of labels.json; L/D monitors carry no
   assert.equal(templateSentence({ ...z, tags: [], range_bin: 4 }, 'Z'), 'A view from over 1500 km.');
   assert.equal(templateSentence({ ...h, verdict: 'SAFE', reasons: [], action: 'NONE_SAFE' }, 'L'), 'SAFE. Advice: no safe action.');
   assert.equal(contextLine({ heads: z, family: 'Z', facts: {} }), 'Context: telemetry: none.', 'Z has no monitor tuple');
+});
+// labels.json reason_masks as Task 11 writes them (apv-pilot): 6 reasons are masked in every family and never trained
+const MASKS = { S: REASONS.slice(0, 10), A: REASONS.slice(0, 10), L: ['UNSTABLE_APPROACH', 'LOCALIZER_DEVIATION', 'HIGH_SINK_RATE', 'STRONG_CROSSWIND', 'RUNWAY_EDGE', 'CANNOT_STOP'], D: ['KOS_VIOLATION', 'CLOSING_TOO_FAST', 'LATERAL_MISALIGNMENT', 'ATTITUDE_ERROR'], Z: [] };
+test('decodeHeads keeps a reason only when it is in the family allow-list (labels.reason_masks, as evaluate.py monitor())', () => {
+  const o = { ...OUT, reasons: REASONS.map((r) => (['HAZARD_AHEAD', 'UNSTABLE_APPROACH', 'LOW_FUEL'].includes(r) ? 5 : -5)) };
+  assert.deepEqual(decodeHeads(o, 'S', REASONS, MASKS.S).reasons, ['HAZARD_AHEAD'], 'an out-of-family (L) and a never-trained reason are dropped');
+  assert.deepEqual(decodeHeads(o, 'L', REASONS, MASKS.L).reasons, ['UNSTABLE_APPROACH']); assert.deepEqual(decodeHeads(o, 'Z', REASONS, MASKS.Z).reasons, []);
+  assert.deepEqual(decodeHeads(o, 'S').reasons, ['HAZARD_AHEAD', 'UNSTABLE_APPROACH', 'LOW_FUEL'], 'no allow-list: unfiltered');
+});
+test('narratorFrame: the Narrator row image joined on key; D falls back to its chase view, other families to the last frame', () => {
+  const d = { key: 'D_apv-pilot_00000_000371', family: 'D', frames: [0, 1, 2].map((k) => `raw/apv-pilot/D/D_apv-pilot_00000_000371.f${k}.png`) };
+  const s = { key: 'S_apv-pilot_00000_000045', family: 'S', frames: [0, 1, 2].map((k) => `raw/apv-pilot/S/S_apv-pilot_00000_000045.f${k}.png`) };
+  assert.equal(narratorFrame(d), 'raw/apv-pilot/D/D_apv-pilot_00000_000371.chase.png'); assert.equal(narratorFrame(s), s.frames[2]);
+  assert.equal(narratorFrame(s, new Map([[s.key, 'raw/x.png']])), 'raw/x.png'); assert.equal(narratorFrame(d, new Map()), 'raw/apv-pilot/D/D_apv-pilot_00000_000371.chase.png');
+  assert.deepEqual(NARRATOR_TASKS, { describe: 'Describe the image in detail.', safety: 'Is the situation safe? Explain.' }, 'the demo buttons send trained prompts');
+  const demo = fs.readFileSync(new URL('../vlm/web/demo.html', import.meta.url), 'utf8'); assert.match(demo, /NARRATOR_TASKS/); assert.match(demo, /narratorFrame\(/); assert.doesNotMatch(demo, /'Is it safe\?'/);
+});
+const APV = process.env.APV_DATASET_DIR || '/Volumes/LaCie/astro-pilot/vlm/datasets/apv-pilot';
+test('narratorFrame without the join reproduces images[0] of every Narrator row whose key is a Pilot Eye row (dataset ood split)', { skip: !fs.existsSync(path.join(APV, 'narrator', 'ood.jsonl')) && `no dataset at ${APV}` }, () => {
+  const rows = (f) => fs.readFileSync(path.join(APV, f), 'utf8').split('\n').filter((l) => l.trim()).map((l) => JSON.parse(l));
+  const pe = new Map(rows('pilot_eye/ood.jsonl').map((r) => [r.key, r])); let n = 0;
+  for (const r of rows('narrator/ood.jsonl')) if (pe.has(r.key)) { assert.equal(narratorFrame(pe.get(r.key)), r.images[0], r.key); n++; }
+  assert.ok(n > 0);
 });
 test('prepareFrame box-resizes RGBA to the labels.input size as RGB', () => {
   const rgba = new Uint8Array(320 * 192 * 4).fill(77); assert.equal(prepareFrame(rgba, 320, 192).length, 160 * 96 * 3);
@@ -85,6 +108,27 @@ test('createPilotEye runs a tiny ONNX pair through ORT-web: warming up until the
   assert.ok(ACTIONS.includes(r.action) && r.reg.length === 6 && r.range_bin >= 0 && r.range_bin <= 4 && Number.isFinite(r.ms)); assert.ok(!/undefined|NaN/.test(r.sentence), r.sentence);
   assert.equal((await push(3, 'S', 2)).status, 'warming up', 'a new episode resets the ring');
   const z = await eye.push({ rgb: rgb(9), sim_t_s: 0, family: 'Z', episode_id: 7 }); assert.equal(z.status, 'ok'); assert.match(z.sentence, /^A view from /);
+});
+
+// the tiny heads in plain JS: the encoder is linear and its 32x32 pools tile the frame, so GAP(m2 - m1) = cw . (channel means of
+// the newest frame - those of the middle one); ++ dt; then each head's Gemm (w [66, n], row-major)
+function tinyLogits(frames, dt) {
+  const n = 160 * 96, mean = (rgb) => [0, 1, 2].map((c) => { let s = 0; for (let i = 0; i < n; i++) s += rgb[i * 3 + c]; return s / n / 255; });
+  const [a, b] = [mean(frames[1]), mean(frames[2])], cw = wts(192, 0);
+  const x = [...Array.from({ length: 64 }, (_, c) => [0, 1, 2].reduce((s, k) => s + cw[c * 3 + k] * (b[k] - a[k]), 0)), ...dt];
+  return Object.fromEntries(Object.entries(HEADS).map(([k, m], i) => { const w = wts(66 * m, i + 1); return [k, Array.from({ length: m }, (_, j) => x.reduce((s, v, r) => s + v * w[r * m + j], 0))]; }));
+}
+test('createPilotEye feeds heads.onnx m0..m2 oldest to newest and dt = [t1-t0, t2-t1]/frame_dt; reasons filtered by labels.reason_masks', async (t) => {
+  const ort = await loadOrt(); if (!ort) return t.skip('onnxruntime-web is not installed under vlm/node_modules');
+  const { enc, heads } = tinyPilotEye(), labels = { input: [160, 96], nominal_frame_dt: { S: 0.2, A: 0.2, L: 0.25, D: 2 }, reasons: [...REASONS], reason_masks: MASKS };
+  const eye = await createPilotEye({ ort, encoderUrl: enc, headsUrl: heads, labels }), times = [0.2, 0.4, 0.6667];
+  const fr = [1, 2, 3].map((k) => new Uint8Array(160 * 96 * 3).map((_, i) => (i % 3 === 0 ? 40 * k : i % 3 === 1 ? 250 - 60 * k : (i * 7 + k * 13) % 256)));
+  let r = null; for (const k of [0, 1, 2]) r = await eye.push({ rgb: fr[k], sim_t_s: times[k], family: 'S', episode_id: 1 });
+  const want = tinyLogits(fr, [(times[1] - times[0]) / 0.2, (times[2] - times[1]) / 0.2]);
+  assert.equal(r.status, 'ok'); assert.deepEqual(Object.keys(r.logits).sort(), Object.keys(HEADS).sort());
+  for (const k of Object.keys(HEADS)) { assert.equal(r.logits[k].length, want[k].length, k); r.logits[k].forEach((v, j) => assert.ok(Math.abs(v - want[k][j]) < 1e-4, `${k}[${j}]: ${v} vs ${want[k][j]}`)); }
+  const d = decodeHeads(want, 'S', REASONS, MASKS.S); assert.deepEqual([r.verdict, r.severity, r.action, r.reasons, r.tags, r.range_bin], [d.verdict, d.severity, d.action, d.reasons, d.tags, d.range_bin]);
+  assert.ok(decodeHeads(want, 'S').reasons.some((x) => !MASKS.S.includes(x)), 'the fixture has out-of-family reasons above 0.5 to drop');
 });
 
 test('bench.mjs runtime: the Pilot Eye part times every frame after warm-up on an untrained-style export (parity.json size, no labels.json)', async (t) => {
@@ -133,6 +177,18 @@ test('createNarrator loads the G2 folder in transformers.js (CPU, deploy dtypes)
     const ids = Array.from((await nar.processor(text, [sq], { do_image_splitting: false })).input_ids.data, Number); assert.equal(ids.filter((t) => t === 49190).length, 64);
     const d = await nar.describe(raw, { context: 'Context: telemetry: none.', maxNewTokens: 4, minNewTokens: 4 }); assert.equal(typeof d.text, 'string'); assert.ok(d.text.length > 0 && d.ms > 0);
   } finally { await nar.dispose(); }
+});
+
+test('squareImage (Node path) matches the PIL LANCZOS 512 squares of parity.json within 1 level on average', { skip: !fs.existsSync(path.join(G2, 'parity.json')) && `no exported folder at ${G2}`, timeout: 60000 }, async () => {
+  const tf = await import(pathToFileURL(createRequire(fileURLToPath(new URL('../vlm/web/bench.mjs', import.meta.url))).resolve('@huggingface/transformers').replace(/\.cjs$/, '.mjs')).href);
+  const samples = JSON.parse(fs.readFileSync(path.join(G2, 'parity.json'), 'utf8')).samples.filter((s) => fs.existsSync(s.image) && fs.existsSync(path.join(G2, s.png))).slice(0, 4);
+  assert.ok(samples.length > 0, 'no parity sample with its source image');
+  for (const s of samples) {
+    const got = (await squareImage(tf, await tf.RawImage.read(s.image))).rgb(), ref = (await tf.RawImage.read(path.join(G2, s.png))).rgb();
+    assert.deepEqual([got.width, got.height, ref.width, ref.height], [512, 512, 512, 512]);
+    let sum = 0; for (let i = 0; i < ref.data.length; i++) sum += Math.abs(got.data[i] - ref.data[i]);
+    assert.ok(sum / ref.data.length < 1, `${s.png}: mean |d| ${(sum / ref.data.length).toFixed(3)} levels`);
+  }
 });
 
 test('serve.mjs: /__vlm/ maps only models, datasets and raw under the LaCie root; reserved ports are refused', () => {

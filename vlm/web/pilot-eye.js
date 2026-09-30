@@ -29,15 +29,18 @@ export function pickAction(p, family) {
   if (!(best >= 0.5)) return 'NONE_SAFE';
   const ties = sub.filter((i) => Math.abs(p[i] - best) < 1e-6); return ties.includes(0) ? 'CONTINUE' : ACTIONS[ties[0]];
 }
-// o: the 8 head logits (typed arrays or plain arrays) → the decoded monitor fields; reg stays as the raw log1p regression row
-export function decodeHeads(o, family, reasons = REASONS) {
-  const v = soft([...o.verdict]), reg = Array.from(o.reg, Number);
-  return { verdict: VERDICTS[argmax(v)], p_unsafe: v[2], severity: argmax([...o.severity]), reasons: reasons.filter((_, i) => sig(o.reasons[i]) > 0.5),
+// o: the 8 head logits (typed arrays or plain arrays) → the decoded monitor fields; reg stays as the raw log1p regression row.
+// allowed: the family's reason allow-list (labels.json reason_masks[family]; the loss masks every other reason, so those rows
+// are never trained): a reason is kept only when sig > 0.5 and it is allowed, as evaluate.py monitor(..., allowed); null = all
+export function decodeHeads(o, family, reasons = REASONS, allowed = null) {
+  const v = soft([...o.verdict]), reg = Array.from(o.reg, Number), ok = allowed ? new Set(allowed) : null;
+  return { verdict: VERDICTS[argmax(v)], p_unsafe: v[2], severity: argmax([...o.severity]), reasons: reasons.filter((r, i) => sig(o.reasons[i]) > 0.5 && (!ok || ok.has(r))),
     action: pickAction(Array.from(o.actions, sig), family === 'Z' ? 'S' : family), p_ref: sig(o.p_ref[0]), reg, ttc_s: Math.expm1(reg[0]), clearance_u: Math.expm1(reg[1]),
     tags: ZOOM_TAGS.filter((_, i) => sig(o.tags[i]) > 0.5), range_bin: argmax([...o.range]) };
 }
 export const prepareFrame = (rgba, w, h, [W, H] = [160, 96]) => boxResize(rgba, w, h, W, H);
-// encoderUrl / headsUrl: a URL (browser), a path (Node) or the model bytes; labels: the export's labels.json
+// encoderUrl / headsUrl: a URL (browser), a path (Node) or the model bytes; labels: the export's labels.json (reasons,
+// reason_masks, input, nominal_frame_dt). An ok result also carries the raw head outputs as logits {head: number[]}.
 export async function createPilotEye({ ort, encoderUrl, headsUrl, labels = {}, numThreads = 1 }) {
   ort.env.wasm.numThreads = numThreads;
   const opt = { executionProviders: ['wasm'] }, enc = await ort.InferenceSession.create(encoderUrl, opt), hd = await ort.InferenceSession.create(headsUrl, opt), rings = {};
@@ -55,9 +58,9 @@ export async function createPilotEye({ ort, encoderUrl, headsUrl, labels = {}, n
       if (family !== 'Z') for (const f of Object.keys(rings)) if (f !== family) rings[f].reset();
       if (!r) return { status: 'warming up', ms: performance.now() - t0 };
       const out = await hd.run({ m0: r.maps[0], m1: r.maps[1], m2: r.maps[2], dt: new ort.Tensor('float32', Float32Array.from(r.dt), [1, 2]) }), o = {};
-      for (const k of HEAD_NAMES) o[k] = out[k].data;
-      const h = decodeHeads(o, family, reasons);
-      return { status: 'ok', ...h, sentence: templateSentence(h, family), ms: performance.now() - t0 };
+      for (const k of HEAD_NAMES) o[k] = Array.from(out[k].data, Number);
+      const h = decodeHeads(o, family, reasons, labels.reason_masks?.[family] ?? null);
+      return { status: 'ok', ...h, logits: o, sentence: templateSentence(h, family), ms: performance.now() - t0 };
     },
   };
 }

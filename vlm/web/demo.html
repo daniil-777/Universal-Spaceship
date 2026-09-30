@@ -10,17 +10,19 @@ h1{font-size:18px;margin:0 0 4px} #status{color:#9ab;margin-bottom:8px}
 </style>
 </head><body><h1>Astro Pilot Vision — test split</h1><div id="status">loading…</div><div id="cards"></div>
 <script type="module">
-// demo.html — test-split frames with Pilot Eye verdicts (worker) and Describe / Is it safe? (Narrator), with latencies (spec §10.3).
+// demo.html — test-split frames with Pilot Eye verdicts (worker) and Describe / Safety check (Narrator, the trained prompts),
+// with latencies (spec §10.3). The Narrator sees the frame it was trained on: narrator/test.jsonl images[0] joined on key (D: chase).
 // ?dataset=apv-open-v0&eye=pilot_eye_v0&narrator=narrator_v0/web&n=12 (served by vlm/web/serve.mjs from /__vlm/)
 import * as tf from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.3.0';
 import { prepareFrame } from './pilot-eye.js';
-import { createNarrator, contextLine } from './narrator.js';
+import { createNarrator, contextLine, narratorFrame, NARRATOR_TASKS } from './narrator.js';
 const q = new URLSearchParams(location.search), DS = q.get('dataset') || 'apv-open-v0', EYE = q.get('eye') || 'pilot_eye_v0', NAR = q.get('narrator') || 'narrator_v0/web', V = '/__vlm/';
 const status = document.getElementById('status'), say = (t, bad = false) => { status.textContent = t; status.className = bad ? 'err' : ''; };
 const getJson = async (u) => { const r = await fetch(u); if (!r.ok) throw new Error(`${u}: HTTP ${r.status}`); return r.json(); };
 const getText = async (u) => { const r = await fetch(u); if (!r.ok) throw new Error(`${u}: HTTP ${r.status}`); return r.text(); };
 try {
   const labels = await getJson(`${V}models/${EYE}/labels.json`), rows = (await getText(`${V}datasets/${DS}/pilot_eye/test.jsonl`)).trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)).slice(0, +(q.get('n') || 12));
+  const narImages = new Map(); try { for (const l of (await getText(`${V}datasets/${DS}/narrator/test.jsonl`)).split('\n')) if (l.trim()) { const n = JSON.parse(l); if (!narImages.has(n.key)) narImages.set(n.key, n.images[0]); } } catch (err) { console.warn('narrator/test.jsonl:', err.message); }
   const worker = new Worker('./pilot-eye-worker.js', { type: 'module' }), pending = new Map(); let nid = 0, narrator = null, narratorLoading = null;
   worker.onmessage = (e) => { const m = e.data; if ((m.type === 'result' || m.type === 'error') && pending.has(m.id)) { const [ok, no] = pending.get(m.id); pending.delete(m.id); m.type === 'error' ? no(new Error(m.message)) : ok(m); } };
   await new Promise((ok, no) => { const h = (e) => { if (e.data.type === 'ready') { worker.removeEventListener('message', h); ok(); } else if (e.data.type === 'error' && e.data.id === undefined) no(new Error(e.data.message)); }; worker.addEventListener('message', h); worker.postMessage({ type: 'init', encoderUrl: `${V}models/${EYE}/encoder.onnx`, headsUrl: `${V}models/${EYE}/heads.onnx`, labels }); });
@@ -39,14 +41,14 @@ try {
     if (res.status !== 'ok') { info.textContent = `${r.family} · warming up`; continue; }
     info.className = `eye ${r.family === 'Z' ? '' : res.verdict}`; info.textContent = `${r.family} · ${res.sentence} · ${res.ms.toFixed(1)} ms`;
     const out = document.createElement('div'); out.className = 'out';
-    for (const [label, task] of [['Describe', 'Describe the image in detail.'], ['Is it safe?', 'Is it safe?']]) {
+    for (const [label, task] of [['Describe', NARRATOR_TASKS.describe], ['Safety check', NARRATOR_TASKS.safety]]) {
       if (r.family === 'Z' && label !== 'Describe') continue;
       const b = document.createElement('button'); b.textContent = label; card.append(b);
       b.onclick = async () => {
         b.disabled = true; out.textContent = narrator ? '' : 'loading the Narrator…';
         try {
           await loadNarrator(); out.textContent = '';
-          const img = await tf.RawImage.fromURL(`${V}${r.frames[r.frames.length - 1]}`), context = contextLine({ heads: res, family: r.family });
+          const img = await tf.RawImage.fromURL(`${V}${narratorFrame(r, narImages)}`), context = contextLine({ heads: res, family: r.family });
           const d = await narrator.describe(img, { context, task, onToken: (x) => { out.textContent += x; } });
           out.textContent = `${d.text}\n(${d.ms.toFixed(0)} ms on ${narrator.device}; load ${narrator.loadMs.toFixed(0)} ms)`;
         } catch (err) { out.textContent = `Narrator error: ${err.message}`; out.classList.add('err'); } finally { b.disabled = false; }

@@ -8,8 +8,18 @@
 import { renderContext, telemetryOf, ttcBin, clrBin } from '../gen/text/context.js';
 export const NARRATOR_EOS = 49279;
 export const NARRATOR_EDGE = 512;
+// the demo's buttons: the trained caption_detail and safety prompts (apv-pilot narrator train: 224 and 180 rows)
+export const NARRATOR_TASKS = Object.freeze({ describe: 'Describe the image in detail.', safety: 'Is the situation safe? Explain.' });
+// the frame the Narrator was trained on for a Pilot Eye row: the Narrator row's images[0] joined on key (images: Map key -> path)
+// when known; else D's chase view (<key>.chase.png beside the port frames); else the last Pilot Eye frame (S/A/L/Z records have
+// narrator_frame == frames[-1])
+export function narratorFrame(row, images = null) {
+  const hit = images && images.get(row.key), last = row.frames[row.frames.length - 1];
+  return hit || (row.family === 'D' ? last.replace(/[^/]*$/, `${row.key}.chase.png`) : last);
+}
 const p2 = (x) => +(+x).toFixed(2);
-// the Monitor tuple of the Context line (the Task 7 shape; evaluate.py monitor() writes the same from the PyTorch heads)
+// the Monitor tuple of the Context line (the Task 7 shape; evaluate.py monitor(..., allowed=reason_masks[family]) writes the same
+// from the PyTorch heads: createPilotEye filters h.reasons by the same labels.json reason_masks)
 export function monitorFromHeads(h, family) {
   const sa = family === 'S' || family === 'A';
   return { verdict: h.verdict, severity: h.severity, reasons: [...h.reasons], action: h.action, p_ref: sa ? p2(h.p_ref) : null, ttc_bin: sa ? ttcBin(h.ttc_s) : 'none', clr_bin: sa ? clrBin(h.clearance_u) : 'none' };
@@ -37,7 +47,7 @@ export async function createNarrator({ tf, modelId, localModelPath = null, devic
   const loadMs = performance.now() - t0;
   return {
     loadMs, device: usedDevice, dtype, model: mdl, processor,
-    async describe(image, { context = null, task = 'Describe the image in detail.', maxNewTokens = 90, minNewTokens = 0, onToken = null } = {}) {
+    async describe(image, { context = null, task = NARRATOR_TASKS.describe, maxNewTokens = 90, minNewTokens = 0, onToken = null } = {}) {
       const t1 = performance.now(), img = model === 'lfm' ? image : await squareImage(tf, image);
       const text = processor.apply_chat_template([{ role: 'user', content: [{ type: 'image' }, { type: 'text', text: context ? `${context}\n${task}` : task }] }], { add_generation_prompt: true });
       const inputs = model === 'lfm' ? await processor(text, [img]) : await processor(text, [img], { do_image_splitting: false });
