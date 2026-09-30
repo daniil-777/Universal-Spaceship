@@ -461,7 +461,7 @@ async function main() {
   function frame(now) {
     requestAnimationFrame(frame);
     let dtReal = Math.min(0.1, Math.max(0, (now - last) / 1000)); last = now;   // a frame's timestamp can precede the clock read at start-up: never a negative step
-    fpsAcc += dtReal; fpsN++; if (fpsAcc >= 0.5) { state.fps = ap.fps = fpsN / fpsAcc; fpsAcc = 0; fpsN = 0; adaptQuality(state.fps); }
+    fpsAcc += dtReal; fpsN++; if (fpsAcc >= 0.5) { state.fps = ap.fps = fpsN / fpsAcc; fpsAcc = 0; fpsN = 0; if (!zoom || !zoom.active) adaptQuality(state.fps); }
     const dt = state.playing ? dtReal * state.simSpeed : 0; t += dt; acc += dt;
     let steps = 0; while (acc >= ENV.dt && steps < 8) { simStep(); acc -= ENV.dt; steps++; }
     if (steps === 8) acc = 0;

@@ -25,6 +25,9 @@ function appHost(app, space) {
 }
 
 export const ZOOM = { fovDeg: 45, minClearKm: 0.3, camClearKm: 0.15, maxRangeKm: 20000, maxTilt: 70 * Math.PI / 180, ringsFullBelowKm: 2500, ringsGoneAboveKm: 4000, hazeK: 0.55, hazeKm: 40 };
+// 4x MSAA on the composer's own HalfFloat target (diagnosis: no black bands here on ANGLE/Metal); ?zoomaa=0 is the escape
+// back to the old single-sample composer, read once since it never changes mid-session.
+const ZOOMAA = new URLSearchParams(location.search).get('zoomaa') !== '0';
 // WASD / Q E / R F by position (the same place on every layout); Z and + / − by the character on the key, so a Swiss or
 // German keyboard's Z (which sends KeyY) and its + / − keys work as labelled.
 const STEER_KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'KeyQ', 'KeyE', 'KeyR', 'KeyF']);
@@ -52,7 +55,8 @@ export function attachEarthZoom({ renderer, space, app = null, host = app ? appH
     for (const o of globe.group.children) if (o.isMesh) o.renderOrder = 30;
     const marker = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 12), new THREE.MeshBasicMaterial({ color: 0x8ec5ff })); marker.renderOrder = 40;
     scene.add(globe.group, marker);
-    const composer = new EffectComposer(renderer); composer.addPass(new RenderPass(scene, camera)); composer.addPass(new OutputPass());
+    const rt = ZOOMAA ? new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: 4 }) : undefined;
+    const composer = new EffectComposer(renderer, rt); composer.addPass(new RenderPass(scene, camera)); composer.addPass(new OutputPass());
     return { scene, camera, sunDir, globe, marker, composer, rings: createEarthRings(scene, renderer), frame: null, L0: null, size: new THREE.Vector2(), w: 0, h: 0, pr: 0 };
   }
   function rebase() {
