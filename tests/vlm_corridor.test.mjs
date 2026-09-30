@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { SpaceEnv } from '../src/env.js';
+import { qFromAxisAngle, qAxes, qIdentity } from '../src/mathx.js';
 import { cloneEnv, macroAction, rollout, actionSearch, corridorLabel, crashCause, createSearchPilot, atanhClamp, PULSE } from '../vlm/gen/labels/corridor.js';
 import { corridorFacts, clockOf } from '../vlm/gen/labels/corridor_facts.js';
 import { lookAtCamera, projectSphere, cameraPosition, project } from '../vlm/gen/labels/camera.js';
@@ -89,6 +90,34 @@ test('REVIEW FOCUS 1: an empty space corridor with a receding hazard gives null 
   const { safety, safety_eye } = corridorLabel(e, { cNear: 2.5 });
   Object.assign(rec, { facts, safety, safety_eye });
   assert.deepEqual(validateRecord(rec).errors, []);
+});
+test('REVIEW FOCUS 1 (zero relative velocity): a hazard exactly co-moving with the ship gives null TTC, tca_s 0, cpa equal to the current distance, and the record validates', () => {
+  const e = new SpaceEnv(4, { level: 1, count: 1, comets: 0 }); e.setComets(0); e.setCount(1); e.spawnAsteroids(); e.reset();
+  const a = e.asteroids[0], s = e.ship; for (let i = 0; i < 3; i++) { a.p[i] = s.p[i] + 20 * s.f[i]; a.v[i] = s.v[i]; }
+  const facts = corridorFacts(e, chaseCam(e), { sky: 'space', route: null });
+  assert.equal(facts['hazard.0.ttc_s'].v, null);
+  assert.equal(facts['hazard.0.tca_s'].v, 0);
+  assert.equal(facts['hazard.0.cpa_u'].v, facts['hazard.0.dist_u'].v);
+  const rec = JSON.parse(fs.readFileSync(new URL('./vlm_fixtures/record_S.json', import.meta.url), 'utf8'));
+  const { safety, safety_eye } = corridorLabel(e, { cNear: 2.5 });
+  Object.assign(rec, { facts, safety, safety_eye });
+  assert.deepEqual(validateRecord(rec).errors, []);
+});
+test('clock is screen-relative and bearing_clock is ship-body relative: a 90-degree banked ship sees them differ; a hazard behind the camera gives clock null', () => {
+  const e = new SpaceEnv(3, { level: 1, count: 0, comets: 0 }); e.setComets(0); e.setCount(0); e.spawnAsteroids(); e.reset();
+  const s = e.ship; s.p[0] = 0; s.p[1] = 0; s.p[2] = 0;
+  qFromAxisAngle(1, 0, 0, Math.PI / 2, s.q); qAxes(s.q, s.f, s.u, s.r);
+  e.asteroids.push({ p: Float64Array.from([0, 3, 0]), v: new Float64Array(3), q: qIdentity(), axis: Float64Array.from([0, 1, 0]), spin: 0, r: 0.5, m: 1, drift: 0, shape: 0, kind: 0, gen: 0 });
+  e.sense();
+  const cam = lookAtCamera({ eye: [-10, 0, 0], target: [10, 0, 0], up: [0, 1, 0], fovDeg: 50, aspect: 896 / 504 });
+  const facts = corridorFacts(e, cam, { sky: 'space', route: null });
+  assert.equal(facts['hazard.0.clock'].v, 12, 'a hazard offset along world up projects to 12 on screen');
+  assert.equal(facts['hazard.0.bearing_clock'].v, 9, 'the same hazard sits at 9 in the rolled ship\'s own body frame');
+  assert.notEqual(facts['hazard.0.clock'].v, facts['hazard.0.bearing_clock'].v);
+  e.asteroids[0].p[0] = -20; e.asteroids[0].p[1] = 0; e.asteroids[0].p[2] = 0; e.sense();
+  const behind = corridorFacts(e, cam, { sky: 'space', route: null });
+  assert.equal(behind['hazard.0.clock'].v, null);
+  assert.equal(behind['hazard.0.in_frame'].v, false);
 });
 test('worlds.js ROUTES equals src/terrain.js ROUTES (parsed as text: terrain.js imports three)', () => {
   const src = fs.readFileSync(new URL('../src/terrain.js', import.meta.url), 'utf8'), body = /export const ROUTES = \{([\s\S]*?)\n\};/.exec(src)[1].replace(/\/\/[^\n]*/g, '');

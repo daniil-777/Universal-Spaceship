@@ -7,10 +7,10 @@ import { mulberry32, wrapX } from '../../../src/mathx.js';
 import { Dryden } from '../../../src/turbulence.js';
 import { createLongField } from '../../../src/cityfield.js';
 import { CELL } from '../../../src/weather.js';
+import { HAZARD_KINDS } from '../schema.js';
 import { CORRIDOR_ACTIONS, corridorSafety, eyeView } from '../safety.js';
 
 export const H_STEPS = 45, K_DRAWS = 4, M_PER_U = 19, PULSE = Object.freeze({ space: 8, air: 15 }), SEARCH = Object.freeze({ every: 8, H: 30 });
-export const HAZARD_KIND = Object.freeze(['rock', 'comet', 'satellite', 'airliner', 'birds']);
 export const atanhClamp = (c) => { const x = Math.max(-0.995, Math.min(0.995, c)); return 0.5 * Math.log((1 + x) / (1 - x)); };
 const TERRAIN_WORLDS = ['mountains', 'pillars', 'meshy'];
 
@@ -24,7 +24,7 @@ export function cloneEnv(src, noiseSeed = 1) {
   }
   e.rng = mulberry32((noiseSeed * 2654435761) >>> 0); e.rngAir = mulberry32((noiseSeed ^ 0x27d4eb2f) >>> 0); e.rngSky = mulberry32((noiseSeed ^ 0x165667b1) >>> 0);
   e.dryden = new Dryden(mulberry32((noiseSeed ^ 0x5bd1e995) >>> 0)); e.dryden.x.set(src.dryden.x); e.dryden.p = src.dryden.p;
-  if (src.hf && src.hf.lap) { e.hf = createLongField(src.hf.city, ENV.mountains.y0); e.hf.lap.shift = src.hf.lap.shift; } else e.hf = src.hf;
+  if (src.hf && src.hf.lap) { e.hf = createLongField(src.hf.city || src.world, ENV.mountains.y0); e.hf.lap.shift = src.hf.lap.shift; } else e.hf = src.hf;
   e.weather = null; if (src.weather) e.buildWeather(src.weather);
   e.radarSky = e.weather; e.lastAction = e.prevA;
   return e;
@@ -49,14 +49,14 @@ export function clearance(env) {
 export function crashCause(env) {
   if (env.crashCause === 'overstress') return 'overstress';
   const s = env.ship.p, R = ENV.ship.radius; let near = null, nd = Infinity;
-  for (const a of env.asteroids) { const d = Math.hypot(wrapX(a.p[0] - s[0], ENV.xHalf), a.p[1] - s[1], a.p[2] - s[2]) - a.r - R; if (d < 1e-6) return HAZARD_KIND[a.kind || 0]; if (d < nd) { nd = d; near = a; } }
+  for (const a of env.asteroids) { const d = Math.hypot(wrapX(a.p[0] - s[0], ENV.xHalf), a.p[1] - s[1], a.p[2] - s[2]) - a.r - R; if (d < 1e-6) return HAZARD_KINDS[a.kind || 0]; if (d < nd) { nd = d; near = a; } }
   const hf = env.hf;
   if (hf) {
     const e = 0.7 * R, [x, y, z] = s;
     if (y - R < hf.height(x, z) || y - e < Math.max(hf.height(x + e, z), hf.height(x - e, z), hf.height(x, z + e), hf.height(x, z - e))) return TERRAIN_WORLDS.includes(env.world) ? 'terrain' : 'building';
     if (hf.ceiling) return 'roof';
   }
-  return near ? HAZARD_KIND[near.kind || 0] : 'terrain';
+  return near ? HAZARD_KINDS[near.kind || 0] : 'terrain';
 }
 
 export function rollout(env, action, { H = H_STEPS, noiseSeed = 1000, pulse } = {}) {
@@ -87,7 +87,7 @@ export function hazardGeometry(env, a) {
 }
 export function nearestThreat(env) {
   let best = null;
-  for (const j of env.nearest) { const a = env.asteroids[j], g = hazardGeometry(env, a); if (g.ttc !== null && (!best || g.ttc < best.ttc_s)) best = { index: j, kind: HAZARD_KIND[a.kind || 0], ttc_s: g.ttc, tca_s: g.tca, cpa_u: g.miss, cpa_m: g.miss * M_PER_U }; }
+  for (const j of env.nearest) { const a = env.asteroids[j], g = hazardGeometry(env, a); if (g.ttc !== null && (!best || g.ttc < best.ttc_s)) best = { index: j, kind: HAZARD_KINDS[a.kind || 0], ttc_s: g.ttc, tca_s: g.tca, cpa_u: g.miss, cpa_m: g.miss * M_PER_U }; }
   return best;
 }
 export const cpaTrigger = (env) => env.asteroids.some((a) => { const g = hazardGeometry(env, a); return g.closing > 0 && g.tca <= 3 && g.miss < 3; });

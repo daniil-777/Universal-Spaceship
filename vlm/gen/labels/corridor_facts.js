@@ -3,12 +3,16 @@
 import { ENV } from '../../../src/envconst.js';
 import { qInvRotate } from '../../../src/mathx.js';
 import { AERO } from '../../../src/aero.js';
-import { fact } from '../schema.js';
+import { fact, HAZARD_KINDS } from '../schema.js';
 import { projectSphere } from './camera.js';
-import { HAZARD_KIND, M_PER_U, boardWarning, clearance, hazardGeometry } from './corridor.js';
+import { M_PER_U, boardWarning, clearance, hazardGeometry } from './corridor.js';
 
 const DEG = 180 / Math.PI, fin = (x) => (Number.isFinite(x) ? x : null), r3 = (x) => (Number.isFinite(x) ? +x.toFixed(3) : null);
 export const clockOf = (b) => { const h = Math.round(Math.atan2(b[2], b[0]) * DEG / 30); return ((h % 12) + 12) % 12 || 12; };
+// screen-relative clock (spec §4.2: "pixel box and clock sector projected with the capture camera"): the angle of the
+// hazard's projected pixel centre about the image centre, 12 o'clock = up in the image; clockOf above stays the ship-
+// body (pilot-relative) bearing, exposed separately as the `bearing_clock` fact.
+const screenClockOf = (cx, cy, W, H) => { const h = Math.round(Math.atan2(cx - W / 2, H / 2 - cy) * DEG / 30); return ((h % 12) + 12) % 12 || 12; };
 const sizeBin = (px) => (px < 8 ? 'tiny' : px < 24 ? 'small' : px < 64 ? 'medium' : 'large');
 const sideOf = (x, W) => (x < W / 3 ? 'left' : x > 2 * W / 3 ? 'right' : 'centre');
 const turbClass = (s) => (s < 0.8 ? 'LIGHT' : s < 2 ? 'MOD' : 'SEVERE');
@@ -21,14 +25,15 @@ export function corridorFacts(env, cam, { W = 896, H = 504, sky = null, route = 
   put('ship.heading_deg', r3(Math.atan2(-s.f[2], s.f[0]) * DEG), 'deg', 'context');
   put('ship.cmd', [...env.cmd].map(r3), null, 'context'); put('ship.applied', [...env.prevA].map(r3), null, 'context');
   const inFrameKinds = new Set(); let nIn = 0;
-  for (const a of env.asteroids) { const g = hazardGeometry(env, a), p = projectSphere(cam, [s.p[0] + g.rel[0], s.p[1] + g.rel[1], s.p[2] + g.rel[2]], a.r, W, H); if (p.inFrame) { nIn++; inFrameKinds.add(HAZARD_KIND[a.kind || 0]); } }
+  for (const a of env.asteroids) { const g = hazardGeometry(env, a), p = projectSphere(cam, [s.p[0] + g.rel[0], s.p[1] + g.rel[1], s.p[2] + g.rel[2]], a.r, W, H); if (p.inFrame) { nIn++; inFrameKinds.add(HAZARD_KINDS[a.kind || 0]); } }
   put('hazards.count_in_frame', nIn, 'count', 'visual'); put('kinds_in_frame', [...inFrameKinds].sort(), null, 'visual');
   env.nearest.slice(0, 6).forEach((j, i) => {
     const a = env.asteroids[j], g = hazardGeometry(env, a), c = [s.p[0] + g.rel[0], s.p[1] + g.rel[1], s.p[2] + g.rel[2]], p = projectSphere(cam, c, a.r, W, H), vis = p.inFrame ? 'visual' : 'context';
     qInvRotate(s.q, g.rel, body);
-    put(`hazard.${i}.kind`, HAZARD_KIND[a.kind || 0], null, vis); put(`hazard.${i}.in_frame`, p.inFrame, null, 'visual');
+    put(`hazard.${i}.kind`, HAZARD_KINDS[a.kind || 0], null, vis); put(`hazard.${i}.in_frame`, p.inFrame, null, 'visual');
     put(`hazard.${i}.box_px`, p.inFrame ? p.box.map((v) => +v.toFixed(1)) : null, 'px', 'visual'); put(`hazard.${i}.side`, p.inFrame ? sideOf(p.cx, W) : null, null, 'visual');
-    put(`hazard.${i}.clock`, clockOf(body), 'clock', vis); put(`hazard.${i}.size_bin`, p.inFrame ? sizeBin(2 * p.rPx) : null, null, 'visual');
+    put(`hazard.${i}.clock`, p.inFrame ? screenClockOf(p.cx, p.cy, W, H) : null, 'clock', 'visual'); put(`hazard.${i}.bearing_clock`, clockOf(body), 'clock', 'context');
+    put(`hazard.${i}.size_bin`, p.inFrame ? sizeBin(2 * p.rPx) : null, null, 'visual');
     put(`hazard.${i}.r_u`, r3(a.r), 'u', 'context'); put(`hazard.${i}.dist_u`, r3(g.dist), 'u', 'context'); put(`hazard.${i}.closing_u_s`, r3(g.closing), 'u/s', 'context');
     put(`hazard.${i}.ttc_s`, g.ttc === null ? null : r3(g.ttc), 's', 'context'); put(`hazard.${i}.cpa_u`, r3(g.miss), 'u', 'context'); put(`hazard.${i}.tca_s`, r3(g.tca), 's', 'context');
   });
