@@ -4,6 +4,20 @@
 //   verify_claims.js   the claim parser (parseClaims) and the gazetteer
 //   verify_rules.js    facts, slot constructors, derivations, category checks and support()
 // This module judges parsed claims against a record and its row Context, and keeps the public API in one place.
+//
+// Scope (controller ruling, fix round 3): for template text the verifier is authoritative and exact (every slot holds and the
+// parser recovers exactly the slot set). For free text (Narrator, teacher) it is a conservative screen, not a proof. Known
+// limitations, with the catch rates of the round-3 probe (t7_probe3/adv3.mjs; template / free text / Narrator path):
+//   N3  verdict synonyms ("fine", "risky", "all clear") are not verdict claims (0 / 0 / 0 %).
+//   N4  comparatives with an earlier moment or another object ("closer than before", "bigger than the rock") are not
+//       claims (0 / 0 / 0 %).
+//   N5  superlatives, "only" and "both" ("the only hazard in view", "the largest hazard") are not claims (20 / 20 / 20 %).
+//   N6  binding is by clause and nearest subject: a size stated of the wrong hazard across "while", a closing relation of a
+//       body (the Moon, the Earth) and a place's distance given to another place still pass (67 / 47 / 73 %).
+//   N8  the teacher path sees visual facts only, so vert_mode and wow are absent and "approaching the runway" cannot be
+//       checked against the rollout (the L 'family' pseudo-support accepts it).
+//   R2  double negation is resolved by parity within a clause (128/128 caught); a negation that reaches across clauses or
+//       sentences is not.
 import { normContext } from './context.js';
 import { SAFETY_TEXT_IDS } from '../schema.js';
 import { UNITS, unitOf, inIv } from './verify_numbers.js';
@@ -19,7 +33,7 @@ export { factsOf, derive, countPhrase, catSlot, entSlot, countSlot, clockSlot, r
 
 const MONITOR_TYPES = ['verdict', 'action', 'reason'];
 // claims a template answer checks by meaning, not by slot
-const SEMANTIC = ['category', 'outcome', 'adjective', 'kind', 'cause', 'disagree'];
+const SEMANTIC = ['category', 'outcome', 'adjective', 'kind', 'cause', 'disagree', 'presence'];
 // claims only a Context line can ground in a flight row
 const CONTEXT_TYPES = [...MONITOR_TYPES, 'outcome', 'cause'];
 // claims a question states (verdict/action/reason/category/outcome/kind/cause words in a question are not claims)

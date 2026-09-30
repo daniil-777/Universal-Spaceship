@@ -5,21 +5,26 @@
 import { WORDS, UNIT_OF, UNITS, toNum, roundNice, RANGE_RES, NUMBER_RE, SPELLED_RE, spelledValue, isBelowCue, CLAUSE_CUT,
   esc } from './verify_numbers.js';
 import { TERMS, STOP, COMMON_LOWER, isCommonOpener, PROPER_FRAME, NAME_FRAME, PRONOUNS, REASON_CTX, REASON_PHRASES, ACTION_PHRASES,
-  CONTINUE_RE, OUTCOME_PHRASES, CAUSE_CUE, CAUSE_PHRASES, DISAGREE, UNGROUNDED, CATS, RELS, KIND_RE, kindOf,
-  SUBJECTS } from './verify_words.js';
+  CONTINUE_RE, OUTCOME_PHRASES, CAUSE_CUE, CAUSE_PHRASES, DISAGREE, UNGROUNDED, CATS, RELS, KIND_RE, kindOf, SUBJECTS, PRESENCE_NOUN,
+  PRESENCE_CUE } from './verify_words.js';
 
 export const norm = (s) => String(s).normalize('NFC').toLowerCase().replace(/[^\p{L}\p{N} ]+/gu, '').replace(/\s+/g, ' ').trim();
 const TERM_KEYS = new Set(TERMS.map(norm));
+// a name written without its diacritics ("Zurich") is the gazetteer name ("Zürich"); a diacritic the name lacks ("Zérmatt")
+// is not
+const fold = (s) => s.normalize('NFD').replace(/\p{M}+/gu, '').normalize('NFC');
 export function makeGazetteer(names) {
-  const m = new Map();
+  const m = new Map(), f = new Map();
   let maxWords = 1;
   for (const n of names) {
     const k = n ? norm(n) : '';
     if (!k) continue;
     if (!m.has(k)) m.set(k, String(n));
+    if (!f.has(fold(k))) f.set(fold(k), String(n));
     maxWords = Math.max(maxWords, Math.min(8, k.split(' ').length));
   }
-  return { has: (s) => m.has(norm(s)), canonical: (s) => m.get(norm(s)), maxWords, names: [...m.values()] };
+  const get = (s) => { const k = norm(s); return m.get(k) ?? (/^[\x20-\x7e]*$/.test(k) ? f.get(k) : undefined); };
+  return { has: (s) => get(s) !== undefined, canonical: get, maxWords, names: [...m.values()] };
 }
 const isAcronym = (w) => /^[\p{Lu}\d_/-]+$/u.test(w) && /\p{Lu}/u.test(w);
 const cleanWord = (w) => w.replace(/^[^\p{L}\p{N}]+/u, '').replace(/[’']s$/u, '').replace(/[^\p{L}\p{N}'’-]+$/u, '')
@@ -48,22 +53,47 @@ const COMPASS_RE = /\b(north-east|north-west|south-east|south-west|northeast|nor
 const VERDICT_RE = /(?<![\p{L}])(?<!no )(unsafe|safe|caution)(?![\p{L}])(?! (?:action|breakout|option|distance|speed|margin|limit))/gu;
 const phraseRe = (p) => new RegExp(`\\b${esc(p)}\\b`, 'g');
 
-// a claim is negated by "not/never/nor/neither/no longer" among the five words before it in its clause (a clause ends at
-// , ; : or a conjunction), or by "no/without" right before it
+// ---- negation: only within a claim's clause (it ends at , ; : or a conjunction); two negations cancel ----
 const NEG_CUT = /[,;:]|\b(?:and|but|while|whereas|because|so|although|though|yet|or)\b/g;
-function negatedAt(low, sentAt, at) {
-  const seg = low.slice(sentAt, at), cut = Math.max(-1, ...[...seg.matchAll(NEG_CUT)].map((m) => m.index + m[0].length - 1));
-  const words = seg.slice(cut + 1).trim().split(/\s+/).filter(Boolean), last = words.slice(-5).join(' ');
-  // "must not exceed about 30 cm/s" states a limit, not a negated speed
-  if (/\b(?:not|never|n't)\s+(?:be\s+)?(?:exceed|surpass|go above|go beyond|rise above)/.test(last)) return false;
-  if (/\b(?:not|never|nor|neither|no longer)\b|n't\b/.test(last)) return true;
-  // "no" and "without" negate the next word or the one after it ("no towering storm clouds"), never a phrase that opens
-  // with an article ("with no intervention the flight stays clear")
-  return !/^(?:a|an|the)\s/.test(low.slice(at)) && words.slice(-2).some((x) => /^(?:no|without)$/.test(x));
+// "not" that modifies another word, not the claim ("not far from the rock", "not hard to spot", "not only a rock")
+const NOT_IDIOM = /\b(?:not|n't)\s+(?:far|hard|difficult|easy|tough|only|just|merely|unlike|least|necessarily|surprising|unusual)\b/g;
+// "must not exceed about 30 cm/s" states a limit, not a negated speed
+const NOT_LIMIT = /\b(?:not|never|n't)\s+(?:be\s+)?(?:exceed|surpass|go above|go beyond|rise above)\b/;
+// a negation of the whole clause after it; a hazard kind it reaches only as "... there is a comet"
+const CLAUSE_NEG = new RegExp('\\b(?:it is not the case that|it is not true that|it isn\'t true that|not the case that|not true that'
+  + '|nowhere|by no means)\\b');
+// a negation right before a hazard kind's noun phrase ("no sign of a comet", "cannot see a comet")
+const NP_NEG = /\b(?:no sign of|no trace of|without(?: any)?(?: sign of| trace of)?|cannot see|can't see|do not see|don't see)\s*$/;
+const NEGATOR = /^(?:not|never|nor|neither|cannot)$|n't$/;
+const countNeg = (ws) => ws.filter((x) => NEGATOR.test(x)).length - (ws.includes('neither') && ws.includes('nor') ? 1 : 0);
+// is the claim at `at` negated? A predicate is negated by "not/never/nor/neither/n't" among the five words before it, by a
+// clause negation before it, or by "no/without" right before it; a hazard kind (np = its determiner) only by a negation that
+// stands right before its noun phrase
+function negatedAt(low, sentAt, at, np = null) {
+  const seg = low.slice(sentAt, np ?? at), cut = Math.max(-1, ...[...seg.matchAll(NEG_CUT)].map((m) => m.index + m[0].length - 1));
+  let text = seg.slice(cut + 1).replace(NOT_IDIOM, ' '), n = 0;
+  const cm = CLAUSE_NEG.exec(text);
+  if (cm) {
+    const rest = text.slice(cm.index + cm[0].length);
+    if (np === null || /\bthere\b/.test(rest)) n++;
+    text = rest;
+  }
+  const words = text.trim().split(/\s+/).filter(Boolean);
+  if (NOT_LIMIT.test(words.slice(-6).join(' '))) return false;
+  if (np !== null) {
+    const near = countNeg(words.slice(-3));
+    n += near || (NP_NEG.test(text) ? 1 : 0);
+  } else {
+    n += countNeg(words.slice(-5));
+    // "no" and "without" negate the next word or the one after it ("no towering storm clouds"), never a phrase that opens
+    // with an article ("with no intervention the flight stays clear")
+    if (!/^(?:a|an|the)\s/.test(low.slice(at)) && words.slice(-2).some((x) => /^(?:no|without)$/.test(x))) n++;
+  }
+  return n % 2 === 1;
 }
 const POSITION = new Set(['clock', 'region', 'compass']);
 const NEGATABLE = new Set(['number', 'range', 'count', 'clock', 'bearing_clock', 'region', 'compass', 'category', 'kind', 'cause',
-  'outcome', 'entity']);
+  'outcome', 'entity', 'presence']);
 // the object a position claim or a closing relation is about: the nearest subject before it in its sentence, else the
 // nearest one after it
 function subjectOf(low, s, cl, claims) {
@@ -105,6 +135,24 @@ function parseEntities(src, gaz, push, blank) {
       i += hit[1] - 1;
     } else if (cap && !STOP.has(clean) && !isAcronym(clean) && (!start(i) || nameFramed(i) || !isCommonOpener(low))) {
       push('unknown_entity', clean, words[i].index);
+    }
+  }
+}
+
+// presence claims: in a clause with a presence cue, every body or object noun ("the Earth is visible", "also in view are the
+// Earth and the Moon"). The claim sits at the cue, so "the Moon is not in view" is negated; "no Moon" before the noun also is.
+const PRESENCE_CUT = /[,;:]|\b(?:but|while|whereas|because|although|though)\b/g;
+function parsePresence(low, sents, push) {
+  for (const s of sents) {
+    const text = low.slice(s.at, s.at + s.text.length);
+    const cuts = [0, ...[...text.matchAll(PRESENCE_CUT)].map((m) => m.index + m[0].length), text.length];
+    for (let i = 0; i + 1 < cuts.length; i++) {
+      const part = text.slice(cuts[i], cuts[i + 1]), cue = PRESENCE_CUE.exec(part);
+      if (!cue) continue;
+      for (const m of part.matchAll(PRESENCE_NOUN)) {
+        const noBefore = /\bno\s+(?:\S+\s+)?$/.test(part.slice(0, m.index));
+        push('presence', m[1] === 'docking port' ? 'station' : m[1], s.at + cuts[i] + cue.index, { noBefore });
+      }
     }
   }
 }
@@ -169,17 +217,18 @@ export function parseClaims(text, gaz) {
   for (const [o, p] of OUTCOME_PHRASES) scan(phraseRe(p), (m) => push('outcome', o, m.index));
   // a hazard kind: only the noun is used up, so the size or colour words before it stay claims of their own
   for (const m of [...lowerSame(w).matchAll(KIND_RE)]) {
-    const at = m.index + m[0].lastIndexOf(m[1]);
-    push('kind', kindOf(m[1]), at);
+    const at = m.index + m[0].lastIndexOf(m[1]), dets = [...m[0].matchAll(/\b(?:a|an|the|another|lone|that|this)\s/g)];
+    push('kind', kindOf(m[1]), at, { np: m.index + dets[dets.length - 1].index });
     blank(at, m[0].length - (at - m.index));
   }
   // a relation's claim sits at its direction word, so "not" before that word negates it
   for (const [dim, re, get] of RELS) scan(re, (m) => push('category', get(m), m[1] ? m.index + m[0].lastIndexOf(m[1]) : m.index, { dim }));
   for (const [dim, value, re] of CATS) scan(re, (m) => push('category', value, m.index, { dim }));
   scan(UNGROUNDED, (m) => push('adjective', m[1], m.index));
+  parsePresence(low0, sents, push);
   for (const cl of c) {
     const s = sents[cl.sent];
-    if (NEGATABLE.has(cl.type) && negatedAt(low0, s.at, cl.at)) cl.negated = true;
+    if (NEGATABLE.has(cl.type) && negatedAt(low0, s.at, cl.at, cl.np ?? null) !== !!cl.noBefore) cl.negated = true;
     const bound = POSITION.has(cl.type) || (cl.type === 'category' && (cl.dim === 'side' || cl.dim === 'closing'));
     if (bound) cl.subject = subjectOf(low0, s, cl, c);
   }

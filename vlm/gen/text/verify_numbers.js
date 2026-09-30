@@ -79,8 +79,12 @@ export const esc = (s) => s.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&');
 // the same for patterns with the u flag, where "\-" outside a class is a syntax error
 export const escU = (s) => s.replace(/[/\\^$*+?.()|[\]{}]/g, '\\$&');
 const UALT = UNIT_WORDS.map(([w]) => esc(w)).join('|'), UEND = '(?![\\p{L}\\d])';
-const UN = `(${UALT})${UEND}`, UNOPT = `(?:(?:${UALT})${UEND})?`, NUM = '(\\d[\\d,]*(?:\\.\\d+)?)';
-export const toNum = (s) => +s.replace(/,/g, '');
+// a number: digits, or groups of three set off by a comma, space, apostrophe or (narrow) no-break space ("1,250", "1 250",
+// "1'250"), with an optional decimal part; its value is the whole number
+const GROUP = "[,'\u2019 \u00A0\u2009\u202F]";
+const UN = `(${UALT})${UEND}`, UNOPT = `(?:(?:${UALT})${UEND})?`;
+const NUM = `((?<![\\d.,'])\\d{1,3}(?:${GROUP}\\d{3})+(?![\\d])(?:\\.\\d+)?|\\d+(?:\\.\\d+)?)`;
+export const toNum = (s) => +s.replace(/[^\d.]/g, '');
 const BELOW = 'under|below|less than|within|closer than|up to', ABOVE = 'over|above|more than|beyond|farther than|further than|outside';
 export const RANGE_RES = [
   [new RegExp(`\\bbetween\\s+(?:about\\s+)?${NUM}\\s*${UNOPT}\\s+and\\s+${NUM}\\s*${UN}`, 'giu'), (m) => [toNum(m[1]), toNum(m[2]), m[3]]],
@@ -130,8 +134,9 @@ export function binEntries(F) {
   return out;
 }
 export const inIv = (x, lo, hi) => x >= lo - 1e-9 * Math.max(1, Math.abs(lo)) && x <= hi + 1e-9 * Math.max(1, Math.abs(hi));
-export const sameBin = (lo, hi, [a, b]) => Math.abs(lo - a) <= 0.01 * Math.max(1, a)
-  && (hi === Infinity ? b === Infinity : b !== Infinity && Math.abs(hi - b) <= 0.01 * Math.max(1, b));
+// a stated range holds for a bin fact when the bin lies inside it ("less than 20 m" for '2-20 m')
+const tol = (x) => 0.01 * Math.max(1, Math.abs(x));
+export const binWithin = (lo, hi, [a, b]) => lo <= a + tol(a) && (hi === Infinity || (b !== Infinity && b <= hi + tol(hi)));
 
 // ---- binding: the quantity nouns a number can belong to, with the facts each one names ----
 const QTY = [[/\b(?:head|tail)wind/g, [/^wind\.head_kt$/]], [/\bcrosswind/g, [/^wind\.cross_kt$/]],

@@ -83,7 +83,7 @@
     "The hazard nearest to the ship is {a_kind}.",
     "I see {a_kind} as the closest hazard.",
     "{a_kind} is closest to the ship in this frame.",
-    "The closest hazard is {a_kind}."
+    "The closest hazard in view is {a_kind}."
   ] },
   "nearest_side_q": { "kind": "vqa_q", "families": ["S", "A"], "slots": ["kind"], "forms": [
     "On which side of the image is the nearest {kind}?",
@@ -108,7 +108,7 @@
     "It shows up {side_at}.",
     "The nearest one can be seen {side_at}.",
     "It is placed {side_at}.",
-    "The nearest hazard is {side_at}."
+    "The nearest hazard in view is {side_at}."
   ] },
   "nearest_clock_q": { "kind": "vqa_q", "families": ["S", "A"], "slots": ["kind"], "forms": [
     "Where is the nearest {kind} in the image, as a clock position?",
@@ -133,7 +133,7 @@
     "It lies at {clock} in the frame.",
     "The closest one shows at {clock} in the picture.",
     "On the image clock it is at {clock}.",
-    "The nearest hazard is at {clock} in the image."
+    "The nearest hazard in view sits at {clock} in the image."
   ] },
   "size_q": { "kind": "vqa_q", "families": ["S", "A"], "slots": ["kind"], "forms": [
     "How big does the nearest {kind} look in the frame?",

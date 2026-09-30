@@ -1,7 +1,7 @@
 // vlm/gen/text/verify_rules.js — what holds a claim: the record's facts (factsOf), the slot constructors and derivations
 // that map a fact to what a slot states, the category checks, and support(): the fact ids (or 'monitor' / 'safety' /
 // 'family') behind one parsed claim. A position claim is checked against the object it is about (its subject).
-import { UNITS, WORDS, rangeText, aboutHolds, numericEntries, binEntries, inIv, sameBin, boundIds } from './verify_numbers.js';
+import { UNITS, WORDS, rangeText, aboutHolds, numericEntries, binEntries, inIv, binWithin, boundIds } from './verify_numbers.js';
 import { W, NOUNS, ROUTE_NAMES, WORLD_TAGS, CAUSE_REASONS } from './verify_words.js';
 import { norm } from './verify_claims.js';
 import { TTC_RANGE, CLR_RANGE_U } from './context.js';
@@ -127,14 +127,17 @@ function dclosingCheck(F, v) {
   const c = val(F, 'closing_cms'), l = val(F, 'corridor_limit_cms');
   return typeof c === 'number' && typeof l === 'number' && (c > l) === (v === 'above') ? ['closing_cms', 'corridor_limit_cms'] : [];
 }
-// rain: the rain flag or a METAR rain group; a storm: a storm-type weather cell (type 1); snow: the ICE zoom tag
+// rain: the rain flag or a METAR rain group; a storm: a storm-type weather cell (type 1); storm clouds: that or a stormy
+// preset; snow: the ICE zoom tag
 const rainCheck = (F) => idsWhere(F, (id, x) => (id === 'scene.rain' && x === true)
   || (id === 'scene.clouds' && /(?:^|\s)[-+]?RA\b/.test(x)));
 const stormCheck = (F) => idsWhere(F, (id, x) => id === 'weather.cells' && Array.isArray(x) && x.some((c) => c && c.type === 1));
+const stormCloudCheck = (F) => [...is('weather.preset', 'storm')(F), ...stormCheck(F)];
 const signOf = (id, pos) => (F, v) => idsWhere(F, (i, x) => i === id && (v === pos ? x > 0 : x < 0));
 const CAT = { size: (F, v) => idsWhere(F, (id, x) => /^hazard\.\d+\.size_bin$/.test(id) && x === v), side: sideCheck,
   sky: (F, v) => is('weather.preset', v)(F), skyclear: (F) => [...is('weather.preset', 'clear')(F), ...cloudIs(['NSC', 'SKC', 'NONE'])(F)],
-  overcast: cloudIs(['BKN', 'OVC']), rain: rainCheck, storm: stormCheck, snow: (F) => tagCheck(F, 'ICE').filter((id) => id === 'zoom.tags'),
+  overcast: cloudIs(['BKN', 'OVC']), rain: rainCheck, storm: stormCheck, stormcloud: stormCloudCheck,
+  snow: (F) => tagCheck(F, 'ICE').filter((id) => id === 'zoom.tags'),
   stars: () => [], tunnel: (F) => is('in_tunnel', true)(F), incloud: (F) => idsWhere(F, (id, x) => id === 'air.in_cloud' && x > 0.25),
   colour: (F, vs) => idsWhere(F, (id, x) => /^image\.palette_\d$/.test(id) && vs.includes(x)), light: lightCheck,
   bright: (F, v) => is('image.brightness_bin', v)(F), texture: (F, v) => is('image.edge_bin', v)(F), vis: (F, v) => is('scene.vis', v)(F),
@@ -184,10 +187,10 @@ function numberSupport(cl, F, ctx, attributed) {
   const dimOk = ([id, , u]) => ok(id) && UNITS[u][0] === cl.dim, si = ([, x, u]) => Math.abs(x * UNITS[u][1]);
   if (cl.type === 'number') return numericEntries(F).filter((e) => dimOk(e) && aboutHolds(si(e) / k, cl.value)).map(([id]) => id);
   const lo = cl.lo * k, hi = cl.hi * k, out = numericEntries(F).filter((e) => dimOk(e) && inIv(si(e), lo, hi)).map(([id]) => id);
-  for (const [id, dim, iv] of binEntries(F)) if (ok(id) && dim === cl.dim && sameBin(lo, hi, iv)) out.push(id);
+  for (const [id, dim, iv] of binEntries(F)) if (ok(id) && dim === cl.dim && binWithin(lo, hi, iv)) out.push(id);
   if (attributed && ctx && ctx.monitor) {
     const t = TTC_RANGE[ctx.monitor.ttc_bin], r = CLR_RANGE_U[ctx.monitor.clr_bin];
-    const inBin = (cl.dim === 'time' && t && sameBin(lo, hi, t)) || (cl.dim === 'len' && r && sameBin(lo, hi, [r[0] * 19, r[1] * 19]));
+    const inBin = (cl.dim === 'time' && t && binWithin(lo, hi, t)) || (cl.dim === 'len' && r && binWithin(lo, hi, [r[0] * 19, r[1] * 19]));
     if (inBin) out.push('monitor');
   }
   return out;
@@ -203,6 +206,15 @@ function countSupport(cl, F) {
   if (v === 0) return kinds.v.includes(cl.noun) ? [] : ['kinds_in_frame'];
   return kinds.v.length === 1 && kinds.v[0] === cl.noun && n && n.v === v ? ['kinds_in_frame', 'hazards.count_in_frame'] : [];
 }
+// a body or object in the frame: the Earth and Moon by their in-frame flags (Z images are of the Earth), the PAPI and the
+// windsock when their fact is recorded (it is null out of view), the station in D and the runway in L by the family
+function presenceSupport(v, F, rec) {
+  if (v === 'earth') return rec.family === 'Z' ? ['family'] : is('earth_in_frame', true)(F);
+  if (v === 'moon') return is('moon_in_frame', true)(F);
+  if (v === 'papi') return idsWhere(F, (id) => id === 'papi_whites_cam');
+  if (v === 'windsock') return idsWhere(F, (id) => id === 'windsock.from_deg');
+  return (v === 'station' && rec.family === 'D') || (v === 'runway' && rec.family === 'L') ? ['family'] : [];
+}
 // the fact ids (or 'monitor' / 'safety' / 'family') that support a claim's positive reading; [] when nothing does
 export function support(cl, F, rec, ctx, attributed) {
   const S = rec.safety, v = cl.value, mon = attributed && ctx && ctx.monitor ? ctx.monitor : null;
@@ -217,6 +229,7 @@ export function support(cl, F, rec, ctx, attributed) {
     const inFrame = hazards(F, { kind: 'hazard', value: v }).filter((i) => val(F, `hazard.${i}.in_frame`) === true);
     return [...out, ...inFrame.map((i) => `hazard.${i}.kind`)];
   }
+  if (cl.type === 'presence') return presenceSupport(v, F, rec);
   if (cl.type === 'cause') {
     const m = ctx && ctx.monitor;
     return S && S.cause === v && (!m || (CAUSE_REASONS[v] || []).some((r) => m.reasons.includes(r))) ? ['safety.cause'] : [];

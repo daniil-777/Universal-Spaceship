@@ -270,3 +270,13 @@ test('round 2: most_dangerous names a hazard only when it is the one kind in the
   const one = { ...s1, facts: { ...s1.facts, kinds_in_frame: V(['rock']) } };
   assert.ok(md.ask(one, mulberry32(1), ctxOf(one)));
 });
+
+test('round 3: bank wording — jet counts agree, the nearest-hazard answers say "in view"', () => {
+  assert.ok(!bank.jets_some_a.forms.some((f) => /which are/.test(f)));
+  assert.ok(bank.nearest_kind_a.forms.includes('The closest hazard in view is {a_kind}.'));
+  assert.ok(bank.nearest_side_a.forms.includes('The nearest hazard in view is {side_at}.'));
+  assert.ok(bank.nearest_clock_a.forms.includes('The nearest hazard in view sits at {clock} in the image.'));
+  for (const id of ['nearest_kind_a', 'nearest_side_a', 'nearest_clock_a']) {
+    assert.ok(!bank[id].forms.some((f) => /^The (?:nearest|closest) hazard (?:is|sits)/.test(f)), id);
+  }
+});

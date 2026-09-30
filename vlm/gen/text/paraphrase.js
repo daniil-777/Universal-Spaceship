@@ -42,8 +42,10 @@ function lintForm(id, t, f) {
     const c = w.replace(/^[^\p{L}]+|[^\p{L}'-]+$/gu, '').replace(/'s$/, '');
     if (i > 0 && /^\p{Lu}/u.test(c) && c !== 'Xslot' && !PROPER_OK.has(c) && !/^[\p{Lu}-]+$/u.test(c) && !/[.!?:;]["')]*$/.test(words[i - 1]) && !SENTENCE_SLOTS.has(slotBefore(f, i))) e.push(`${id}: "${f}" has the proper noun "${c}" outside a slot`);
   });
-  // category and outcome words are checked by meaning against the record, so a yes/no answer may spell them out
-  const claims = parseClaims(bare, EMPTY_GAZ).filter((c) => c.type !== 'unknown_entity' && c.type !== 'category' && c.type !== 'outcome' && !(QUESTION.has(t.kind) && ['verdict', 'action', 'reason'].includes(c.type)));
+  // category, outcome and presence words are checked by meaning against the record, so a yes/no answer may spell them out
+  const byMeaning = ['unknown_entity', 'category', 'outcome', 'presence'];
+  const asked = (c) => QUESTION.has(t.kind) && ['verdict', 'action', 'reason'].includes(c.type);
+  const claims = parseClaims(bare, EMPTY_GAZ).filter((c) => !byMeaning.includes(c.type) && !asked(c));
   for (const c of claims) e.push(`${id}: "${f}" states a ${c.type} (${JSON.stringify(c.value ?? [c.lo, c.hi])}) outside a slot`);
   return e;
 }

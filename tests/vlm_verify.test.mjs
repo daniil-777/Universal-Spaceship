@@ -75,7 +75,8 @@ test('parser: "no safe action" is an action, not SAFE; reason words count only b
 });
 test('parser: acronyms and bodies are terms, not places; a sentence-initial common word is not a place; your N o\'clock is the pilot bearing', () => {
   const g = makeGazetteer(['PAPI', 'Earth', 'Split', 'Orange', 'Zermatt']);
-  assert.deepEqual(t2('The PAPI shows two white and two red lights; the Earth is in view.', g), [['count', 2], ['count', 2]]);
+  const papi = t2('The PAPI shows two white and two red lights; the Earth is in view.', g);
+  assert.deepEqual(papi, [['presence', 'papi'], ['count', 2], ['count', 2], ['presence', 'earth']]);
   assert.deepEqual(t2('Split the wind into components. Orange and blue dominate. The view is near Split.', g).filter((c) => c[0] !== 'category'), [['entity', 'Split']]);
   assert.deepEqual(t2('A comet at your 1 o\'clock; the rock sits at 2 o\'clock in the image.'), [['kind', 'comet'], ['bearing_clock', 1], ['kind', 'rock'], ['clock', 2]]);
   const brec = { ...rec, facts: { ...rec.facts, 'hazard.0.bearing_clock': F(1, 'clock') } };
@@ -180,4 +181,46 @@ test('round 2: roundNice is symmetric about zero; "about X" holds within half a 
   for (const v of [0.66, 3.5, 6.6, 12.4, 142.3, 233.7]) assert.equal(roundNice(-v).value, -roundNice(v).value, String(v));
   assert.ok(aboutHolds(6.6, 7) && aboutHolds(0.66, 0.6) && aboutHolds(142.3, 140) && aboutHolds(12.4, 12));
   assert.ok(!aboutHolds(6.6, 5) && !aboutHolds(233.7, 300) && !aboutHolds(21.5, 30));
+});
+
+// ---- fix round 3 ----
+const lRec = { family: 'L', facts: { 'cfg.gear': F('down', null, 'visual'), papi_whites_cam: F(1, 'count', 'visual'),
+  'windsock.from_deg': F(null, 'deg', 'visual') }, safety: null };
+test('round 3: common nouns open sentences; kind words used as modifiers are not hazard claims', () => {
+  for (const o of ['Runway', 'Birds', 'Station', 'Ocean', 'Tarmac', 'Glaciers', 'Thrusters']) {
+    assert.ok(ok(`${o} dominates the view as the gear is down.`, lRec), o);
+  }
+  assert.ok(!ok('Zorblax dominates the view as the gear is down.', lRec), 'an unknown name');
+  assert.ok(!ok('Runway town lies ahead.', lRec), 'a common word in a name frame');
+  const a = { family: 'A', facts: { world: F('pillars', null, 'visual'), kinds_in_frame: F([], null, 'visual') }, safety: null };
+  assert.ok(ok('The aircraft weaves between the rock pillars.', a) && ok('A rock face rises ahead of the aircraft.', a));
+  assert.ok(!ok('There is a rock ahead.', a) && ok("A bird's-eye view shows the Matterhorn in the upper left.", zrec));
+});
+test('round 3: negation binds only to a predicate of its clause; idioms are not negations; two negations cancel', () => {
+  assert.ok(ok('The ship is not far from the rock.', sRec) && ok("It is not hard to spot the rock at 2 o'clock in the image.", sRec));
+  assert.ok(!ok('The ship is not far from the comet.', sRec), 'no comet in the frame');
+  assert.ok(!ok('The frame shows not only a comet but also a rock.', sRec), 'no comet in the frame');
+  assert.ok(ok('There is no sign of a comet in the frame.', sRec) && ok('Nowhere in the frame is there a comet.', sRec));
+  assert.ok(ok('It is not the case that the rock is large.', sRec) && !ok('It is not the case that the rock is medium-sized.', sRec));
+  assert.ok(!ok('The rock is not not large.', sRec) && !ok('It is not true that the rock is not large.', sRec));
+});
+test('round 3: gear state in its common forms; presence of bodies and objects', () => {
+  assert.ok(ok('With the gear down, the aircraft approaches the runway.', lRec) && ok('The landing gear is extended.', lRec));
+  assert.ok(!ok('The aircraft has its gear up.', lRec) && !ok('The undercarriage is retracted.', lRec));
+  assert.ok(!ok('The gear is not down.', lRec) && ok('The PAPI shows one white and three red lights.', lRec));
+  assert.ok(!ok('The windsock is visible.', lRec) && !ok('The station is visible in the frame.', lRec));
+  const s = { ...sRec, facts: { ...sRec.facts, earth_in_frame: F(true, null, 'visual') } };
+  assert.ok(ok('The Moon is not in view.', s) && !ok('The Moon is visible.', s));
+  assert.ok(ok('Also in view is the Earth.', s) && !ok('The Earth is not in view.', s));
+});
+test('round 3: bins, storm clouds, grouped numbers and names written without diacritics', () => {
+  const d = { family: 'D', facts: { station_distance_bin: F('2-20 m', null, 'visual'), phase: F('FINAL', null, 'visual') }, safety: null };
+  assert.ok(ok('The station is visible and less than 20 m away.', d) && !ok('The station is less than 2 m away.', d));
+  const a = (preset) => ({ family: 'A', facts: { 'weather.preset': F(preset, null, 'visual') }, safety: null });
+  assert.ok(ok('Storm clouds loom ahead.', a('storm')) && !ok('Storm clouds loom ahead.', a('clear')));
+  for (const t of ['about 1 250 m/s', "about 1'250 m/s", 'about 1 250 m/s', 'about 1,250 m/s']) {
+    assert.equal(parseClaims(t, gaz)[0].value, 1250, t);
+  }
+  const g = makeGazetteer(['Zürich', 'Zermatt']);
+  assert.equal(g.canonical('Zurich'), 'Zürich'); assert.equal(g.has('Zérmatt'), false);
 });

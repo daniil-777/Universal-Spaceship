@@ -216,7 +216,7 @@
     "{jets} failed. That is {jet_names}.",
     "Failures on {jets}: {jet_names}.",
     "Out of service: {jets}, which means {jet_names}.",
-    "Out of service: {jets}, which are {jet_names}."
+    "The failures: {jets}, namely {jet_names}."
   ] },
   "breakout_q": { "kind": "vqa_q", "families": ["D"], "slots": [], "forms": [
     "Is a breakout available?",

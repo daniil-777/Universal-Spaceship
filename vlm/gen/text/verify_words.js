@@ -95,17 +95,21 @@ const LIGHT = [['in full daylight', ['day']], ['in low sunlight', ['golden']], [
   ['twilight', ['twilight', 'dusk']], ['at night', ['night']], ['night-time', ['night']], ['in darkness', ['night']],
   ['darkness', ['night']], ['dusk light', DUSK], ['at dusk', DUSK], ['in direct sunlight', LIT], ['full sunlight', LIT], ['sunlit', LIT],
   ['lit by the sun', LIT], ['in sunlight', LIT], ['sunlight', [...LIT, 'golden']], ['daylight', ['day', 'golden']],
-  ['in shadow', ['shadow']], ['shadow', ['shadow']]];
+  ['in shadow', ['shadow']], ['shadow', ['shadow']], ['in deep shade', ['shadow']], ['in shade', ['shadow']], ['daytime', ['day']],
+  ['broad daylight', ['day']], ['midday', ['day']]];
 const COLOUR_SYN = [['gray', ['grey']], ['golden', ['yellow', 'orange']], ['gold', ['yellow', 'orange']], ['amber', ['orange']],
   ['crimson', ['red']], ['scarlet', ['red']], ['azure', ['blue']], ['navy', ['blue']], ['cyan', ['teal', 'blue']], ['turquoise', ['teal']],
   ['silver', ['grey', 'white']], ['beige', ['brown', 'white']], ['tan', ['brown', 'orange']], ['violet', ['purple']],
   ['magenta', ['pink', 'purple']]];
 // weather and flight-condition words: [phrase, dim, value]; only a METAR report says cloudless, a clear preset or report says
-// clear skies, and a storm is a storm-type weather cell
+// clear skies, a storm cell or thunderstorm is a storm-type weather cell, and a storm or storm clouds are a stormy preset or
+// such a cell
 const WEATHER = [['overcast', 'overcast', true], ['cloudless', 'clouds', ['NSC', 'SKC', 'NONE']], ['clear skies', 'skyclear', true],
   ['clear sky', 'skyclear', true], ['raining', 'rain', true], ['rainy', 'rain', true], ['rainfall', 'rain', true], ['rain', 'rain', true],
-  ['drizzle', 'rain', true], ['storm cells?', 'storm', true], ['thunderstorms?', 'storm', true], ['storm clouds?', 'storm', true],
-  ['storm', 'storm', true], ['snow-capped', 'snow', true], ['snow-covered', 'snow', true], ['snowy', 'snow', true], ['snow', 'snow', true],
+  ['drizzle', 'rain', true], ['storm cells?', 'storm', true], ['thunderstorm cells?', 'storm', true], ['thunderstorms?', 'storm', true],
+  ['storm clouds?', 'stormcloud', true], ['thunderclouds?', 'stormcloud', true],
+  ['storm', 'stormcloud', true], ['snow-capped', 'snow', true], ['snow-covered', 'snow', true], ['snowy', 'snow', true],
+  ['snow', 'snow', true],
   ['stars', 'stars', true], ['starry', 'stars', true], ['stormy', 'sky', 'storm'], ['inside a tunnel', 'tunnel', true],
   ['in a tunnel', 'tunnel', true], ['through a tunnel', 'tunnel', true], ['inside cloud', 'incloud', true],
   ['inside a cloud', 'incloud', true], ['inside the cloud', 'incloud', true], ['in cloud', 'incloud', true]];
@@ -125,6 +129,14 @@ const pre = (dim) => (dim === 'colour' ? '(?<![\\p{L}])' : '(?<![\\p{L}-])');
 const body = (p) => (p.includes('(?') || p.endsWith('?') ? p : escU(p));
 export const CATS = RAW.map(([dim, value, p]) => [dim, value,
   new RegExp(`${pre(dim)}${body(p)}(?![\\p{L}-])${p === 'large' ? '(?! towns?\\b)' : ''}`, 'gu'), p.length]).sort((a, b) => b[3] - a[3]);
+// gear state in its common forms: "the gear is (not) down", "with the gear up", "has its gear retracted", "the undercarriage is
+// stowed", "gear-down"
+const GEAR_STATE = { down: 'down', extended: 'down', lowered: 'down', deployed: 'down', up: 'up', retracted: 'up', stowed: 'up',
+  raised: 'up',
+  'in transit': 'transit', moving: 'transit' };
+const GEAR_RE = new RegExp('\\b(?:landing gear|gear|undercarriage|wheels)(?:\\s+(?:is|are|shows|appears|looks|seems|remains|stays'
+  + '|isn\'t|aren\'t|has been|have been|was|were|still|now|already|currently|fully|not))*(?:\\s+|-)'
+  + '(down|up|extended|lowered|deployed|retracted|stowed|raised|in transit)\\b', 'g');
 // relations that need a direction word next to their subject
 const DCL = ['above', 'over', 'beyond', 'exceeds', 'higher than'];
 const SIDE_RE = new RegExp('\\b(?:on|to|at|toward|towards|near) the (left|right|middle|upper|lower|top|bottom)'
@@ -140,24 +152,36 @@ export const RELS = [['gs', /\b(?:(?:well|slightly) )?(above|below) the glideslo
   ['dclosing', /\b(above|below|over|under|within|inside|beyond|exceeds|higher than|lower than) (?:the |its )?limit\b/g,
     (m) => (DCL.includes(m[1]) ? 'above' : 'below')],
   ['closing', /\b(closing in|closing fast|closing on|getting closer|approaching|approaches|converg\w*|gap shrinks)\b/g, () => 1],
-  ['closing', /\b(receding|recedes|moving away|draws away|opening away|getting farther away|separate at|separating|gap grows)\b/g,
+  ['closing', new RegExp('\\b(receding|recedes|moving away|draws away|drawing away|drifting away|drifts away|backing off|backs off'
+    + '|pulling away|opening away|getting farther away|separate at|separating|gap grows)\\b', 'g'),
     () => -1],
   ['turb', /\b(light|moderate|severe)(?:ly)? turbulen(?:ce|t)\b/g, (m) => m[1]],
   ['turb', /\bturbulen(?:ce|t)\b[^.;]{0,25}?\b(light|moderate|severe)\b/g, (m) => m[1]],
   ['stall', /\b(?:close to|near|at|past|in|into) (?:a |the )?stall\b|\bstalled\b/g, () => true],
-  ['gear', /\bgear(?:-| is | are | shows | appears )(?:currently |still |now )?(down|up|in transit|extended|lowered)\b/g,
-    (m) => (m[1] === 'up' || m[1] === 'in transit' ? m[1].replace('in ', '') : 'down')],
+  ['gear', GEAR_RE, (m) => GEAR_STATE[m[1]]],
   ['side', SIDE_RE, (m) => ({ middle: 'centre', upper: 'top', lower: 'bottom' })[m[1]] || m[1]]];
+// a kind word is a hazard only as a noun: not inside a compound ("bird's-eye", "rock-strewn") or before another noun that it
+// modifies ("rock pillars", "a rock face", "satellite imagery")
+const HEADS = 'pillars?|faces?|walls?|fields?|formations?|spires?|outcrops?|surfaces?|slabs?|arch(?:es)?|towers?|columns?|gardens?|bands?'
+  + '|belts?|layers?|ledges?|eye|views?|images?|imagery|photos?|maps?|dish(?:es)?|links?|tails?|strikes?|songs?|nests?|debris|dust';
+export const KIND_END = `s?(?![\\p{L}'’-])(?!\\s+(?:${HEADS})\\b)`;
 // hazard kinds named with an article are claims about the frame ("there is a comet in the frame")
 export const KIND_RE = new RegExp('\\b(?:a|an|the|another|lone|that|this)\\s+(?:[a-z-]+\\s+){0,2}?'
-  + '(rock|comet|satellite|airliner|flocks? of birds|flock|bird)s?\\b', 'g');
+  + `(rock|comet|satellite|airliner|flocks? of birds|flock|bird)${KIND_END}`, 'gu');
 export const kindOf = (w) => (/^flock|^bird/.test(w) ? 'birds' : w);
 // the objects a position claim (o'clock, side, region, compass) or a closing relation can be about
-export const SUBJECTS = [[/\b(rock|comet|satellite|airliner|flock|bird)s?\b/g, (m) => ({ kind: 'hazard', value: kindOf(m[1]) })],
+export const SUBJECTS = [[new RegExp(`\\b(rock|comet|satellite|airliner|flock|bird)${KIND_END}`, 'gu'),
+  (m) => ({ kind: 'hazard', value: kindOf(m[1]) })],
   [/\b(?:hazards?|nearest one|closest one)\b/g, () => ({ kind: 'hazard', value: null })],
   [/\b(moon|earth|sun)\b/g, (m) => ({ kind: 'body', value: m[1] })],
   [/\b(station|port|runway|windsock|sock|airfield)\b/g, (m) => ({ kind: 'object', value: m[1] })],
   [/\b(sea|water|ocean|coast|coastline)\b/g, () => ({ kind: 'sea' })]];
+
+// presence of a body or an object in the frame: a clause with one of these nouns and a presence cue ("the Earth is visible",
+// "also in view are the Earth and the Moon", "the chase camera shows the station", "the Moon is not in view")
+export const PRESENCE_NOUN = /\b(earth|moon|station|docking port|runway|windsock|papi)\b/g;
+export const PRESENCE_CUE = new RegExp('\\b(?:visible|in view|in the frame|in the picture|in the image|in sight|appears?|shows?|showing'
+  + '|includes?|contains?)\\b');
 
 // ---- the common-word lexicon ----
 const WORD_LIST = (s) => s.trim().split(/\s+/);
@@ -202,7 +226,19 @@ const COMMON_EN = new Set(WORD_LIST(`
   tall high low near far close distant quiet busy sharp soft hard faint pale deep sunlit ahead aside apart abreast aloft astern alone
   alongside everywhere somewhere nowhere anywhere outward inward upward downward meanwhile indeed perhaps certainly clearly directly
   just only even still yet also too`));
-export const isCommonOpener = (low) => SENTENCE_WORDS.has(low) || COMMON_EN.has(low) || /^\p{L}{3,}(?:ing|ed|ly)$/u.test(low)
+// the nouns a description of these scenes opens with ("Runway", "Debris", "Thrusters", "Glaciers"), beyond the bank's own words
+const SCENE_NOUNS = new Set(WORD_LIST(`
+  debris glare haze drizzle mist gloom murk dusk dawn sunrise sunset horizon skyline landscape scenery vista backdrop foreground
+  background silhouette blackness void starfield tarmac asphalt concrete grass taxiway apron hangar terminal threshold beacon marking
+  centreline centerline cloudbank thundercloud lightning thunder sleet hail frost fog smoke steam vapour vapor dust sand gravel rubble
+  boulder crag cliff ridge valley canyon gorge plateau plain meadow dune shore shoreline beach bay harbour harbor cape delta lagoon reef
+  marsh swamp glacier icefield farmland field forest woodland orchard vineyard village suburb street avenue boulevard block skyscraper
+  rooftop bridge highway railway park solar module panel hull truss antenna radiator hatch arm cockpit fuselage wingtip engine cabin
+  relief summit crest slope hillside peak spire`));
+// a common word: in the lexicon or the bank's vocabulary, a plural of one, -ing/-ed/-ly, or a hyphenated compound of them
+const singular = (w) => [w.replace(/ies$/, 'y'), w.replace(/(?:es)$/, ''), w.replace(/s$/, '')];
+const knownWord = (w) => COMMON_LOWER.has(w) || SCENE_NOUNS.has(w);
+export const isCommonOpener = (low) => knownWord(low) || singular(low).some(knownWord) || /^\p{L}{3,}(?:ing|ed|ly)$/u.test(low)
   || (/^\p{L}+(?:-\p{L}+)+$/u.test(low) && low.split('-').every(isCommonOpener));
 // pronouns and determiners are never names, whatever follows them ("It lies on the right")
 export const PRONOUNS = new Set(WORD_LIST(`
