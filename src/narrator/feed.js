@@ -60,25 +60,38 @@ export function centerCrop(w, h, aspect = 16 / 9) {
   const sh = Math.round(w / aspect); return [0, Math.floor((h - sh) / 2), w, sh];
 }
 
-function grab(canvas) {
-  const [sx, sy, sw, sh] = centerCrop(canvas.width, canvas.height);
-  try { return createImageBitmap(canvas, sx, sy, sw, sh, { resizeWidth: FRAME_W, resizeHeight: FRAME_H, resizeQuality: 'high' }); } catch { /* fall through */ }
-  const c = document.createElement('canvas'); c.width = FRAME_W; c.height = FRAME_H;
-  const g = c.getContext('2d'); g.imageSmoothingQuality = 'high'; g.drawImage(canvas, sx, sy, sw, sh, 0, 0, FRAME_W, FRAME_H);
-  return createImageBitmap(c);
+// the frame copy: createImageBitmap straight from the WebGL canvas (the snapshot is taken inside the call, in the render
+// task). It rejects rather than throws where that is unsupported; after the first rejection (that frame is lost: null)
+// every copy goes through a 2D canvas with drawImage, synchronously in the render task, and is bitmapped from there.
+export function createGrabber({ cib = globalThis.createImageBitmap, makeCanvas = () => document.createElement('canvas') } = {}) {
+  function viaCanvas(canvas, [sx, sy, sw, sh]) {
+    const c = makeCanvas(); c.width = FRAME_W; c.height = FRAME_H;
+    const x = c.getContext('2d'); x.imageSmoothingQuality = 'high'; x.drawImage(canvas, sx, sy, sw, sh, 0, 0, FRAME_W, FRAME_H);
+    return cib(c);
+  }
+  const grab = (canvas) => {
+    const crop = centerCrop(canvas.width, canvas.height);
+    if (grab.useCanvas) return viaCanvas(canvas, crop);
+    let p;
+    try { p = cib(canvas, ...crop, { resizeWidth: FRAME_W, resizeHeight: FRAME_H, resizeQuality: 'high' }); } catch { grab.useCanvas = true; return viaCanvas(canvas, crop); }
+    return p.catch(() => { grab.useCanvas = true; return null; });
+  };
+  grab.useCanvas = false;
+  return grab;
 }
 
 // onFrame({bitmap, sim_t_s, family, episode_id}) receives each Pilot Eye frame (the receiver owns and closes the bitmap);
-// nominal: labels.json nominal_frame_dt, or a function returning it (known once the model folder has been probed)
-export function createFeed({ onFrame, nominal = null, g = globalThis, doc = globalThis.document, zoomEveryMs = 1000, maxInflight = 2 }) {
+// nominal: labels.json nominal_frame_dt, or a function returning it (known once the model folder has been probed);
+// accepting(): whether Pilot Eye takes a frame now (backpressure: nothing is grabbed otherwise).
+// proto and grab are injectable (tests); by default the importmap's EffectComposer.prototype and createGrabber().
+export function createFeed({ onFrame, nominal = null, accepting = () => true, g = globalThis, doc = globalThis.document, zoomEveryMs = 1000, maxInflight = 1, proto: given = null, grab = createGrabber() }) {
   const episodes = createEpisodes();
-  let snap = null;
-  let proto = null, orig = null, wrapped = null, busy = false, on = false, lastGrid = null, lastEp = null, lastZ = -Infinity, inflight = 0, errors = 0;
+  let snap = null, proto = given, orig = null, wrapped = null, busy = false, depth = 0, on = false, lastGrid = null, lastEp = null, lastZ = -Infinity, inflight = 0, errors = 0;
   function after(composer) {
     const cv = composer.renderer && composer.renderer.domElement;
     if (!cv || cv.id !== 'view' || composer.renderToScreen === false || !cv.width) return;
-    if (snap) { const w = snap; snap = null; grab(cv).then(w.ok, w.no); }
-    if (!onFrame || (doc && doc.hidden) || inflight >= maxInflight) return;
+    if (snap) { const w = snap; snap = null; grab(cv).then((b) => { if (b) w.ok(b); else if (!snap) snap = w; else w.no(new Error('no frame')); }, w.no); }
+    if (!onFrame || (doc && doc.hidden) || inflight >= maxInflight || !accepting()) return;
     const family = familyOf(g); if (!family) return;
     let sim_t_s, episode_id;
     if (family === 'Z') {
@@ -89,8 +102,8 @@ export function createFeed({ onFrame, nominal = null, g = globalThis, doc = glob
       if (gi === lastGrid && episode_id === lastEp) return;
       lastGrid = gi; lastEp = episode_id; sim_t_s = c.t;
     }
-    inflight++;
-    grab(cv).then((bitmap) => { inflight--; if (on) onFrame({ bitmap, sim_t_s, family, episode_id }); else bitmap.close(); }, () => { inflight--; errors++; });
+    const p = grab(cv); inflight++;
+    p.then((bitmap) => { inflight--; if (!bitmap) return; if (on) onFrame({ bitmap, sim_t_s, family, episode_id }); else bitmap.close(); }, () => { inflight--; errors++; });
   }
   return {
     async install() {
@@ -103,9 +116,12 @@ export function createFeed({ onFrame, nominal = null, g = globalThis, doc = glob
       if (!on || wrapped) return;
       orig = proto.render;
       const base = orig;
+      // the grab runs once per outermost render (a render nested inside another is not a new frame), after it returns,
+      // and nothing it throws reaches the page's render loop
       wrapped = function (deltaTime) {
-        const r = base.call(this, deltaTime);
-        if (on && !busy) { busy = true; try { after(this); } catch { errors++; } finally { busy = false; } }
+        depth++;
+        let r; try { r = base.call(this, deltaTime); } finally { depth--; }
+        if (on && depth === 0 && !busy) { busy = true; try { after(this); } catch { errors++; } finally { busy = false; } }
         return r;
       };
       proto.render = wrapped;

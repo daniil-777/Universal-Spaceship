@@ -84,8 +84,9 @@ export async function createNarrator({ tf, modelId, localModelPath = null, devic
     describe(image, { signal = null, ...opts } = {}) {
       if (live) live.abort();
       const ctl = new AbortController(); live = ctl;
-      if (signal) { if (signal.aborted) ctl.abort(); else signal.addEventListener('abort', () => ctl.abort(), { once: true }); }
-      const job = chain.then(() => run(image, opts, ctl.signal)).finally(() => { if (live === ctl) live = null; });
+      const onAbort = () => ctl.abort();
+      if (signal) { if (signal.aborted) ctl.abort(); else signal.addEventListener('abort', onAbort, { once: true }); }
+      const job = chain.then(() => run(image, opts, ctl.signal)).finally(() => { if (signal) signal.removeEventListener('abort', onAbort); if (live === ctl) live = null; });
       chain = job.catch(() => {});
       return job;
     },

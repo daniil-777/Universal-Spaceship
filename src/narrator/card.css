@@ -14,9 +14,10 @@ body.landing #nr { --panel: rgba(12, 16, 22, .72); }
 /* ---------- the pill ---------- */
 #nr .nr-pill { position: absolute; top: var(--py, 17px); left: var(--px, 50%); transform: translateX(-50%) scale(.96); width: var(--pw, 132px); height: 34px; padding: 0;
   border-radius: 17px; overflow: hidden; color: var(--text); font: inherit; cursor: pointer; opacity: 0; pointer-events: none; text-align: left;
-  transition: width .35s var(--nr-spring), top .35s var(--nr-spring), left .35s var(--nr-spring), opacity .2s ease, transform .35s var(--nr-spring), background .18s; }
-#nr.on .nr-pill { opacity: 1; transform: translateX(-50%); pointer-events: auto; }
-#nr.on .nr-pill.away { opacity: 0; pointer-events: none; transition-duration: .35s, .35s, .35s, .12s, .35s, .18s; }
+  visibility: hidden; transition: width .35s var(--nr-spring), top .35s var(--nr-spring), left .35s var(--nr-spring), opacity .2s ease, transform .35s var(--nr-spring), background .18s, visibility 0s linear .2s; }
+/* hidden (off, or away while the card is open) also means out of the tab order and the accessibility tree */
+#nr.on .nr-pill { opacity: 1; transform: translateX(-50%); pointer-events: auto; visibility: visible; transition-delay: 0s; }
+#nr.on .nr-pill.away { opacity: 0; pointer-events: none; visibility: hidden; transition-duration: .35s, .35s, .35s, .12s, .35s, .18s, 0s; transition-delay: 0s, 0s, 0s, 0s, 0s, 0s, .12s; }
 #nr .nr-pill:hover { background: color-mix(in srgb, var(--panel) 88%, var(--text) 12%); }
 #nr.on .nr-pill:active { transform: translateX(-50%) scale(.97); transition-duration: .12s; }
 #nr .nr-pill:focus-visible, #nr .nr-card button:focus-visible, #nr .nr-ask input:focus-visible { outline: 2px solid var(--nr-hi); outline-offset: 2px; }
@@ -79,7 +80,9 @@ body[data-mode="2"][data-invert="1"] .nr-thumb::after { background: linear-gradi
 @keyframes nr-scan { to { transform: translateX(100%); } }
 .nr-titles { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 7px; }
 .nr-title { margin: 0; display: flex; align-items: center; gap: 8px; font: 600 15px/1.2 var(--font); letter-spacing: -.01em; color: var(--text); }
+.nr-demo-p { font: 600 9px/1 var(--font); letter-spacing: .09em; text-transform: uppercase; color: var(--nr-hi); border: 1px solid color-mix(in srgb, var(--nr-hi) 45%, transparent); border-radius: 999px; padding: 3px 5px 2px 6px; margin-left: -2px; }
 .nr-beta { font: 500 10px/1 var(--font); letter-spacing: .09em; text-transform: uppercase; color: var(--text-3); border: 1px solid var(--hair); border-radius: 999px; padding: 3px 6px 2px 7px; }
+.nr-demo { color: var(--nr-hi); border-color: color-mix(in srgb, var(--nr-hi) 45%, transparent); }
 .nr-chip { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; height: 22px; padding: 0 9px 0 7px; border-radius: 11px; background: var(--fill);
   font: 500 11px/1 var(--font); color: var(--text-2); white-space: nowrap; overflow: hidden; }
 .nr-chip-t { overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }

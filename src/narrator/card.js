@@ -9,6 +9,7 @@ import { pillLabel, contextChip, humanTemplate, skyName } from './words.js';
 import { placeBox } from './place.js';
 import { createEngine, config, memory, hasWebGPU, TASKS, TOKENS, DOWNLOAD_MB } from './engine.js';
 import { createMockEngine } from './mock.js';
+import { createLifecycle } from './life.js';
 
 const svg = (body, vb = '0 0 16 16') => `<svg viewBox="${vb}" aria-hidden="true" focusable="false">${body}</svg>`;
 const st = 'fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"';
@@ -22,14 +23,14 @@ const ICON = {
 const X = svg(`<path d="M1.5 1.5l7 7M8.5 1.5l-7 7" ${st} stroke-width="1.6"/>`, '0 0 10 10');
 const SEND = svg(`<path d="M6 10.2V2.2M2.5 5.6 6 2.1l3.5 3.5" ${st} stroke-width="1.8"/>`, '0 0 12 12');
 const HTML = `
-<button class="nr-pill glass" type="button" aria-expanded="false"><span class="nr-pill-in"><span class="nr-st">${SPARKLE}</span><span class="nr-pl"></span><span class="nr-fam"></span></span></button>
+<button class="nr-pill glass" type="button" aria-expanded="false"><span class="nr-pill-in"><span class="nr-st">${SPARKLE}</span><span class="nr-pl"></span><span class="nr-fam"></span><span class="nr-demo-p" hidden>Demo</span></span></button>
 <section class="nr-card" role="dialog" aria-label="Narrator" tabindex="-1" data-view="idle">
   <div class="nr-glow" aria-hidden="true"><i></i></div>
   <div class="nr-clip glass"><div class="nr-in">
     <div class="nr-grab" aria-hidden="true"></div>
     <header class="nr-head">
       <div class="nr-thumb"><canvas width="192" height="108" aria-hidden="true"></canvas></div>
-      <div class="nr-titles"><h2 class="nr-title">Narrator<span class="nr-beta">Beta</span></h2><span class="nr-chip"><span class="nr-chip-i"></span><span class="nr-chip-t"></span></span></div>
+      <div class="nr-titles"><h2 class="nr-title">Narrator<span class="nr-beta">Beta</span><span class="nr-beta nr-demo" hidden title="Canned text, no models (?narratorMock=1)">Demo</span></h2><span class="nr-chip"><span class="nr-chip-i"></span><span class="nr-chip-t"></span></span></div>
       <button class="nr-x" type="button" aria-label="Close the Narrator">${X}</button>
     </header>
     <div class="nr-body" aria-live="polite">
@@ -52,8 +53,8 @@ const OBSTACLES = ['#top .wordmark', '#top .tools', '#playbox', '#training', '.l
 
 const cfg = config(), engine = cfg.mock ? createMockEngine() : createEngine(cfg), hyst = createHysteresis(), labels = createHysteresis();
 const sheet = matchMedia('(max-width: 640px)'), reduce = matchMedia('(prefers-reduced-motion: reduce)');
-const S = { on: false, open: false, view: 'idle', family: null, heads: null, eye: 'idle', gen: false, task: null, dismissed: false, frame: null, last: null, pillKey: '' };
-let el = null, built = null, feed = null, timer = 0, ticks = 0, genCtl = null, pending = null, rq = [], rt = 0, ending = false, committed = 0, collapseT = 0;
+const S = { open: false, view: 'idle', family: null, heads: null, eye: 'idle', gen: false, task: null, dismissed: false, frame: null, last: null, pillKey: '' };
+let el = null, feed = null, timer = 0, ticks = 0, genCtl = null, pending = null, rq = [], rt = 0, ending = false, committed = 0, collapseT = 0;
 const place = { pill: { x: innerWidth / 2, y: 17 }, card: { x: innerWidth / 2, y: 17, w: 560 } };
 const $ = (s) => el.root.querySelector(s);
 const now = () => performance.now();
@@ -62,6 +63,7 @@ function build() {
   const link = document.createElement('link'); link.rel = 'stylesheet'; link.href = new URL('./card.css', import.meta.url).href;
   const css = new Promise((ok) => { link.onload = ok; link.onerror = ok; }); document.head.appendChild(link);
   const root = document.createElement('div'); root.id = 'nr'; root.className = 'nr-root'; root.innerHTML = HTML; document.body.appendChild(root);
+  if (cfg.mock) for (const n of root.querySelectorAll('.nr-demo, .nr-demo-p')) n.hidden = false;
   el = { root };
   Object.assign(el, { pill: $('.nr-pill'), pillIn: $('.nr-pill-in'), pl: $('.nr-pl'), fam: $('.nr-fam'), card: $('.nr-card'), in: $('.nr-in'), thumb: $('.nr-thumb'), cv: $('.nr-thumb canvas'),
     chipI: $('.nr-chip-i'), chipT: $('.nr-chip-t'), x: $('.nr-x'), body: $('.nr-body'), text: $('.nr-text'), tw: $('.nr-tw'), tmpl: $('.nr-tmpl'), out: $('.nr-out'),
@@ -92,14 +94,16 @@ function obstacles(extra = []) {
   }
   return out;
 }
+// nothing while the Narrator is off; the pill's place while it is on; the card's only while the card is open
 function layout() {
-  if (!el) return;
+  if (!el || !life.on) return;
   const vw = innerWidth, vh = innerHeight, pw = pillWidth();
   const p = placeBox({ vw, vh, obstacles: obstacles(['#zoomHud']), h: 34, minW: pw, maxW: pw });
+  place.pill = p; el.root.style.setProperty('--px', `${p.x}px`); el.root.style.setProperty('--py', `${p.y}px`);
+  if (!S.open) return;
   const c = placeBox({ vw, vh, obstacles: obstacles(), h: Math.max(240, el.in.offsetHeight || 300), minW: 420, maxW: 560 });
-  place.pill = p; place.card = c;
-  el.root.style.setProperty('--px', `${p.x}px`); el.root.style.setProperty('--py', `${p.y}px`); el.root.style.setProperty('--iw', `${c.w}px`);
-  if (S.open) geom(cardGeom());
+  place.card = c; el.root.style.setProperty('--iw', `${c.w}px`);
+  geom(cardGeom());
 }
 const pillWidth = () => Math.ceil(el.pillIn.offsetWidth) + 2;
 const pillGeom = () => ({ x: place.pill.x, y: place.pill.y, w: pillWidth(), h: 34, r: 17 });
@@ -143,7 +147,7 @@ const template = () => (S.heads && S.heads.sentence ? humanTemplate(S.heads.sent
 
 // ---------- Pilot Eye ----------
 function onEye(m) {
-  if (!S.on) return;
+  if (!life.on) return;
   if (m.status === 'ready') { S.eye = 'warming'; renderPill(); return; }
   if (m.status === 'error') { S.eye = 'error'; console.warn('pilot eye:', m.message); renderPill(); renderChrome(); return; }
   if (m.status !== 'ok') return;
@@ -168,40 +172,43 @@ function tick() {
 }
 
 // ---------- open / close / morph ----------
-export async function open() {
-  if (S.on) { expand(); return; }
-  S.on = true; built ||= build(); await built;
-  if (!S.on) return;
-  S.family = familyOf(); S.eye = 'warming'; S.pillKey = '';
-  document.body.classList.add('nr-on'); headerButton(true);
-  const m = memory.get();
-  setView(engine.ready || m.consent || S.dismissed ? 'idle' : 'consent');
-  renderChrome(); renderPill(); layout();
-  el.root.classList.add('on');
-  expand();
-  feed ||= createFeed({ onFrame: (f) => engine.postFrame(f), nominal: () => engine.nominal() });
-  await feed.install(); refresh();
-  timer = setInterval(tick, 250);
-  const pr = await engine.probe();
-  if (!S.on) return;
-  if (!pr.ok) { S.eye = 'missing'; setView('missing'); renderPill(); renderChrome(); return; }
-  engine.startEye(onEye);
-}
-export function close() {
-  if (!S.on) return;
+// open and close go through life.js: a close or a reopen during the build, the grab install or the probe stops the
+// stale open where it stands; the Narrator model is released after 5 minutes closed
+const life = createLifecycle({
+  build,
+  show() {
+    S.family = familyOf(); S.eye = 'warming'; S.pillKey = '';
+    document.body.classList.add('nr-on'); headerButton(true);
+    setView(engine.ready || memory.get().consent || S.dismissed ? 'idle' : 'consent');
+    renderChrome(); renderPill();
+    el.root.classList.add('on'); layout();
+    expand();
+    feed ||= createFeed({ onFrame: (f) => engine.postFrame(f), nominal: () => engine.nominal(), accepting: () => engine.accepting() });
+  },
+  install: async () => { await feed.install(); refresh(); },
+  startTick: () => { clearInterval(timer); timer = setInterval(tick, 250); },
+  probe: () => engine.probe(),
+  ready(pr) { if (!pr.ok) { S.eye = 'missing'; setView('missing'); renderPill(); renderChrome(); return; } engine.startEye(onEye); },
+  expand: () => expand(),
+  teardown,
+  idle: () => engine.release(),
+});
+export const open = () => life.open();
+export const close = () => life.close();
+function teardown() {
   const inside = el.root.contains(document.activeElement);
-  S.on = false; cancel(); pending = null;
+  cancel(); pending = null;
   collapse(true);
-  clearInterval(timer); if (feed) feed.uninstall(); engine.stopEye(); hyst.reset(); S.heads = null; S.eye = 'idle';
+  clearInterval(timer); timer = 0; if (feed) feed.uninstall(); engine.stopEye(); hyst.reset(); labels.reset(); S.heads = null; S.eye = 'idle';
   el.root.classList.remove('on'); document.body.classList.remove('nr-on'); headerButton(false);
   if (S.frame) { S.frame.close(); S.frame = null; }
   const back = [document.getElementById('btnNarrator'), document.getElementById('nr-launch')].find((n) => n && n.offsetParent);
   if (inside && back) back.focus({ preventScroll: true });
 }
-export const toggle = () => (S.on ? close() : open());
+export const toggle = () => (life.on ? close() : open());
 function headerButton(on) { const b = document.getElementById('btnNarrator'); if (b) { b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on)); } }
 export function expand() {
-  if (!S.on || S.open || !el) return;
+  if (!life.on || S.open || !el) return;
   S.open = true; clearTimeout(collapseT); layout();
   const c = el.card, morph = !sheet.matches && !reduce.matches;
   if (morph && !c.classList.contains('show')) { c.classList.add('snap'); geom(pillGeom()); c.classList.add('show'); void c.offsetWidth; c.classList.remove('snap'); }
@@ -260,26 +267,29 @@ async function download() {
   memory.set({ consent: true });
   el.dlL.textContent = memory.get().downloaded ? 'Loading Narrator' : 'Downloading Narrator';
   progress({ loaded: 0, total: DOWNLOAD_MB * 1e6 }); setView('dl');
+  const live = life.guard();
   try {
-    await engine.loadNarrator(progress);
+    await engine.loadNarrator((p) => { if (live()) progress(p); });
     memory.set({ downloaded: true });
-    if (!S.on) return;
+    if (!live()) return;
     const p = pending || { kind: 'describe' }; pending = null; renderChrome(); run(p.kind, p.question);
-  } catch (e) { console.error('narrator:', e); if (S.on) setView('error', String(e && e.message ? e.message : e).slice(0, 160)); }
+  } catch (e) { console.error('narrator:', e); if (live()) setView('error', String(e && e.message ? e.message : e).slice(0, 160)); }
 }
 
 // ---------- asking ----------
 async function refresh() {
   if (!feed || !feed.installed) return null;
+  const live = life.guard();
   try {
     const b = await feed.snapshot();
+    if (!live()) { if (b !== S.frame) b.close(); return null; }
     if (S.frame && S.frame !== b) S.frame.close();
     S.frame = b; el.cv.getContext('2d').drawImage(b, 0, 0, el.cv.width, el.cv.height); el.thumb.classList.add('has');
     return b;
   } catch { return S.frame; }
 }
 export function ask(kind, question = null) {
-  if (!S.on || S.eye === 'missing') return;
+  if (!life.on || S.eye === 'missing') return;
   const family = familyOf() || S.family;
   if (family === 'Z' && (kind === 'safety' || kind === 'now')) return;
   S.task = kind; renderChrome();
@@ -335,6 +345,6 @@ function edge() { const t = el.text; t.classList.toggle('more', t.scrollHeight -
 
 // visual QA and the harness: window.__narrator.card.debug
 export const debug = {
-  get state() { return { on: S.on, open: S.open, view: S.view, family: S.family, eye: S.eye, heads: S.heads, gen: S.gen, task: S.task, last: S.last, pill: S.pillKey, text: el ? el.out.textContent : '', device: engine.device, errors: feed ? feed.errors : 0 }; },
+  get state() { return { on: life.on, open: S.open, view: S.view, family: S.family, eye: S.eye, heads: S.heads, gen: S.gen, task: S.task, last: S.last, pill: S.pillKey, text: el ? el.out.textContent : '', device: engine.device, errors: feed ? feed.errors : 0 }; },
   get mock() { return engine.mock || null; }, engine, expand, collapse, ask, setView, layout, refresh,
 };

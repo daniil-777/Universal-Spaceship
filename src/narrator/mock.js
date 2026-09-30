@@ -42,6 +42,8 @@ export function createMockEngine() {
     probe: async () => { await wait(120); return { ok: true, labels: {} }; },
     startEye(cb) { onResult = cb; },
     nominal: () => null,
+    accepting: () => !!onResult,
+    async release() { ready = false; loading = null; },
     postFrame({ bitmap, family, episode_id }) {
       bitmap.close();
       const k = `${family}:${episode_id}`; seen[k] = (seen[k] || 0) + 1;

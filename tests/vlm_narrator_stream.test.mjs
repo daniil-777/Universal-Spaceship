@@ -67,3 +67,12 @@ test('a serial queue: a new request cancels the running one and runs only after 
   await rx; await ry; assert.equal((await z).aborted, false);
   assert.deepEqual(tf.log.seen.slice(2).map((s) => s.split('|').pop()), ['z'], 'only the latest request runs');
 });
+test('describe removes its listener from the caller\'s signal once the request settles', async () => {
+  const tf = streamingTf({ tokens: ['Hi. '] }), nar = await createNarrator({ tf, modelId: 'm' }), added = [], removed = [];
+  const signal = { aborted: false, addEventListener: (k, f) => added.push([k, f]), removeEventListener: (k, f) => removed.push([k, f]) };
+  await nar.describe(img, { signal });
+  assert.equal(added.length, 1); assert.deepEqual(removed, added, 'the same abort listener is removed');
+  const s2 = { aborted: false, addEventListener: (k, f) => added.push([k, f]), removeEventListener: (k, f) => removed.push([k, f]) };
+  const x = nar.describe(img, { signal: s2 }), y = nar.describe(img, {});
+  await assert.rejects(x, (e) => e.name === 'AbortError'); await y; assert.deepEqual(removed.at(-1), added.at(-1), 'removed on rejection too');
+});
