@@ -1,0 +1,52 @@
+{
+ "tag": "v5.1.2",
+ "base": "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/v5.1.2/geojson/",
+ "dir": "/Volumes/LaCie/astro-pilot/vlm/geo",
+ "layers": [
+  {
+   "name": "ne_10m_populated_places",
+   "bytes": 19359003,
+   "sha256": "9b8e3de09048ef00dfc70357dbb9fa324493f214b5e0ae4daf1aa79a8d10116b"
+  },
+  {
+   "name": "ne_10m_admin_0_countries",
+   "bytes": 13287234,
+   "sha256": "239eec57ac17f100a11e2536cffc56752c318b50ae765b0918ff7aab4ce8f255"
+  },
+  {
+   "name": "ne_10m_admin_1_states_provinces",
+   "bytes": 40726851,
+   "sha256": "22d0e3ad85eb3e27f17cabf8ba2d50e554fbc27a87796ff891d958185da62fb5"
+  },
+  {
+   "name": "ne_10m_geography_regions_polys",
+   "bytes": 5583870,
+   "sha256": "b7b26e50ea917d3696aec87f932def2bf5f890f5770e441d59c162c6f4c92a77"
+  },
+  {
+   "name": "ne_10m_geography_regions_elevation_points",
+   "bytes": 862686,
+   "sha256": "f98a16867867146ec4146d6d4b18c823eeedb2825947de666116cf9a4e3f43cb"
+  },
+  {
+   "name": "ne_10m_land",
+   "bytes": 10157965,
+   "sha256": "1ac90796408bc6ad6911d69448485d3c4dbf2190370080368a09976e1c9f7416"
+  },
+  {
+   "name": "ne_10m_lakes",
+   "bytes": 5043554,
+   "sha256": "2d036f53dedec578001c5c30c2959ee7d4eebc1306900fa4367c49929ec8f2d9"
+  },
+  {
+   "name": "ne_10m_rivers_lake_centerlines",
+   "bytes": 7307743,
+   "sha256": "bb854a900ecbd3b408df46d5e16e3e0f974ba55993f9d8b5c26e855273c0905a"
+  },
+  {
+   "name": "ne_10m_glaciated_areas",
+   "bytes": 5876193,
+   "sha256": "04fd2303d5f0ece2cf482af19d06731d745db9690501d7b0a2a4b7fe23a7726f"
+  }
+ ]
+}
