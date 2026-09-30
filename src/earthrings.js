@@ -8,7 +8,7 @@
 // coarser in a 4 × 4 atlas, decoded in the vertex shader. Tiles come from src/earthloader.js. Units: km in the view's
 // local frame.
 import * as THREE from 'three';
-import { RING_TILES, RING_COUNT, HEIGHT_TILES, MAX_LEVEL, HEIGHT_SOURCE, sourceForLevel, tileUrl, ringLevels, ringWindow, heightWindow, heightTileFor, windowTiles, innerWindow, innerState, tileToLonLat, lonLatToTile, tileSizeKm, decodeTerrarium, mod } from './earthtiles.js';
+import { RING_TILES, RING_COUNT, HEIGHT_TILES, MAX_LEVEL, HEIGHT_SOURCE, sourceForLevel, tileUrl, tileLevelOf, ringLevels, ringWindow, heightWindow, heightTileFor, windowTiles, innerWindow, innerState, tileToLonLat, lonLatToTile, tileSizeKm, decodeTerrarium, mod } from './earthtiles.js';
 import { createTileLoader } from './earthloader.js';
 
 const T = 256, GRID = 128, SHOW_AT = 0.9, HIDE_AT = 0.5, UPLOADS_PER_FRAME = 6, RETRY_S = 10;
@@ -67,7 +67,7 @@ const DEBUG_TINTS = [0xff0000, 0x0080ff, 0x00c000, 0xffd000, 0xffffff];
 const ZEROS = new Map();
 const zeros = (n) => { if (!ZEROS.has(n)) ZEROS.set(n, new Uint8Array(n)); return ZEROS.get(n); };
 
-export function createEarthRings(scene, renderer, { loader = createTileLoader() } = {}) {
+export function createEarthRings(scene, renderer, { loader = createTileLoader({ maxInFlight: 24, pin: (url) => tileLevelOf(url) <= 8 }) } = {}) {
   const uploads = [], dst = new THREE.Vector2(), cpu = new Map(), _p = [0, 0, 0], _u = [0, 0, 0];
   const zero = new THREE.DataTexture(zeros(T * T * 4), T, T, THREE.RGBAFormat); zero.needsUpdate = true;
   let frame = null, scratch = null, retryT = 0, debugTint = false;

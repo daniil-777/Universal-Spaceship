@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { lonLatToTile, tileToLonLat, tileSizeKm, SOURCES, EOX_YEAR, sourceForLevel, tileUrl, HEIGHT_SOURCE, heightLevel, decodeTerrarium, levelFloat, pickInnerLevel, ringLevels, ringWindow, heightWindow, windowTiles, RING_TILES, RING_COUNT, HEIGHT_TILES, MAX_LAT, R_KM, createLocalFrame, globeAxes, sunLocal, cameraPose, panTarget, clipPlanes, heightTileFor, entryPoint, KM_PER_DEG } from '../src/earthtiles.js';
+import { lonLatToTile, tileToLonLat, tileSizeKm, SOURCES, EOX_YEAR, sourceForLevel, tileUrl, tileLevelOf, HEIGHT_SOURCE, heightLevel, decodeTerrarium, levelFloat, pickInnerLevel, ringLevels, ringWindow, heightWindow, windowTiles, RING_TILES, RING_COUNT, HEIGHT_TILES, MAX_LAT, R_KM, createLocalFrame, globeAxes, sunLocal, cameraPose, panTarget, clipPlanes, heightTileFor, entryPoint, KM_PER_DEG } from '../src/earthtiles.js';
 import { julianDay, gmst, moonEci } from '../src/ephem.js';
 
 const close = (a, b, eps, msg = '') => assert.ok(Math.abs(a - b) <= eps, `${msg} ${a} vs ${b}`);
@@ -23,6 +23,13 @@ test('sources by level; the URLs are the ones probed on 2026-09-28', () => {
   assert.equal(tileUrl(sourceForLevel(17), 17, 68336, 46636), 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/17/46636/68336');
   assert.equal(tileUrl(HEIGHT_SOURCE, 12, 2135, 1457), 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/12/2135/1457.png');
   assert.equal(tileUrl(sourceForLevel(2), 2, -1, 1), tileUrl(sourceForLevel(2), 2, 3, 1), 'x wraps around the antimeridian');
+});
+
+test('tileLevelOf: the z level parsed back out of a GIBS, EOX, Esri or Terrarium tile URL', () => {
+  assert.equal(tileLevelOf(tileUrl(sourceForLevel(8), 8, 133, 91)), 8, 'GIBS: …/{z}/{y}/{x}.jpeg');
+  assert.equal(tileLevelOf(tileUrl(sourceForLevel(12), 12, 2135, 1457)), 12, 'EOX: …/{z}/{y}/{x}.jpg');
+  assert.equal(tileLevelOf(tileUrl(sourceForLevel(17), 17, 68336, 46636)), 17, 'Esri: …/{z}/{y}/{x}');
+  assert.equal(tileLevelOf(tileUrl(HEIGHT_SOURCE, 12, 2135, 1457)), 12, 'Terrarium: …/{z}/{x}/{y}.png');
 });
 
 test('Terrarium heights: metres from RGB; the sea floor is sea level; heights one level up, capped at 13', () => {

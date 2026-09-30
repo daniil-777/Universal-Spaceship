@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createTileLoader } from '../src/earthloader.js';
+import { createTileLoader, sha1Js } from '../src/earthloader.js';
 
 // A fake network: every request waits until the test answers it; a body's byte length stands for its content.
 function fakeNet() {
@@ -68,4 +68,58 @@ test('suspend stops a closed view fetching: the queue is dropped, running answer
   net.reply('a'); await settle(); assert.deepEqual(log[1], ['a', null, 'dropped']);
   L.request(job('c', 0, log)); assert.deepEqual(log[2], ['c', null, 'dropped']); assert.deepEqual(net.calls, ['a']);
   L.resume(); L.request(job('c', 0, log)); assert.deepEqual(net.calls, ['a', 'c']);
+});
+
+test('in-flight dedup: a second request for the same URL attaches to the first; one fetch, two done("ok")', async () => {
+  const net = fakeNet(), L = createTileLoader({ fetchImpl: net.fetchImpl, decode }), log = [];
+  L.request(job('a', 0, log)); L.request(job('a', 1, log));
+  assert.equal(net.calls.length, 1, 'only one fetch for the two requests'); assert.equal(L.stats.deduped, 1);
+  net.reply('a'); await settle();
+  assert.deepEqual(log.map((l) => l[2]), ['ok', 'ok']);
+});
+
+test('in-flight dedup: an attached job no longer wanted gets dropped, the other still gets the result', async () => {
+  const net = fakeNet(), L = createTileLoader({ fetchImpl: net.fetchImpl, decode }), log = [];
+  let keep = true;
+  L.request(job('a', 0, log)); L.request(job('a', 1, log, () => keep));
+  keep = false; net.reply('a'); await settle();
+  assert.deepEqual(log[0], ['a', 'bitmap', 'ok']); assert.deepEqual(log[1], ['a', null, 'dropped']);
+});
+
+test('perHost limits: at most one request per host in flight at once, with two hosts running concurrently', async () => {
+  const net = fakeNet(), L = createTileLoader({ maxInFlight: 8, perHost: { default: 1 }, fetchImpl: net.fetchImpl, decode }), log = [];
+  L.request(job('https://a.example/1', 0, log)); L.request(job('https://a.example/2', 0, log));
+  L.request(job('https://b.example/1', 0, log)); L.request(job('https://b.example/2', 0, log));
+  assert.equal(L.inFlight, 2, 'one per host, two hosts'); assert.deepEqual(net.calls, ['https://a.example/1', 'https://b.example/1']);
+  net.reply('https://a.example/1'); net.reply('https://b.example/1'); await settle();
+  assert.deepEqual(net.calls, ['https://a.example/1', 'https://b.example/1', 'https://a.example/2', 'https://b.example/2']);
+  net.reply('https://a.example/2'); net.reply('https://b.example/2'); await settle();
+  assert.equal(L.stats.loaded, 4);
+});
+
+test('a pinned URL is kept forever in its own map, even under a tiny keep limit', async () => {
+  const net = fakeNet(), L = createTileLoader({ keep: 2, pin: (url) => url === 'pinned', fetchImpl: net.fetchImpl, decode }), log = [];
+  L.request(job('pinned', 0, log)); net.reply('pinned'); await settle();
+  for (const u of ['x1', 'x2', 'x3', 'x4', 'x5']) { L.request(job(u, 0, log)); net.reply(u); await settle(); }
+  L.request(job('pinned', 0, log));
+  assert.deepEqual(log[log.length - 1], ['pinned', 'bitmap', 'ok']);
+  assert.equal(net.calls.filter((c) => c === 'pinned').length, 1, 'never refetched though 5 more loads passed keep:2');
+});
+
+test('sha1Js: the pure-JS SHA-1 matches the standard test vectors', () => {
+  const enc = (s) => new TextEncoder().encode(s).buffer;
+  assert.equal(sha1Js(enc('abc')), 'a9993e364706816aba3e25717850c26c9cd0d89d');
+  assert.equal(sha1Js(new ArrayBuffer(0)), 'da39a3ee5e6b4b0d3255bfef95601890afd80709');
+});
+
+test('without crypto.subtle, blank detection falls back to sha1Js', async () => {
+  const restore = Object.getOwnPropertyDescriptor(globalThis, 'crypto');
+  Object.defineProperty(globalThis, 'crypto', { value: {}, configurable: true });
+  try {
+    const abc = new TextEncoder().encode('abc').buffer, blank = { bytes: 3, sha1: sha1Js(abc) };
+    const fetchImpl = () => Promise.resolve({ ok: true, arrayBuffer: async () => abc });
+    const L = createTileLoader({ fetchImpl, decode, blank }), log = [];
+    L.request(job('a', 0, log)); await settle();
+    assert.deepEqual(log[0], ['a', null, 'blank']);
+  } finally { Object.defineProperty(globalThis, 'crypto', restore); }
 });

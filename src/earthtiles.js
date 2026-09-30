@@ -34,6 +34,9 @@ export const HEIGHT_SOURCE = { name: 'AWS Terrain Tiles', credit: 'elevation: AW
 export const ZOOM_CREDIT = [...SOURCES, HEIGHT_SOURCE].map((s) => s.credit).join(' · ');
 export const sourceForLevel = (z) => SOURCES.find((s) => z <= s.maxLevel) || SOURCES[SOURCES.length - 1];
 export const tileUrl = (src, z, x, y) => src.url(z, mod(x, 2 ** z), y);
+// The z of a tile URL: every source's path ends in three numbers (…/{z}/{y}/{x} or, for Terrarium, …/{z}/{x}/{y}),
+// z always first, so it needs no per-host parsing.
+export const tileLevelOf = (url) => { const m = /\/(\d+)\/\d+\/\d+(?:\.\w+)?(?:\?.*)?$/.exec(url); return m ? +m[1] : NaN; };
 export const heightLevel = (z) => Math.max(0, Math.min(z - 1, MAX_HEIGHT_LEVEL));
 export const decodeTerrarium = (r, g, b) => Math.max(0, r * 256 + g + b / 256 - 32768);
 
