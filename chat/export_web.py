@@ -34,10 +34,10 @@ def add_num_logits_to_keep(g):
     if head.op_type not in ('MatMul', 'MatMulNBits'): raise ValueError(f'unexpected LM head op {head.op_type}')
     src = head.input[0]
     g.input.append(helper.make_tensor_value_info('num_logits_to_keep', TensorProto.INT64, []))
-    g.initializer.extend([helper.make_tensor('nltk/axes', TensorProto.INT64, [1], [1]),
+    g.initializer.extend([helper.make_tensor('nltk/axes', TensorProto.INT64, [1], [1]), helper.make_tensor('nltk/zero', TensorProto.INT64, [1], [0]),
                           helper.make_tensor('nltk/end', TensorProto.INT64, [1], [2 ** 62])])
     nodes = [helper.make_node('Neg', ['num_logits_to_keep'], ['nltk/neg']),
-             helper.make_node('Unsqueeze', ['nltk/neg', 'nltk/axes'], ['nltk/start']),
+             helper.make_node('Unsqueeze', ['nltk/neg', 'nltk/zero'], ['nltk/start']),
              helper.make_node('Slice', [src, 'nltk/start', 'nltk/end', 'nltk/axes'], ['nltk/hidden'])]
     head.input[0] = 'nltk/hidden'
     i = list(g.node).index(head)
