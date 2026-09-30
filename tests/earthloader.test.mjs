@@ -97,7 +97,7 @@ test('perHost limits: at most one request per host in flight at once, with two h
   assert.equal(L.stats.loaded, 4);
 });
 
-test('a pinned URL is kept forever in its own map, even under a tiny keep limit', async () => {
+test('a pinned URL lives in its own map, untouched by a tiny keep limit', async () => {
   const net = fakeNet(), L = createTileLoader({ keep: 2, pin: (url) => url === 'pinned', fetchImpl: net.fetchImpl, decode }), log = [];
   L.request(job('pinned', 0, log)); net.reply('pinned'); await settle();
   for (const u of ['x1', 'x2', 'x3', 'x4', 'x5']) { L.request(job(u, 0, log)); net.reply(u); await settle(); }
@@ -172,4 +172,49 @@ test('cross-host starvation: a saturated host does not block a lower-priority jo
   L.request(job('https://b.example/1', 9, log));         // host B: free; lower priority than 'urgent', runs anyway
   assert.deepEqual(net.calls, ['https://a.example/busy', 'https://b.example/1'], 'B is not starved by a higher-priority job stuck on a saturated host');
   assert.equal(L.inFlight, 2); assert.equal(L.queued, 1, 'only the A-urgent job is left queued');
+});
+
+// Final review M2: the pinned (z ≤ 8) map is capped too, least recently used first, and keepIf still holds its URLs.
+test('pinned tiles are capped at pinCap, least recently used first (a hit refreshes), and an evicted one is fetched again', async () => {
+  const net = fakeNet(), L = createTileLoader({ pinCap: 3, pin: () => true, fetchImpl: net.fetchImpl, decode }), log = [];
+  for (const u of ['p1', 'p2', 'p3']) { L.request(job(u, 0, log)); net.reply(u); await settle(); }
+  L.request(job('p1', 0, log)); assert.deepEqual(log[log.length - 1], ['p1', 'bitmap', 'ok'], 'p1 served from the pinned map');
+  L.request(job('p4', 0, log)); net.reply('p4'); await settle();
+  assert.ok(L.peek('p1') && L.peek('p3') && L.peek('p4'), 'p1 (just used), p3 and p4 stay');
+  assert.equal(L.peek('p2'), null, 'p2, the least recently used, went');
+  L.request(job('p2', 0, log)); assert.equal(net.calls.filter((c) => c === 'p2').length, 2, 'an evicted pinned tile is fetched again');
+});
+
+test('keepIf holds a pinned URL past pinCap', async () => {
+  const net = fakeNet(), L = createTileLoader({ pinCap: 2, pin: () => true, keepIf: (u) => u === 'p1', fetchImpl: net.fetchImpl, decode }), log = [];
+  for (const u of ['p1', 'p2', 'p3', 'p4', 'p5']) { L.request(job(u, 0, log)); net.reply(u); await settle(); }
+  assert.ok(L.peek('p1'), 'held, though the oldest'); assert.ok(L.peek('p5'));
+  for (const u of ['p2', 'p3', 'p4']) assert.equal(L.peek(u), null, `${u} evicted`);
+});
+
+test('the pinned map\'s default cap is 1024 entries', async () => {
+  const fetchImpl = async () => ({ ok: true, status: 200, arrayBuffer: async () => new Uint8Array(10).buffer });
+  const L = createTileLoader({ maxInFlight: 64, pin: () => true, fetchImpl, decode }), log = [];
+  for (let i = 0; i < 1030; i++) L.request(job(`https://gibs.test/${i}`, i, log));
+  for (let k = 0; k < 200 && (L.inFlight || L.queued); k++) await settle();
+  assert.equal(log.length, 1030); let kept = 0; for (let i = 0; i < 1030; i++) if (L.peek(`https://gibs.test/${i}`)) kept++;
+  assert.equal(kept, 1024); assert.equal(L.peek('https://gibs.test/0'), null, 'the oldest went first');
+});
+
+// Final review M7: a caller's callback that throws must not skip the other jobs' answers or the next pump().
+test('a done() that throws costs neither the other job on the same URL its answer nor the queue its next fetch', async () => {
+  const restore = quiet(), net = fakeNet(), L = createTileLoader({ maxInFlight: 1, fetchImpl: net.fetchImpl, decode }), log = [];
+  L.request({ url: 'a', prio: 0, raw: false, wanted: () => true, done: () => { throw new Error('caller bug'); } });
+  L.request(job('a', 0, log)); L.request(job('b', 1, log));
+  assert.deepEqual(net.calls, ['a']); net.reply('a'); await settle();
+  assert.deepEqual(log[0], ['a', 'bitmap', 'ok'], 'the attached job still got the tile');
+  assert.deepEqual(net.calls, ['a', 'b'], 'pump() still started the next request'); restore();
+});
+
+test('a throwing done() on a dropped job does not stop prune or the pump', async () => {
+  const restore = quiet(), net = fakeNet(), L = createTileLoader({ maxInFlight: 1, fetchImpl: net.fetchImpl, decode }), log = [];
+  let want = true;
+  L.request(job('a', 0, log)); L.request({ url: 'b', prio: 1, raw: false, wanted: () => want, done: () => { throw new Error('caller bug'); } }); L.request(job('c', 2, log));
+  want = false; L.prune(); assert.equal(L.queued, 1, 'b dropped, c still queued');
+  net.reply('a'); await settle(); assert.deepEqual(net.calls, ['a', 'c']); restore();
 });

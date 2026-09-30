@@ -119,7 +119,7 @@ function makeFakeRenderer() {
 }
 const fakeLoader = { inFlight: 0, queued: 0, stats: {}, failRate: 0, request(job) { if (job.wanted()) job.done({}); }, prune() {}, suspend() {}, resume() {} };
 
-test('createEarthRings.update(): uFar = the view\'s far fade on every ring, uInnerVis = the next finer used ring\'s own fade-in (0 on the finest)', async () => {
+test('createEarthRings.update(): uFar = the view\'s far fade on every ring, uInnerVis = the nearest shown finer used ring\'s own fade-in (0 when none shows)', async () => {
   const { createEarthRings } = await import('../src/earthrings.js');
   const meshes = [], rings = createEarthRings({ add: (m) => meshes.push(m) }, makeFakeRenderer(), { loader: fakeLoader });
   rings.rebase(createLocalFrame(48, 10));
@@ -131,8 +131,9 @@ test('createEarthRings.update(): uFar = the view\'s far fade on every ring, uInn
     for (const L of want) {
       const u = byLevel(L), finer = want.filter((x) => x > L);
       assert.equal(u.uFar.value, 0.5, `frame ${f}, L${L}: uFar`);
-      const expect = finer.length ? byLevel(Math.min(...finer)).uVis.value / view.vis : 0;
-      assert.equal(u.uInnerVis.value, expect, `frame ${f}, L${L}: uInnerVis = the finer ring's fade-in`);
+      const shown = finer.filter((x) => byLevel(x).uVis.value / view.vis > 0.003).sort((a, b) => a - b);
+      const expect = shown.length ? byLevel(shown[0]).uVis.value / view.vis : 0;
+      assert.equal(u.uInnerVis.value, expect, `frame ${f}, L${L}: uInnerVis = the fade-in of the ring it defers to`);
       if (u.uInnerVis.value > 0.01 && u.uInnerVis.value < 0.99) partial++;
     }
   }

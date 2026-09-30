@@ -1,11 +1,12 @@
 // earthloader.js — the Earth zoom's tile loader (no three.js; Node-testable with a fake fetch and decode): at most
 // `maxInFlight` requests overall and `perHost` per host, the lowest priority number first, requests nobody wants any
 // more dropped before they start (prune), a failed tile retried only after `retryMs`, Esri's "no imagery here"
-// placeholder recognised by its size and SHA-1 and never fetched again, `pin(url)` tiles cached for good in their own
-// map (GIBS sends `Cache-Control: no-store`, so its low levels must not be re-fetched), `keepIf(url)` protects a tile
-// still in use by the caller from LRU eviction even past `keep` (a shared height tile at the loader's size cap does not
-// get evicted out from under a ring that still wants it), a second request for a URL already queued or in flight joins
-// the first instead of firing a second fetch, and suspend() / resume() so a closed view stops fetching.
+// placeholder recognised by its size and SHA-1 and never fetched again, `pin(url)` tiles cached in their own map, up
+// to `pinCap` of them (GIBS sends `Cache-Control: no-store`, so its low levels must not be re-fetched), `keepIf(url)`
+// protects a tile still in use by the caller from LRU eviction even past `keep` or `pinCap` (a shared height tile at
+// the loader's size cap does not get evicted out from under a ring that still wants it), a second request for a URL
+// already queued or in flight joins the first instead of firing a second fetch, a job's callback that throws costs no
+// other job its answer, and suspend() / resume() so a closed view stops fetching.
 // A job is { url, prio, raw, wanted(), done(bitmap | null, why) }, why = 'ok' | 'failed' | 'blank' | 'dropped'.
 import { ESRI_BLANK } from './earthtiles.js';
 
@@ -37,24 +38,30 @@ const sha1Hex = async (buf) => (globalThis.crypto && crypto.subtle ? hex(await c
 const hostOf = (url) => { try { return new URL(url).host; } catch (e) { return url; } };
 
 export function createTileLoader({ maxInFlight = 8, perHost = { default: 6, 'gibs.earthdata.nasa.gov': 10, 'tiles.maps.eox.at': 10 },
-  pin = () => false, keepIf = () => false, keep = 256, retryMs = 30000, timeoutMs = 15000, blank = ESRI_BLANK, fetchImpl = (url, opts) => fetch(url, opts),
+  pin = () => false, keepIf = () => false, keep = 256, pinCap = 1024, retryMs = 30000, timeoutMs = 15000, blank = ESRI_BLANK, fetchImpl = (url, opts) => fetch(url, opts),
   decode = (blob, opts) => createImageBitmap(blob, opts), hashHex = sha1Hex, now = () => performance.now() } = {}) {
-  // pin(url) is bounded on its own: z ≤ 8 is at most Σ 4^z (z = 0..8) ≈ 87k URLs per source (GIBS colour, Terrarium
-  // height), and a real session's rings only ever touch a few hundred of them.
+  // pin(url) tiles are never re-fetched while pinned, but their map is capped too (pinCap, least recently used first):
+  // z ≤ 8 alone is ≈ 87k URLs per source, and a long pan would otherwise keep every one it ever touched (256² bitmaps).
+  // Neither map ever evicts a URL that keepIf holds; if every entry is held, the cap is exceeded for now.
   const cache = new Map(), pinned = new Map(), failed = new Map(), warned = new Set(), queue = [], pending = new Map(), recent = [];
   const stats = { requested: 0, loaded: 0, failed: 0, blank: 0, deduped: 0 };
   const hostLoad = new Map();
-  let inFlight = 0, suspended = false;
+  let inFlight = 0, suspended = false, threw = false;
   const isBlank = async (buf) => !!blank && buf.byteLength === blank.bytes && (await hashHex(buf)) === blank.sha1;
-  const remember = (url, bmp) => {
-    if (pin(url)) { pinned.set(url, bmp); return; }
-    cache.delete(url); cache.set(url, bmp);
-    // evict the oldest entry that keepIf does not claim; if every cached entry is claimed, keep is exceeded for now
-    if (cache.size > keep) for (const k of cache.keys()) if (!keepIf(k)) { cache.delete(k); break; }
+  const lru = (map, url, bmp, cap) => {
+    map.delete(url); map.set(url, bmp);
+    if (map.size > cap) for (const k of map.keys()) if (!keepIf(k)) { map.delete(k); break; }
   };
+  const remember = (url, bmp) => (pin(url) ? lru(pinned, url, bmp, pinCap) : lru(cache, url, bmp, keep));
   const note = (bad) => { recent.push(bad ? 1 : 0); if (recent.length > 24) recent.shift(); };
   const hostCap = (host) => perHost[host] ?? perHost.default ?? Infinity;
-  const finish = (jobs, bmp, why) => { for (const job of jobs) job.done(job.wanted() ? bmp : null, job.wanted() ? why : 'dropped'); };
+  // a caller's callback that throws must not cost the other jobs their answer, or the queue its next pump()
+  const call = (job, bmp, why) => {
+    try { job.done(bmp, why); } catch (e) { if (!threw) { threw = true; console.warn('earth zoom: a tile callback threw', e && e.message); } }
+  };
+  const finish = (jobs, bmp, why) => {
+    for (const job of jobs) { let w = false; try { w = job.wanted(); } catch (e) { w = false; } call(job, w ? bmp : null, w ? why : 'dropped'); }
+  };
   async function run(entry) {
     inFlight++; const host = hostOf(entry.url); hostLoad.set(host, (hostLoad.get(host) || 0) + 1);
     let bmp = null, why = 'failed';
@@ -83,7 +90,7 @@ export function createTileLoader({ maxInFlight = 8, perHost = { default: 6, 'gib
       const entry = queue[i], host = hostOf(entry.url);
       if ((hostLoad.get(host) || 0) >= hostCap(host)) { i++; continue; }
       queue.splice(i, 1);
-      entry.jobs = entry.jobs.filter((job) => job.wanted() || (job.done(null, 'dropped'), false));
+      entry.jobs = entry.jobs.filter((job) => job.wanted() || (call(job, null, 'dropped'), false));
       if (!entry.jobs.length) { pending.delete(entry.url); continue; }
       run(entry);
     }
@@ -94,8 +101,9 @@ export function createTileLoader({ maxInFlight = 8, perHost = { default: 6, 'gib
     peek: (url) => pinned.get(url) || cache.get(url) || null,
     request(job) {
       if (suspended) { job.done(null, 'dropped'); return; }
+      // a hit becomes the most recently used entry of its map, pinned or not
       const hit = pinned.get(job.url) || cache.get(job.url);
-      if (hit) { if (cache.has(job.url)) remember(job.url, hit); job.done(hit, 'ok'); return; }
+      if (hit) { remember(job.url, hit); job.done(hit, 'ok'); return; }
       const t = failed.get(job.url);
       if (t !== undefined && now() - t < retryMs) { job.done(null, t === Infinity ? 'blank' : 'failed'); return; }
       const entry = pending.get(job.url);
@@ -107,7 +115,7 @@ export function createTileLoader({ maxInFlight = 8, perHost = { default: 6, 'gib
     prune() {
       for (let i = queue.length - 1; i >= 0; i--) {
         const entry = queue[i];
-        entry.jobs = entry.jobs.filter((job) => job.wanted() || (job.done(null, 'dropped'), false));
+        entry.jobs = entry.jobs.filter((job) => job.wanted() || (call(job, null, 'dropped'), false));
         if (!entry.jobs.length) { pending.delete(entry.url); queue.splice(i, 1); }
       }
     },

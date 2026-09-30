@@ -28,7 +28,7 @@ const VERT = /* glsl */`uniform sampler2D tHeight; uniform vec2 uHOff; uniform f
     vSea = raw < -1.0 && raw > -12000.0 ? 1.0 : 0.0;          // below sea level (an empty atlas slot decodes to -32768: unknown, not sea)
     vec4 w = modelMatrix * vec4(position + vUp * h, 1.0); vW = w.xyz; gl_Position = projectionMatrix * viewMatrix * w; }`;
 
-// A coarser ring never competes in depth with the next finer ring (diagnosis 2026-09-29, fix A): each ring's relief comes
+// A coarser ring never competes in depth with a finer ring (diagnosis 2026-09-29, fix A): each ring's relief comes
 // from its own height level, so where the rings overlap a coarse ring's smoothed valleys would sit above the fine ring's
 // real ones and win the depth test. Under the finer ring's footprint (where its tiles are in) the coarse ring is pushed to
 // the far plane while the finer ring fades in, so it only ever shows THROUGH it. Once the finer ring's imagery and relief
@@ -39,17 +39,17 @@ const VERT = /* glsl */`uniform sampler2D tHeight; uniform vec2 uHOff; uniform f
 // pushed rings. Haze grows with the air crossed (the path below uAirTop km), not with the distance, so a view straight
 // down from orbit stays clear while a low view's horizon fades.
 // The rings are ONE layer over the globe (Task 7, 2026-09-30). Above 2500 km every ring's alpha carries the view's far
-// fade uFar (1 at 2500 km -> 0 at 4000 km) and the day side, so where a coarse ring C is still drawn under the next
-// finer ring F (F's edge band, and F's whole footprint until F is fully in) two "over" blends let the globe G through
-// (1 - V)^2 instead of (1 - V): a soft box around every finer ring at 2500-4000 km. There, under F, C's alpha is
-// scaled by (1 - cF) / (1 - V cF), cF = F's own cover (its fade-in uInnerVis times its edge fade), V = uFar times
-// day, so the pair composites exactly as V (cF F + (1 - cF) cC C) + (1 - V (cF + (1 - cF) cC)) G. Below 2500 km
-// (uFar = 1) the factor is off, even at dusk: close up, relief parallax shows C's smoother ridges where F has no
-// fragment, and a C faded out there would open holes. It ramps in over uFar 1 -> 0.95 (2500 -> about 2700 km), so
-// crossing 2500 km never pops: at dusk (day < 1) the full factor stays below 1 even as uFar -> 1, and switching it on
-// at once jumped the coarse ring's alpha in the edge bands. Known limitation: cF only knows the next finer ring, so
-// while three rings fade in together (about 1 s after opening or jumping at far range) the error is reduced, not
-// zero: at most 0.06 (C - G) with all three at the same fade-in, against up to 0.24 (C - G) before.
+// fade uFar (1 at 2500 km -> 0 at 4000 km) and the day side, so where a coarse ring C is still drawn under the finer
+// ring F it defers to (F's edge band, and F's whole footprint until F is fully in) two "over" blends let the globe G
+// through (1 - V)^2 instead of (1 - V): a soft box around every finer ring at 2500-4000 km. There, under F, C's alpha
+// is scaled by (1 - cF) / (1 - V cF), cF = F's own cover (its fade-in uInnerVis times its edge fade), V = uFar times
+// day, so the pair composites exactly as V (cF F + (1 - cF) cC C) + (1 - V (cF + (1 - cF) cC)) G. Below 2500 km (uFar =
+// 1) the factor is off, even at dusk: close up, relief parallax shows C's smoother ridges where F has no fragment, and
+// a C faded out there would open holes. It ramps in over uFar 1 -> 0.95 (2500 -> about 2700 km), so crossing 2500 km
+// never pops: at dusk (day < 1) the full factor stays below 1 even as uFar -> 1, and switching it on at once jumped the
+// coarse ring's alpha in the edge bands. Known limitation: cF only knows the one finer ring C defers to, so while three
+// rings fade in together (about 1 s after opening or jumping at far range) the error is reduced, not zero: at most 0.06
+// (C - G) with all three at the same fade-in, against up to 0.24 (C - G) before.
 const FRAG = /* glsl */`uniform sampler2D tColor, tMask, tInner; uniform vec2 uCOff, uVRange, uInnerMin, uInnerCOff; uniform vec3 uSun, uHazeCol;
   uniform float uVis, uHazeK, uHazeL, uInnerOn, uInnerDone, uInnerScale, uInnerWrap, uAirTop, uInnerVis, uFar; uniform vec3 uSeaCol;
   uniform vec3 uTint; uniform float uTintOn;
@@ -276,11 +276,13 @@ export function createEarthRings(scene, renderer, { wantedUrls = new Set(), load
         u.uTintOn.value = debugTint ? 1 : 0; if (debugTint) u.uTint.value.setHex(DEBUG_TINTS[(MAX_LEVEL - r.level) % 5]);
         r.mesh.visible = u.uVis.value > 0.003; r.stats = { have, valid: r.valid, hHave, hValid: r.hValid };
       }
-      // fix A: every used ring with a finer used ring tracks that ring's window every frame, so it is behind the finer
-      // ring as soon as that one is drawn at all (on) and leaves its hole once the finer ring is fully in (done); the
-      // finer ring's own fade-in (uInnerVis) sets how much of the pair it covers (FRAG's one-layer blend)
+      // fix A: every used ring tracks the window of the NEAREST finer used ring that is drawn at all (on) every frame, so
+      // it is behind that ring as soon as it shows and leaves its hole once it is fully in (done); the finer ring's own
+      // fade-in (uInnerVis) sets how much of the pair it covers (FRAG's one-layer blend). Nearest ON, not just the next
+      // level: after a zoom step of two levels or more the loader brings the finest ring in first, and deferring only to
+      // the still-empty ring between would leave this one competing with the finest in depth (the (a) blobs) meanwhile.
       for (const r of rings) {
-        const finer = want.filter((L) => L > r.level), inner = want.includes(r.level) && finer.length && rings.find((q) => q.level === Math.min(...finer)), u = r.mat.uniforms;
+        const inner = want.includes(r.level) && rings.filter((q) => want.includes(q.level) && q.level > r.level && innerState(q).on).sort((a, b) => a.level - b.level)[0], u = r.mat.uniforms;
         const st = inner ? innerState(inner) : { on: false, done: false };
         u.uInnerOn.value = st.on ? 1 : 0; u.uInnerDone.value = st.done ? 1 : 0; u.uInnerVis.value = inner ? inner.vis : 0;
         if (!inner) continue;
