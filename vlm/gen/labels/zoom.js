@@ -29,14 +29,19 @@ export function lightingOf({ mode, utcMs, lat, lon }) {
   const s = sunAngles(utcMs, lat, lon); return { mode: 'utc', sun_elev_deg: +s.elev.toFixed(2), sun_az_deg: +s.az.toFixed(2), class: lightingClass(s.elev) };
 }
 export const rMinKm = (latDeg, Lmax) => 0.011533 * Math.cos(latDeg * DEG) * 504 * 2 ** (14 - Lmax) * 1.15;
-export function zoomFacts(info, cam, { origin, lighting, rings }) {
+// grid.approx_km: the grid assumes sea-level ground, so a point is off by about h·tan(tilt), h the ground height under
+// the view: groundKm when known (zoom.info / heightAt; src 'ground'), else the highest Terrarium elevation in the
+// footprint (terrainMaxM, sea clamped to 0; src 'terrarium_max'), else null (src 'none'). The fact carries src.
+export function zoomFacts(info, cam, { origin, lighting, rings, groundKm = null, terrainMaxM = null }) {
   const F = {}, put = (id, v, unit) => { F[id] = fact(v, unit, 'visual'); }, r2 = (x) => +(+x).toFixed(4), grid = matrixGrid(cam, origin);
+  const [h, src] = Number.isFinite(groundKm) ? [Math.max(0, groundKm), 'ground'] : Number.isFinite(terrainMaxM) ? [Math.max(0, terrainMaxM) / 1000, 'terrarium_max'] : [null, 'none'];
   put('view.lat_deg', r2(info.lat), 'deg'); put('view.lon_deg', r2(info.lon), 'deg'); put('view.range_km', r2(info.rangeKm), 'km'); put('view.tilt_deg', r2(info.tilt / DEG), 'deg');
   put('view.heading_deg', r2(info.heading / DEG), 'deg'); put('view.cam_alt_km', r2(info.camAltKm), 'km'); put('view.clear_km', r2(info.clearKm), 'km'); put('view.L0', info.L0, null);
   put('view.rings', rings, null); put('view.gsd_m', r2(Math.max(tileSizeKm(info.L0, info.lat) * 1000 / 256, sourceForLevel(info.L0).maxLevel > 8 ? 10 : 0)), 'm');
   put('view.footprint_km', r2(info.rangeKm * 2 * Math.tan(22.5 * DEG)), 'km'); put('view.range_bin', rangeBin(info.rangeKm), null);
   put('sun.elev_deg', lighting.sun_elev_deg, 'deg'); put('sun.az_deg', lighting.sun_az_deg, 'deg'); put('sun.class', lighting.class, null);
-  put('grid.latlon', grid.map((g) => (g ? [r2(g.lat), r2(g.lon)] : null)), 'deg'); put('grid.approx_km', r2(Math.max(0, info.clearKm) * Math.tan(info.tilt)), 'km');
+  put('grid.latlon', grid.map((g) => (g ? [r2(g.lat), r2(g.lon)] : null)), 'deg');
+  F['grid.approx_km'] = { ...fact(h === null ? null : r2(h * Math.tan(info.tilt)), 'km', 'visual'), src };
   put('camera.eye_km', cameraPosition(cam).map(r2), 'km');
   return F;
 }

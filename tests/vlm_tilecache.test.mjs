@@ -74,10 +74,37 @@ test('at most maxPerSec requests sent per host in any 1 s window, even after the
   while (Date.now() - t0 < 1100);
   await Promise.all(all);
   const eox = starts.filter(([h]) => h === 'tiles.maps.eox.at').map(([, t]) => t), gibs = starts.find(([h]) => h === 'gibs.earthdata.nasa.gov')[1];
-  assert.equal(eox.length, 5); assert.ok(eox[3] - eox[0] >= 990, `4th send ${eox[3] - eox[0]} ms after the 1st`); assert.ok(gibs < eox[3], 'another host is not held back');
+  assert.equal(eox.length, 5); assert.ok(gibs < eox[3], 'another host is not held back');
+  for (let i = 0; i + 3 < eox.length; i++) assert.ok(eox[i + 3] - eox[i] >= 990, `send ${i + 4} came ${eox[i + 3] - eox[i]} ms after send ${i + 1}`);
 });
 test('the User-Agent carries a contact only when one is given (APV_CONTACT is optional)', async () => {
   const seen = [], f = async (u, o) => { seen.push(o.headers['user-agent']); return res(200, jpg, 'image/jpeg'); };
   await createUpstream({ dir: tmp(), fetchImpl: f }).get(U); await createUpstream({ dir: tmp(), contact: 'ops@example.invalid', fetchImpl: f }).get(U);
   assert.ok(seen[0].startsWith('AstroPilotVision/') && !/contact/.test(seen[0]), seen[0]); assert.match(seen[1], /contact ops@example\.invalid/);
+});
+
+// Fix round 1
+const G0 = 'https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/BlueMarble_NextGeneration/default/GoogleMapsCompatible_Level8/3/2/';
+test('IMPORTANT: a 403 or 429 latches the host: queued and later gets reject before sending, the body is cancelled', async () => {
+  for (const code of [429, 403]) {
+    let n = 0, cancelled = 0;
+    const up = createUpstream({ dir: tmp(), fetchImpl: async (u) => { if (u.startsWith(G0)) return res(200, jpg, 'image/jpeg'); n++; await sleep(10); return { ...res(code, Buffer.alloc(0), 'text/html'), body: { cancel: async () => { cancelled++; } } }; } });
+    const out = await Promise.allSettled(Array.from({ length: 20 }, (_, i) => up.get(U + `?l${i}`)));
+    assert.deepEqual([n, cancelled], [1, 1], `${code}: upstream requests and cancelled bodies`); assert.ok(out.every((o) => o.status === 'rejected' && o.reason instanceof StopDrive));
+    await assert.rejects(up.get(U + '?later'), StopDrive); assert.equal(n, 1); assert.equal((await up.get(G0 + '4.jpeg')).outcome, 'fetch', 'another host is not latched');
+  }
+});
+test('each upstream request carries a timeout signal; a timed-out request is a fetch-error', async () => {
+  const keep = setTimeout(() => {}, 5000); let sig = null;
+  const up = createUpstream({ dir: tmp(), timeoutMs: 50, fetchImpl: (u, o) => { sig = o.signal; return new Promise((_, rej) => o.signal.addEventListener('abort', () => rej(o.signal.reason))); } });
+  const t = Date.now(), r = await up.get(U); clearTimeout(keep);
+  assert.ok(sig instanceof AbortSignal && sig.aborted); assert.deepEqual([r.outcome, r.status], ['fetch-error', 502]); assert.ok(Date.now() - t < 2000);
+});
+test('budgets merge with the EOX default, a resumed run passes the requests already used, and the fetch counts agree', async () => {
+  let n = 0; const f = async (u) => { n++; return u.includes('bad') ? res(200, Buffer.from('<html></html>'), 'text/html') : res(200, jpg, 'image/jpeg'); };
+  const up = createUpstream({ dir: tmp(), budgets: { 'gibs.earthdata.nasa.gov': 2 }, used: { 'tiles.maps.eox.at': 79999 }, fetchImpl: f });
+  assert.equal((await up.get(U)).outcome, 'fetch'); await assert.rejects(up.get(U + '?2'), /budget of 80000/);
+  assert.equal((await up.get(G0 + '1.jpeg')).outcome, 'fetch'); assert.equal((await up.get(G0 + 'bad.jpeg')).outcome, 'fetch-error'); await assert.rejects(up.get(G0 + '3.jpeg'), /budget of 2 /);
+  const s = up.stats(); assert.equal(s.fetch, n); assert.equal(s.fetch, Object.values(s.byHost).reduce((a, h) => a + h.fetch, 0));
+  assert.deepEqual([s.byHost['tiles.maps.eox.at'].used, s.byHost['gibs.earthdata.nasa.gov'].used, s.error, s.hit], [80000, 2, 1, 0]);
 });

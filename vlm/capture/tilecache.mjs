@@ -1,8 +1,10 @@
 // vlm/capture/tilecache.mjs — the tile cache of spec §6 / R15: one WAL SQLite file per upstream host on LaCie (WAL checked
 // on the exFAT drive), keyed by the served URL, and the politeness limiter: <= 4 requests in flight and <= 8 requests
-// sent per second per host, a descriptive User-Agent that carries a contact only if one is given (the optional
-// APV_CONTACT), an 80,000 EOX budget reserved before queueing; 403/429 or the budget stop the drive. Only valid responses
-// are cached: a 200 with the whole body and, for tile hosts, an image type whose bytes start with a JPEG or PNG signature
+// sent per second per host (one at a time until the host has answered once), a descriptive User-Agent that carries a
+// contact only if one is given (the optional APV_CONTACT), a 30 s timeout per request, and per-host budgets (the EOX
+// 80,000 by default, merged with any given; `used` carries a resumed run's count) reserved before queueing. A 403 or 429
+// latches its host: every queued and later request to it rejects with StopDrive before sending. Only valid responses are
+// cached: a 200 with the whole body and, for tile hosts, an image type whose bytes start with a JPEG or PNG signature
 // (an HTML error page or captcha served as 200 is a failed fetch, never imagery).
 import { DatabaseSync } from 'node:sqlite';
 import crypto from 'node:crypto';
@@ -18,53 +20,68 @@ export function openTileCache(dir, host) {
   return { get: (url) => get.get(url) || null, put: (url, body, ctype) => put.run(url, body, ctype, crypto.createHash('sha1').update(body).digest('hex'), body.length, Date.now()), count: () => cnt.get().n, close: () => db.close() };
 }
 const TILE_HOSTS = new Set(['tiles.maps.eox.at', 'gibs.earthdata.nasa.gov', 's3.amazonaws.com']);
+export const DEFAULT_BUDGETS = Object.freeze({ 'tiles.maps.eox.at': 80000 });
 const isImage = (b) => b.length >= 4 && ((b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) || (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47));
 const failed = () => ({ status: 502, body: Buffer.alloc(0), ctype: 'text/plain', outcome: 'fetch-error' });
-export function createUpstream({ dir, contact, budgets = { 'tiles.maps.eox.at': 80000 }, fetchImpl = fetch, maxInFlight = 4, maxPerSec = 8 }) {
-  const caches = new Map(), lanes = new Map(), pending = new Map(), stats = { hit: 0, fetch: 0, error: 0, byHost: {} };
+// stats: hit (served from the cache), fetch (requests sent upstream), error (sent requests that failed); byHost[h] has
+// fetch and error as above plus used (the budget count: the given used[h] plus this run's fetch)
+export function createUpstream({ dir, contact, budgets = {}, used = {}, fetchImpl = fetch, maxInFlight = 4, maxPerSec = 8, timeoutMs = 30000 }) {
+  const limits = { ...DEFAULT_BUDGETS, ...budgets }, caches = new Map(), lanes = new Map(), pending = new Map(), stats = { hit: 0, fetch: 0, error: 0, byHost: {} };
   const ua = contact ? `AstroPilotVision/0 (research dataset capture; low-rate, cached; contact ${contact})` : 'AstroPilotVision/0 (research dataset capture; low-rate, cached)';
   const cache = (h) => { if (!caches.has(h)) caches.set(h, openTileCache(dir, h)); return caches.get(h); };
-  const lane = (h) => { if (!lanes.has(h)) lanes.set(h, { live: 0, starts: [] }); return lanes.get(h); };
+  const hostStats = (h) => (stats.byHost[h] ||= { fetch: 0, error: 0, used: used[h] || 0 });
+  // per host: live (in flight), starts (send times in the last second), queued (admitted, not sent; they hold budget),
+  // open (the host has answered once), stop (the StopDrive message once a 403/429 latched the host)
+  const lane = (h) => { if (!lanes.has(h)) lanes.set(h, { live: 0, starts: [], queued: 0, open: false, stop: null }); return lanes.get(h); };
   // send() runs under the host's limits. The start is stamped in the same tick as the send, so a blocked event loop (a
   // slow synchronous cache open or write on the USB drive) cannot bunch granted-but-unsent requests into a burst.
   function limited(h, send) {
-    const L = lane(h);
+    const L = lane(h), hs = hostStats(h);
     return new Promise((resolve, reject) => {
       const attempt = () => {
-        const now = Date.now(); L.starts = L.starts.filter((t) => now - t < 1000);
-        if (L.live >= maxInFlight || L.starts.length >= maxPerSec) { setTimeout(attempt, L.live >= maxInFlight ? 5 : 1000 - (now - L.starts[0]) + 1); return; }
-        L.live++; L.starts.push(now);
+        if (L.stop) { L.queued--; reject(new StopDrive(L.stop)); return; }
+        const now = Date.now(), cap = L.open ? maxInFlight : 1; L.starts = L.starts.filter((t) => now - t < 1000);
+        if (L.live >= cap || L.starts.length >= maxPerSec) { setTimeout(attempt, L.live >= cap ? 5 : 1000 - (now - L.starts[0]) + 1); return; }
+        L.queued--; L.live++; L.starts.push(now); hs.fetch++; hs.used++; stats.fetch++;
         send().finally(() => { L.live--; }).then(resolve, reject);
       };
       attempt();
     });
   }
-  async function fetchOnce(url, h, c, hs) {
-    let r, body;
+  async function fetchOnce(url, h, c) {
+    const L = lane(h), hs = hostStats(h); let r, body;
     try {
       ({ r, body } = await limited(h, async () => {
-        const res = await fetchImpl(url, { headers: { 'user-agent': ua } });
-        return { r: res, body: res.status === 403 || res.status === 429 ? null : Buffer.from(await res.arrayBuffer()) };
+        const res = await fetchImpl(url, { headers: { 'user-agent': ua }, signal: AbortSignal.timeout(timeoutMs) });
+        if (res.status === 403 || res.status === 429) {
+          L.stop ||= `${res.status} from ${h}: stopping without retry`;
+          try { await res.body?.cancel(); } catch { /* the body is dropped either way */ }
+          return { r: res, body: null };
+        }
+        L.open = true;
+        return { r: res, body: Buffer.from(await res.arrayBuffer()) };
       }));
-    } catch { hs.error++; stats.error++; return failed(); }
-    if (r.status === 403 || r.status === 429) throw new StopDrive(`${r.status} from ${h}: stopping without retry`);
+    } catch (err) { if (err instanceof StopDrive) throw err; hs.error++; stats.error++; return failed(); }
+    if (body === null) throw new StopDrive(L.stop);
     // fetch decodes gzip/br bodies while content-length stays the encoded size, so the length is compared only unencoded
     const ctype = r.headers.get('content-type') || '', len = r.headers.get('content-length'), enc = r.headers.get('content-encoding');
     const whole = len === null || (enc !== null && enc !== 'identity') || +len === body.length;
     const ok = r.status === 200 && body.length > 0 && whole && (!TILE_HOSTS.has(h) || (ctype.startsWith('image/') && isImage(body)));
     if (!ok) { hs.error++; stats.error++; return failed(); }
-    c.put(url, body, ctype); stats.fetch++;
+    c.put(url, body, ctype);
     return { status: 200, body, ctype, outcome: 'fetch' };
   }
   async function get(url) {
-    const h = new URL(url).host, c = cache(h), hit = c.get(url);
+    const h = new URL(url).host, L = lane(h);
+    if (L.stop) throw new StopDrive(L.stop);
+    const c = cache(h), hit = c.get(url);
     if (hit) { stats.hit++; return { status: 200, body: Buffer.from(hit.body), ctype: hit.ctype, outcome: 'hit' }; }
     // a second request for a URL already on its way shares that one upstream request (served as a hit if it succeeds)
     if (pending.has(url)) return pending.get(url).then((r) => (r.outcome === 'fetch' ? (stats.hit++, { ...r, outcome: 'hit' }) : r));
-    const hs = (stats.byHost[h] ||= { fetch: 0, error: 0 });
-    if (budgets[h] !== undefined && hs.fetch >= budgets[h]) throw new StopDrive(`upstream budget of ${budgets[h]} requests reached for ${h}`);
-    hs.fetch++;
-    const p = fetchOnce(url, h, c, hs).finally(() => pending.delete(url));
+    const hs = hostStats(h);
+    if (limits[h] !== undefined && hs.used + L.queued >= limits[h]) throw new StopDrive(`upstream budget of ${limits[h]} requests reached for ${h}`);
+    L.queued++;
+    const p = fetchOnce(url, h, c).finally(() => pending.delete(url));
     pending.set(url, p);
     return p;
   }
