@@ -9,7 +9,9 @@ vision_positions_fix), so that only the decoder differs.
     float32 pixel_values go to <folder>/parity/ so that bench.mjs checks transformers.js within 1e-2 on the same inputs
     (with the fp32 image features, against which bench.mjs checks the vision encoder on the device).
 (e) with --stop-set, >= 95 % of greedy fp32 outputs end in 49279 before max_new_tokens."""
-import argparse, json, sys, time
+import argparse, json, os, sys, time
+# before transformers/huggingface_hub are imported (they read HF_HOME at import): downloads stay on LaCie
+os.environ.setdefault('HF_HOME', '/Volumes/LaCie/astro-pilot/vlm/hf')
 from pathlib import Path
 import numpy as np, onnxruntime as ort, torch
 from PIL import Image
@@ -116,6 +118,8 @@ def main():
             t0 = time.perf_counter(); f = venc.run(None, {'pixel_values': x['pv'], 'pixel_attention_mask': x['pam']})[0]; ms.append(1e3 * (time.perf_counter() - t0)); cos.append(cosine(x['feats'], f))
         R['b']['variants'][v] = {'mean_cos': float(np.mean(cos)), 'min_cos': float(np.min(cos)), 'cos': cos, 'mb': round(p.stat().st_size / 1e6, 1), 'cpu_ms': float(np.median(ms))}
     R['b']['candidate'] = vision_candidate(R['b']['variants']); R['b']['mean_cos'] = R['b']['variants'][R['b']['candidate']]['mean_cos'] if R['b']['candidate'] else None
+    # the candidate is picked on onnxruntime's CPU EP only; the published fp16 encoder is exact there and wrong on WebGPU
+    R['b']['candidate_measured_on'], R['b']['needs_device_confirmation'] = 'cpu', 'node vlm/web/bench.mjs narrator --model-dir <folder> --device webgpu --vision all'
     base = json.loads(Path(a.baseline).read_text()) if a.baseline else None
     for d in (d for d in DTYPES if (md / f'onnx/decoder_model_merged{SUFFIX[d]}.onnx').exists()):
         paths = {'ours': md / f'onnx/decoder_model_merged{SUFFIX[d]}.onnx', 'published': published(f'decoder_model_merged{SUFFIX[d]}.onnx') if a.src == BASE else None}

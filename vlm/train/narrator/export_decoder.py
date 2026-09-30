@@ -10,6 +10,8 @@
   cos >= 0.999 on WebGPU and CPU, where the published fp16 encoder breaks on WebGPU (cos 0.14-0.69) and its q8/int8/q4
   reach 0.92-0.95. Block 32 because the WebGPU MatMulNBits kernel runs it 2.7x faster than block 128 (279 vs 752 ms)."""
 import argparse, copy, json, os, shutil, subprocess, sys, tempfile
+# before transformers/huggingface_hub are imported (they read HF_HOME at import): downloads stay on LaCie
+os.environ.setdefault('HF_HOME', '/Volumes/LaCie/astro-pilot/vlm/hf')
 from pathlib import Path
 import onnx, torch
 from PIL import Image
@@ -130,7 +132,10 @@ def vision_positions_fix(model):
     trained with, and the published vision_encoder ONNX computes, bucketize(arange(0, 1-1e-6, 1/n)) (ids 0…31). Without
     this, PyTorch's image features differ from the deployed encoder's (cos 0.86–0.92); with it, fp32/fp16 ONNX match at
     cos 1.0. Training (Task 15), merge checks and parity must all call it."""
+    from transformers.models.idefics3.modeling_idefics3 import Idefics3VisionEmbeddings
     E = model.model.vision_model.embeddings
+    if not isinstance(E, Idefics3VisionEmbeddings):
+        raise TypeError(f'vision_positions_fix patches Idefics3VisionEmbeddings (SmolVLM, transformers 4.57); model.model.vision_model.embeddings is {type(E).__name__}')
 
     def forward(pixel_values, patch_attention_mask):
         b, _, h, w = pixel_values.shape; n, dev = E.num_patches_per_side, pixel_values.device
@@ -152,7 +157,16 @@ def published(name):
     return Path(hf_hub_download(BASE, f'onnx/{name}'))
 
 ATTRIBUTION = 'Base model: HuggingFaceTB/SmolVLM-256M-Instruct (Apache-2.0). Fine-tuning data: Astro Pilot Vision (see the dataset ATTRIBUTION.txt).\n'
-MODEL_CARD = '# Narrator (SmolVLM-256M, Astro Pilot Vision)\n\nBase: SmolVLM-256M-Instruct, Apache-2.0. Decoder LoRA-merged; vision encoder and embeddings unchanged.\nIntended use: on-demand captions and safety explanations for Astro Pilot frames in the browser. Trained on simulator frames: there is a sim-to-real gap; do not use for real flight decisions.\n'
+def model_card(src):
+    dec = 'the unmodified base text decoder of SmolVLM-256M-Instruct' if str(src) == BASE else f'the LoRA-merged Narrator text decoder ({Path(str(src)).name})'
+    return ('# Narrator (SmolVLM-256M, Astro Pilot Vision)\n\n'
+            f'Base: SmolVLM-256M-Instruct, Apache-2.0. Decoder: {dec}; decoder_model_merged.onnx is the fp32 parity reference and '
+            'decoder_model_merged_{q4,q4f16,fp16}.onnx are the fused ONNX Runtime GenAI builds.\n'
+            'Vision encoder and embed_tokens: the base weights. vision_encoder_quantized.onnx (q8) is our weight-only 8-bit re-quantisation '
+            'of the published fp32 encoder; vision_encoder_{q4,int8,fp16}.onnx are the published files (fp16 is wrong on WebGPU).\n'
+            'Images: preprocessor_config.json sets do_resize false, so every caller must resize the image to 512×512 (LANCZOS) before the processor.\n'
+            'Intended use: on-demand captions and safety explanations for Astro Pilot frames in the browser. Trained on simulator frames: '
+            'there is a sim-to-real gap; do not use for real flight decisions.\n')
 
 def export_folder(src, out, processor_src=SMOLVLM_DIR, dtypes=DTYPES, vision=VISION):
     from transformers import AutoModelForVision2Seq
@@ -174,7 +188,7 @@ def export_folder(src, out, processor_src=SMOLVLM_DIR, dtypes=DTYPES, vision=VIS
     (out / 'preprocessor_config.json').write_text(json.dumps(pre, indent=1))
     gen = json.loads((Path(processor_src) / 'generation_config.json').read_text()); gen['eos_token_id'] = EOU
     (out / 'generation_config.json').write_text(json.dumps(gen, indent=1))
-    (out / 'ATTRIBUTION.txt').write_text(ATTRIBUTION); (out / 'MODEL_CARD.md').write_text(MODEL_CARD)
+    (out / 'ATTRIBUTION.txt').write_text(ATTRIBUTION); (out / 'MODEL_CARD.md').write_text(model_card(src))
     return out
 
 if __name__ == '__main__':

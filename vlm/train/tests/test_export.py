@@ -1,18 +1,44 @@
+import os
+os.environ.setdefault('HF_HOME', '/Volumes/LaCie/astro-pilot/vlm/hf')
 import tempfile, unittest
+from importlib.util import find_spec
 from pathlib import Path
+from types import SimpleNamespace
 import numpy as np, onnx, onnxruntime as ort, torch
 from onnx import TensorProto, helper
 from PIL import Image
 from transformers import LlamaConfig, LlamaForCausalLM
 from transformers.cache_utils import DynamicCache
-from vlm.train.narrator.export_decoder import Decoder, fix_io, preprocessor_config, quantize_vision_w8, square, vision_positions_fix
-from vlm.train.narrator.check_parity import TOL, forced_agreement, gate_failures, vision_candidate
+from vlm.train.narrator.export_decoder import (BASE, SMOLVLM_DIR, Decoder, build_fused, export_onnx, fix_io, io_names, model_card, preprocessor_config,
+                                               quantize_vision_w8, save_text_llama, square, vision_positions_fix)
+from vlm.train.narrator.check_parity import TOL, forced_agreement, gate_failures, greedy_torch, run_onnx, vision_candidate
+
+LACIE_TMP = '/Volumes/LaCie/astro-pilot/vlm/tmp'
+
+def tmpdir(case):
+    """A temporary directory under $TMPDIR when that is on LaCie (else LaCie's tmp, never the Mac disk), removed after the test."""
+    base = os.environ.get('TMPDIR', '')
+    d = tempfile.TemporaryDirectory(dir=base if base.startswith('/Volumes/LaCie/') else LACIE_TMP); case.addCleanup(d.cleanup)
+    return Path(d.name)
+
+def tiny_vlm():
+    """A tiny random Llama, wrapped like Idefics3ForConditionalGeneration (config.text_config, model.text_model, lm_head)."""
+    torch.manual_seed(0)
+    cfg = LlamaConfig(hidden_size=64, intermediate_size=128, num_hidden_layers=2, num_attention_heads=4, num_key_value_heads=2, head_dim=16, vocab_size=97, rope_theta=100000.0, rms_norm_eps=1e-5)
+    m = LlamaForCausalLM(cfg).eval()
+    return m, cfg, SimpleNamespace(config=SimpleNamespace(text_config=cfg), model=SimpleNamespace(text_model=m.model), lm_head=m.lm_head)
+
+def forced_run(case, m, cfg, vlm, sess):
+    """torch greedy for 8 tokens, then the ONNX session stepped through the same tokens; returns (tokens, torch logits, onnx logits)."""
+    e = torch.randn(1, 5, 64)
+    with torch.no_grad():
+        tt, lt = greedy_torch(vlm, e, 8); _, lo = run_onnx(sess, cfg, e, lambda t: m.model.embed_tokens(torch.tensor([[t]])).numpy(), tt)
+    case.assertEqual(len(tt), 8)
+    return tt, lt, lo
 
 class TestDecoder(unittest.TestCase):
     def test_matches_hf_llama_with_and_without_past(self):
-        torch.manual_seed(0)
-        cfg = LlamaConfig(hidden_size=64, intermediate_size=128, num_hidden_layers=2, num_attention_heads=4, num_key_value_heads=2, head_dim=16, vocab_size=97, rope_theta=100000.0, rms_norm_eps=1e-5)
-        m = LlamaForCausalLM(cfg).eval(); dec = Decoder(m.model, m.lm_head, cfg).eval()
+        m, cfg, _ = tiny_vlm(); dec = Decoder(m.model, m.lm_head, cfg).eval()
         e1 = torch.randn(1, 5, 64); am = torch.ones(1, 5, dtype=torch.int64); pos = torch.arange(5)[None]
         empty = [torch.zeros(1, 2, 0, 16) for _ in range(4)]
         with torch.no_grad():
@@ -24,6 +50,28 @@ class TestDecoder(unittest.TestCase):
             out2 = dec(e2, am2, pos2, *out[1:])
             self.assertLess((out2[0] - ref2.logits).abs().max().item(), 1e-4)
             self.assertEqual(tuple(out2[1].shape), (1, 2, 6, 16))
+
+class TestExportOnnx(unittest.TestCase):
+    def test_traced_decoder_has_the_contract_names_and_follows_torch_greedy(self):
+        m, cfg, vlm = tiny_vlm(); d = tmpdir(self); export_onnx(vlm, d / 'dec.onnx'); sess = ort.InferenceSession(str(d / 'dec.onnx'))
+        past, present = io_names(cfg.num_hidden_layers)
+        self.assertEqual([i.name for i in sess.get_inputs()], ['inputs_embeds', 'attention_mask', 'position_ids', *past])
+        self.assertEqual([o.name for o in sess.get_outputs()], ['logits', *present])
+        tt, lt, lo = forced_run(self, m, cfg, vlm, sess)
+        self.assertEqual(forced_agreement(lo, tt), 1.0); self.assertLess(max(float(np.abs(a - b).max()) for a, b in zip(lt, lo)), 1e-4)
+
+@unittest.skipUnless(find_spec('onnxruntime_genai') and (SMOLVLM_DIR / 'tokenizer.json').exists(), 'needs onnxruntime-genai and the SmolVLM tokenizer files')
+class TestBuildFused(unittest.TestCase):
+    def test_builder_fp16_decoder_gets_the_contract_without_position_ids_and_follows_torch(self):
+        m, cfg, vlm = tiny_vlm(); d = tmpdir(self)
+        save_text_llama(vlm, d / 'llama'); build_fused(d / 'llama', 'fp16', d / 'dec.onnx', d / 'work', head_dim=16)
+        sess = ort.InferenceSession(str(d / 'dec.onnx')); ins = {i.name: i for i in sess.get_inputs()}; outs = {o.name: o for o in sess.get_outputs()}
+        past, present = io_names(cfg.num_hidden_layers)
+        self.assertEqual(set(ins), {'inputs_embeds', 'attention_mask', *past}); self.assertEqual(set(outs), {'logits', *present})
+        self.assertEqual((ins['inputs_embeds'].type, outs['logits'].type, ins[past[0]].type), ('tensor(float)', 'tensor(float)', 'tensor(float16)'))
+        self.assertEqual(ins[past[0]].shape[1:], [2, 'past_sequence_length', 16]); self.assertEqual(outs[present[0]].shape[3], 16)
+        tt, lt, lo = forced_run(self, m, cfg, vlm, sess)
+        self.assertEqual(forced_agreement(lo, tt), 1.0); self.assertLess(max(float(np.abs(a - b).max()) for a, b in zip(lt, lo)), 2e-2)
 
 def builder_like(dtype):
     """A two-node stand-in for a GenAI-builder decoder: builder I/O names, a symbolic kv_cache_dim, fp16 or fp32 I/O."""
@@ -37,7 +85,7 @@ def builder_like(dtype):
 
 class TestFixIo(unittest.TestCase):
     def run_fixed(self, dtype):
-        d = Path(tempfile.mkdtemp()); onnx.save(builder_like(dtype), str(d / 'model.onnx')); fix_io(d / 'model.onnx', d / 'out.onnx', head_dim=8)
+        d = tmpdir(self); onnx.save(builder_like(dtype), str(d / 'model.onnx')); fix_io(d / 'model.onnx', d / 'out.onnx', head_dim=8)
         m = onnx.load(str(d / 'out.onnx')); io = {v.name: v.type.tensor_type for v in [*m.graph.input, *m.graph.output]}
         return d, m, io
 
@@ -60,7 +108,7 @@ class TestVisionW8(unittest.TestCase):
         rng = np.random.default_rng(0); w = rng.standard_normal((256, 128)).astype(np.float32)
         g = helper.make_graph([helper.make_node('MatMul', ['x', 'w'], ['y'])], 'g', [helper.make_tensor_value_info('x', TensorProto.FLOAT, [1, 256])],
                               [helper.make_tensor_value_info('y', TensorProto.FLOAT, [1, 128])], [onnx.numpy_helper.from_array(w, 'w')])
-        d = Path(tempfile.mkdtemp()); onnx.save(helper.make_model(g, opset_imports=[helper.make_opsetid('', 17)], ir_version=10), str(d / 'fp32.onnx'))
+        d = tmpdir(self); onnx.save(helper.make_model(g, opset_imports=[helper.make_opsetid('', 17)], ir_version=10), str(d / 'fp32.onnx'))
         quantize_vision_w8(d / 'fp32.onnx', d / 'w8.onnx')
         n = onnx.load(str(d / 'w8.onnx')).graph.node; attrs = {a.name: helper.get_attribute_value(a) for a in n[0].attribute}
         self.assertEqual((n[0].op_type, attrs['bits'], attrs['block_size']), ('MatMulNBits', 8, 32))
@@ -75,9 +123,14 @@ class TestPreprocessing(unittest.TestCase):
     def test_square_is_a_512_rgb_image(self):
         self.assertEqual(square(Image.new('RGBA', (1600, 900))).size, (512, 512)); self.assertEqual(square(Image.new('L', (90, 160))).mode, 'RGB')
 
+class TestModelCard(unittest.TestCase):
+    def test_card_names_the_decoder_source_the_q8_requantisation_and_the_512_resize(self):
+        base, merged = model_card(BASE), model_card('/Volumes/LaCie/astro-pilot/vlm/models/narrator-merged')
+        self.assertIn('unmodified base', base); self.assertNotIn('LoRA-merged', base); self.assertIn('LoRA-merged', merged)
+        for c in (base, merged): self.assertIn('re-quantisation', c); self.assertIn('512×512', c); self.assertIn('do_resize', c)
+
 class TestVisionPositions(unittest.TestCase):
     def test_patched_embeddings_add_position_rows_0_to_n_minus_1_like_the_published_encoder(self):
-        from types import SimpleNamespace
         from transformers.models.idefics3.configuration_idefics3 import Idefics3VisionConfig
         from transformers.models.idefics3.modeling_idefics3 import Idefics3VisionEmbeddings
         torch.manual_seed(0); E = Idefics3VisionEmbeddings(Idefics3VisionConfig(image_size=64, patch_size=16, hidden_size=8)).eval()
@@ -88,6 +141,10 @@ class TestVisionPositions(unittest.TestCase):
             self.assertLess((E(pv, mask) - want).abs().max().item(), 1e-6)
             half = mask.clone(); half[:, :, 2:] = False; ids = torch.zeros(16, dtype=torch.long); ids[[0, 1, 4, 5, 8, 9, 12, 13]] = torch.tensor([0, 2, 4, 6, 8, 10, 12, 14])
             self.assertLess((E(pv, half) - (E.patch_embedding(pv).flatten(2).transpose(1, 2) + E.position_embedding.weight[ids][None])).abs().max().item(), 1e-6)
+
+    def test_refuses_embeddings_that_are_not_idefics3(self):
+        with self.assertRaisesRegex(TypeError, 'Idefics3VisionEmbeddings'):
+            vision_positions_fix(SimpleNamespace(model=SimpleNamespace(vision_model=SimpleNamespace(embeddings=torch.nn.Linear(2, 2)))))
 
 class TestGates(unittest.TestCase):
     def test_forced_agreement_is_the_top1_hit_rate(self):
