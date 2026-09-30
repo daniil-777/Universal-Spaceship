@@ -19,6 +19,10 @@ export function classify(url, { port, profile }) {
   }
   return { action: 'abort', why: 'not on the allow-list' };
 }
+// The drive's stop latch: the first 403/429 wins over any other stop, earlier or later (a budget stop never hides a ban, so
+// the ban is persisted and the drive exits 3); otherwise the first stop stays.
+const httpStop = (e) => /^(403|429) from /.test(String(e && e.message));
+export function latchStop(stop, err) { if (!stop.error || (httpStop(err) && !httpStop(stop.error))) stop.error = err; return stop.error; }
 // A response the tile cache did not serve (a failed upstream fetch: 502, empty body) is ledgered as 'fetch error' even on
 // a rewrite, so it is never counted as imagery and always discards its sample. `via` keeps the cache's own outcome.
 export async function installRoutes(ctx, { port, profile, upstream, ledger, stop }) {
@@ -27,7 +31,7 @@ export async function installRoutes(ctx, { port, profile, upstream, ledger, stop
     if (c.action === 'continue') { ledger.push({ ...e, outcome: 'continued' }); return route.continue(); }
     if (c.action === 'abort') { ledger.push({ ...e, outcome: 'aborted', why: c.why }); return route.abort('blockedbyclient'); }
     let r;
-    try { r = await upstream.get(c.upstream); } catch (err) { stop.error = err; ledger.push({ ...e, outcome: 'aborted', why: String(err.message) }); return route.abort('failed'); }
+    try { r = await upstream.get(c.upstream); } catch (err) { latchStop(stop, err); ledger.push({ ...e, outcome: 'aborted', why: String(err.message) }); return route.abort('failed'); }
     const served = r.outcome === 'hit' || r.outcome === 'fetch';
     ledger.push({ ...e, outcome: !served ? 'fetch error' : c.action === 'rewrite' ? 'rewritten' : r.outcome === 'hit' ? 'cache hit' : 'upstream fetch', via: r.outcome, served: c.upstream });
     return route.fulfill({ status: r.status, body: r.body, headers: { 'content-type': r.ctype || 'application/octet-stream', 'access-control-allow-origin': '*' } });

@@ -1,6 +1,6 @@
 // vlm/capture/session.mjs — one page load = one fresh context (896x504, DPR 1, service workers blocked) with the licence
 // routes, the seeded Math.random, the L/D preserveDrawingBuffer wrapper, a paused fake clock (install(utc - 5000) then
-// pauseAt(utc)), an all-request in-flight counter, and the readiness waits of spec §7.1-§7.2.
+// pauseAt(utc)), an all-request in-flight counter, the deterministic boot and the readiness waits of spec §7.1-§7.2.
 import { installRoutes } from './routes.mjs';
 export class Discard extends Error {}
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -35,29 +35,42 @@ export async function waitIdle(S, check = null, { timeoutMs = 10000, stop = null
     await sleep(5);
   }
 }
-// Waits, with the clock paused, until the page is ready (true) or has been quiet for quietMs of real time: no request in
-// flight and none finished (false). Network idle alone is not enough: the page keeps working after a response arrives
-// (app.js parses and decodes the policy before __ap.ready), and a frame pumped during that work lands ready one fake tick
-// later in some runs (fix round 1: seen as a +16 ms provenance.clock and different pixels in one of four S runs).
-export async function settleReal(S, readyExpr, { stop = null, quietMs = BOOT_QUIET_MS } = {}) {
-  let seen = S.done, since = Date.now();
+// Boot (§7.1; Task 9 review, step 0 of Task 10): deterministic, with no real-time quiet heuristic. A page is pumped a frame only
+// while its pump predicate holds, i.e. while it waits on a fake timer; everything else before ready is real-time work
+// (module loads, the policy fetch, parse and decode), awaited with the clock paused. S/A (app.js): main() runs synchronously
+// to `ui.loading('building the solar system…')` and awaits a 30 ms timer (app.js:404), which fires on the 2nd frame; from
+// there it runs to `ui.loading('loading the policy…')` and only real-time work remains. So a frame is pumped only while
+// #loadingMsg reads 'building the solar system…' (a still-loading module reads 'warming up the engines…' and is waited for,
+// never pumped), and exactly 2 frames must have run at ready (Z, L and D set ready without a frame: 0). A mismatch, a page
+// error (__ap.errors or a pageerror), more than maxFrames frames or no ready within readyMs of real time discards the page.
+export const BOOT = Object.freeze({
+  app: Object.freeze({ ready: '!!(window.__ap && window.__ap.ready)', pump: "(() => { const l = document.getElementById('loadingMsg'); return !!l && l.textContent === 'building the solar system…'; })()", frames: 2 }),
+  zoom: Object.freeze({ ready: '!!(window.__zoomPage && window.__zoomPage.ready)', pump: null, frames: 0 }),
+  landing: Object.freeze({ ready: '!!(window.__landing && window.__landing.ready)', pump: null, frames: 0 }),
+  real: Object.freeze({ ready: '!!(window.__real && window.__real.ready)', pump: null, frames: 0 }),
+});
+export const BOOT_READY_MS = 60000, BOOT_MAX_FRAMES = 8;
+const bootState = (b) => `(() => { const a = window.__ap; return { ready: ${b.ready}, errors: a && a.errors && a.errors.length ? a.errors.slice(0, 3).map(String) : null, pump: ${b.pump ? `!!${b.pump}` : 'false'}, perf: performance.now() }; })()`;
+// `stop` (the drive's latch) makes a 403/429 during boot surface as StopDrive; returns {frames, perf} (page performance.now()
+// at ready, the fake clock's, for the log)
+export async function boot(S, url, b, mode, stop = null, { readyMs = BOOT_READY_MS, maxFrames = BOOT_MAX_FRAMES } = {}) {
+  await S.page.goto(url, { waitUntil: 'load', timeout: 180000 }); await waitIdle(S, null, { stop });
+  const expr = bootState(b); let n = 0, since = Date.now();
   for (;;) {
-    if (await S.page.evaluate(readyExpr)) return true;
     if (stop && stop.error) throw stop.error;
-    if (S.inflight > 0) { await waitIdle(S, null, { stop }); seen = S.done; since = Date.now(); continue; }
-    if (S.done !== seen) { seen = S.done; since = Date.now(); } else if (Date.now() - since >= quietMs) return false;
+    const s = await S.page.evaluate(expr), errs = s.errors || (S.logs.length ? S.logs.slice(0, 3) : null);
+    if (errs) throw new Discard(`boot: page error: ${errs.join(' | ')}`);
+    if (s.ready) {
+      if (mode === 'clock' && n !== b.frames) throw new Discard(`boot: ready after ${n} frames, expected ${b.frames}`);
+      return { frames: n, perf: s.perf };
+    }
+    if (s.pump) {
+      if (n >= maxFrames) throw new Discard(`boot: ${maxFrames} boot frames without leaving the fake-timer wait`);
+      await waitIdle(S, null, { stop }); await frame(S, mode); n++; since = Date.now(); continue;
+    }
+    if (Date.now() - since > readyMs) throw new Discard(`boot: not ready after ${readyMs / 1000} s of real time with the clock paused (${n} frames)`);
     await sleep(10);
   }
-}
-export const BOOT_QUIET_MS = 1000;
-// the §7.2 per-frame wait holds from boot on, and a boot frame is pumped only when the page has settled without becoming
-// ready (it waits on a fake timer, app.js:404's 30 ms), so ready lands on the same fake tick in every run; `stop` (the
-// drive's latch) makes a 403/429 during boot surface as StopDrive
-export async function boot(S, url, readyExpr, mode, stop = null) {
-  await S.page.goto(url, { waitUntil: 'load', timeout: 180000 }); await waitIdle(S, null, { stop });
-  for (let i = 0; i < 4000; i++) { if (await settleReal(S, readyExpr, { stop })) return; await frame(S, mode); }
-  if (stop && stop.error) throw stop.error;
-  throw new Discard('boot: the ready flag never set');
 }
 export async function loadProbe(S, family, params) { return S.page.evaluate(async ([f, p]) => { const m = await import('/vlm/capture/probe/core.js'); window.__apv = m.createProbe(); return window.__apv.setup(f, p); }, [family, params]); }
 export const call = (S, name, arg = null) => S.page.evaluate(([n, a]) => window.__apv.call(n, a), [name, arg]);

@@ -2,7 +2,7 @@
 // warm-up, candidates every 1.5 s of sim time accepted with p = 1/3 or 1 on the CPA/clearance trigger, clips at a jittered
 // 2-4 step spacing captured speculatively (f0, f1 are dropped when f2 is rejected), labels at f2; the episode ends at a
 // crash, 60 s or 12 samples. drive.mjs keeps at most 2 severity-4 samples per episode (weight x candidates / kept).
-import { openPage, boot, loadProbe, call, frame, waitIdle, Discard } from './session.mjs';
+import { openPage, boot, BOOT, loadProbe, call, frame, waitIdle, Discard } from './session.mjs';
 import { createRing } from './probe/ring.js';
 export class Crash extends Error {}
 const chk = (S) => S.page.evaluate(() => window.__apv.check()), sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -32,7 +32,7 @@ export async function runCorridorEpisode(D, ep) {
   const T = { caps: 0, capHostMs: 0, capPageMs: 0, encMs: 0, encN: 0, pngBytes: 0, labels: 0, labelHostMs: 0, rolloutMs: 0, factsMs: 0, bootMs: 0, warmMs: 0 };
   const stats = () => ({ ...T, frames: S.nFrames, frameMs: S.frameMs });
   try {
-    await boot(S, ep.url, '!!(window.__ap && window.__ap.ready)', D.mode, D.stop); T.bootMs = Date.now() - t0;
+    T.boot = await boot(S, ep.url, BOOT.app, D.mode, D.stop); T.bootMs = Date.now() - t0;
     let c = await loadProbe(S, ep.family, ep.params);
     if (c.renderScale !== 1 || c.pixelRatio !== 1) throw new Discard(`renderScale ${c.renderScale} pixelRatio ${c.pixelRatio}`);
     if (ep.warmup) c = await ep.warmup(S, D);

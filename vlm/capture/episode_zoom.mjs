@@ -10,9 +10,9 @@
 //
 // Drops, each with its own logged reason: 'gate timeout' (120 s of real time without the gate), 'gate: slot used' (the page-
 // time slot ran out first), 'gate lost' (it held, then failed at the slot end), 'not steady', a dirty ledger, and 'stall' (no
-// request finished for 60 s; the location ends there, the views already captured are kept). A dropped view does not fill its
-// slot, so the later views of that page start earlier (still deterministic for the same drops).
-import { openPage, boot, loadProbe, call, frame, waitIdle, Discard } from './session.mjs';
+// request finished for 60 s; the location ends there, the views already captured are kept). A dropped view still fills its
+// slot, so the later views of that page keep their page time (step 0 of Task 10).
+import { openPage, boot, BOOT, loadProbe, call, frame, waitIdle, Discard } from './session.mjs';
 import { discardReason } from './routes.mjs';
 export const SLOT = 1600, GATE_REAL_MS = 120000, STALL_MS = 60000;
 const TILE = /^(tiles\.maps\.eox\.at|gibs\.earthdata\.nasa\.gov|s3\.amazonaws\.com|server\.arcgisonline\.com)$/;
@@ -21,14 +21,17 @@ async function zframe(S, D) { await waitIdle(S, () => call(S, 'loaderIdle'), { t
 const tilesOf = (ledger, i0, i1) => { const w = ledger.slice(i0, i1).filter((e) => TILE.test(e.host)); return { requests: w.length, upstream: w.filter((e) => e.via === 'fetch').length }; };
 // The per-view control flow on injected io (the tests drive it with fakes): io.frame() one paced frame, io.gate() -> {ok, why},
 // io.steady() -> frames the rendered state has not changed, io.used() -> frames since goView, io.elapsedMs() -> real ms since goView.
+// Every outcome, a drop included, ends at the end of the view's slot (step 0 of Task 10), so the next view of the page starts at
+// the same page time whether this one was kept or dropped; a stall (io.frame throws) still ends the location.
 export async function settleView(io, { slot = SLOT, realMs = GATE_REAL_MS } = {}) {
+  const fill = async (r) => { while (io.used() < slot) await io.frame(); return r; };
   for (let i = 0; i < 94; i++) await io.frame();
   let g = await io.gate();
   while (!g.ok && io.used() < slot - 1) {
-    if (io.elapsedMs() >= realMs) return { ok: false, why: `gate timeout: ${realMs / 1000} s of real time (${g.why.join('; ')})`, gateFrames: io.used(), steadyFrames: 0 };
+    if (io.elapsedMs() >= realMs) return fill({ ok: false, why: `gate timeout: ${realMs / 1000} s of real time (${g.why.join('; ')})`, gateFrames: io.used(), steadyFrames: 0 });
     await io.frame(); g = await io.gate();
   }
-  if (!g.ok) return { ok: false, why: `gate: the ${slot}-frame slot was used without the gate (${g.why.join('; ')})`, gateFrames: io.used(), steadyFrames: 0 };
+  if (!g.ok) return fill({ ok: false, why: `gate: the ${slot}-frame slot was used without the gate (${g.why.join('; ')})`, gateFrames: io.used(), steadyFrames: 0 });
   const gateFrames = io.used(); let same = 0;
   while (same < 2 && io.used() < slot - 1) { await io.frame(); same = await io.steady(); }
   const steadyFrames = io.used() - gateFrames;
@@ -40,7 +43,7 @@ export async function settleView(io, { slot = SLOT, realMs = GATE_REAL_MS } = {}
 export async function runZoomLocation(D, loc) {
   const ledger0 = D.ledger.length, S = await openPage(D.browser, { utcMs: loc.utcMs, family: 'Z', mode: D.mode, routes: D.routes(loc) }), views = [], t0 = Date.now(), drops = [];
   try {
-    await boot(S, loc.url, '!!(window.__zoomPage && window.__zoomPage.ready)', D.mode, D.stop); await loadProbe(S, 'Z', { licence: D.licence });
+    await boot(S, loc.url, BOOT.zoom, D.mode, D.stop); await loadProbe(S, 'Z', { licence: D.licence });
     const bootMs = Date.now() - t0;
     for (const [index, v] of loc.views.entries()) {
       const i0 = D.ledger.length, tv = Date.now(), f0 = S.nFrames, used = () => S.nFrames - f0; await call(S, 'goView', v);

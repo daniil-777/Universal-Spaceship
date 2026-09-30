@@ -10,10 +10,12 @@ import { fnv1a32, renderSeed, scanRun, writeEpisode, assemble, startGate, stopOf
 import { shrink, SIZES } from '../vlm/capture/report.mjs';
 import { createUpstream, StopDrive } from '../vlm/capture/tilecache.mjs';
 import { withSpares, nextSpare } from '../vlm/capture/zplan.mjs';
-import { zLocation, replaceDiscarded } from '../vlm/capture/families.mjs';
+import { zLocation, replaceDiscarded, closeEpisode } from '../vlm/capture/families.mjs';
 import { settleView, SLOT } from '../vlm/capture/episode_zoom.mjs';
 import { groundOf, CAM_CLEAR_KM } from '../vlm/capture/probe/zoom.js';
-import { settleReal } from '../vlm/capture/session.mjs';
+import { boot, BOOT, Discard } from '../vlm/capture/session.mjs';
+import { latchStop } from '../vlm/capture/routes.mjs';
+import { pickStop } from '../vlm/capture/records.mjs';
 import { createLocalFrame, cameraPose } from '../src/earthtiles.js';
 import { fact } from '../vlm/gen/schema.js';
 
@@ -115,18 +117,52 @@ test('fix 9: settleView captures at the end of the fixed slot and drops with a d
   const io = fakeIO(), ok = await settleView(io);
   assert.deepEqual({ ok: ok.ok, why: ok.why, gate: ok.gateFrames, steady: ok.steadyFrames, used: io.used() }, { ok: true, why: null, gate: 150, steady: 630, used: SLOT });
   const early = fakeIO({ gateAt: 10 }), e = await settleView(early); assert.equal(e.gateFrames, 94, 'the 94 frames of §3.4 always run first'); assert.equal(early.used(), SLOT);
-  const slot = fakeIO({ gateAt: Infinity }), s = await settleView(slot); assert.match(s.why, /^gate: the 1600-frame slot was used without the gate \(ring 13 incomplete\)/); assert.equal(slot.used(), SLOT - 1);
-  const slow = fakeIO({ gateAt: Infinity, msPerFrame: 100 }), t = await settleView(slow); assert.match(t.why, /^gate timeout: 120 s of real time/); assert.equal(slow.used(), 1200);
+  const slot = fakeIO({ gateAt: Infinity }), s = await settleView(slot); assert.match(s.why, /^gate: the 1600-frame slot was used without the gate \(ring 13 incomplete\)/); assert.equal(slot.used(), SLOT, 'a dropped view fills its slot');
+  const slow = fakeIO({ gateAt: Infinity, msPerFrame: 100 }), t = await settleView(slow); assert.match(t.why, /^gate timeout: 120 s of real time/); assert.equal(t.gateFrames, 1200);
+  assert.equal(slow.used(), SLOT, 'step 0: a gate-timeout drop fills its slot, so the later views of the page keep their clocks');
   assert.match((await settleView(fakeIO({ stableAfter: 5000 }))).why, /^not steady within the 1600-frame slot/);
   assert.match((await settleView(fakeIO({ lostAtEnd: true }))).why, /^gate lost at the slot end/);
   await assert.rejects(settleView(fakeIO({ stallAt: 300 })), /stall/, 'a stall propagates to runZoomLocation, which logs it as its own reason');
 });
-test('fix round 1 (boot race): settleReal waits for ready or real quiet with the clock paused; a finishing request restarts the quiet time', async () => {
-  const S = (readyAfter) => { let k = 0; return { inflight: 0, done: 0, page: { evaluate: async () => ++k > readyAfter } }; };
-  assert.equal(await settleReal(S(3), 'x', { quietMs: 5000 }), true, 'ready arrives without any frame');
-  const quiet = S(Infinity), t0 = Date.now(); assert.equal(await settleReal(quiet, 'x', { quietMs: 60 }), false); assert.ok(Date.now() - t0 >= 60);
-  const busy = S(Infinity), t1 = Date.now(), tick = setInterval(() => { busy.done++; }, 20); setTimeout(() => clearInterval(tick), 150);
-  assert.equal(await settleReal(busy, 'x', { quietMs: 60 }), false); assert.ok(Date.now() - t1 >= 150 + 60 - 25, 'quiet counts from the last finished request');
-  const stop = { error: new Error('429 from tiles.maps.eox.at: stopping without retry') };
-  await assert.rejects(settleReal(S(Infinity), 'x', { stop, quietMs: 60 }), /429/);
+// a fake page for boot(): `warm` evaluations before main() reaches its fake timer (the module still loading), then the
+// pump predicate holds until `need` frames ran, then `load` evaluations of real-time work (the policy) before ready
+function bootPage({ warm = 2, need = 2, load = 3, errorAt = Infinity, pumpForever = false, never = false } = {}) {
+  let evals = 0, frames = 0, readyAfter = null;
+  const page = { goto: async () => {}, clock: { runFor: async () => { frames++; } }, evaluate: async () => {
+    evals++; const pump = evals > warm && (pumpForever || frames < need);
+    if (!pump && evals > warm && readyAfter === null) readyAfter = evals + load;
+    return { ready: !never && !pumpForever && readyAfter !== null && evals >= readyAfter, errors: evals >= errorAt ? ['boot: broken'] : null, pump, perf: frames * 16 };
+  } };
+  return { page, n: 0, done: 0, logs: [], nFrames: 0, frameMs: 0, get inflight() { return 0; }, get frames() { return frames; } };
+}
+test('step 0: boot pumps frames only while main() waits on its fake timer, then waits for ready with the clock paused', async () => {
+  const S = bootPage(), r = await boot(S, '/', BOOT.app, 'clock');
+  assert.equal(S.frames, 2, 'S/A: exactly the two frames that fire app.js:404\'s 30 ms timer'); assert.deepEqual(r, { frames: 2, perf: 32 });
+  const Z = bootPage({ warm: 3, need: 0 }); await boot(Z, '/', BOOT.zoom, 'clock'); assert.equal(Z.frames, 0, 'Z, L and D are ready without a frame');
+  for (const k of ['landing', 'real']) { const P = bootPage({ need: 0 }); await boot(P, '/', BOOT[k], 'clock'); assert.equal(P.frames, 0); }
+  assert.equal(BOOT.app.frames, 2); assert.equal(BOOT.zoom.frames, 0); assert.match(BOOT.app.pump, /building the solar system…/);
 });
+test('step 0: boot discards on a frame-count mismatch, fails fast on page errors, caps its frames and bounds the real-time wait', async () => {
+  await assert.rejects(boot(bootPage({ need: 3 }), '/', BOOT.app, 'clock'), (e) => e instanceof Discard && /3 frames, expected 2/.test(e.message));
+  const t0 = Date.now(); await assert.rejects(boot(bootPage({ errorAt: 4 }), '/', BOOT.app, 'clock', null, { readyMs: 60000 }), /page error: boot: broken/); assert.ok(Date.now() - t0 < 1000, 'fail fast');
+  const pe = bootPage({ never: true }); pe.logs.push('TypeError: x is undefined'); await assert.rejects(boot(pe, '/', BOOT.real, 'clock'), /page error: TypeError/);
+  const loop = bootPage({ pumpForever: true }); await assert.rejects(boot(loop, '/', BOOT.app, 'clock', null, { maxFrames: 6 }), /6 boot frames/); assert.equal(loop.frames, 6);
+  const t1 = Date.now(); await assert.rejects(boot(bootPage({ never: true }), '/', BOOT.app, 'clock', null, { readyMs: 80 }), /not ready after 0.08 s/); assert.ok(Date.now() - t1 < 2000);
+  await assert.rejects(boot(bootPage(), '/', BOOT.app, 'clock', { error: new Error('429 from tiles.maps.eox.at: stop') }), /429/);
+});
+test('step 0: a 403/429 wins the stop latch over a budget stop, before or after it, and decides the exit code', async () => {
+  const ban = new StopDrive('429 from tiles.maps.eox.at: stopping without retry'), budget = new StopDrive('upstream budget of 80000 requests reached for tiles.maps.eox.at');
+  const a = {}; latchStop(a, ban); latchStop(a, budget); assert.equal(a.error, ban, 'a later budget stop does not replace the ban');
+  const b = {}; latchStop(b, budget); latchStop(b, ban); assert.equal(b.error, ban, 'a ban replaces an earlier budget stop');
+  const c = {}; latchStop(c, ban); latchStop(c, new StopDrive('403 from gibs.earthdata.nasa.gov: stopping without retry')); assert.equal(c.error, ban, 'the first ban stays');
+  assert.equal(exitCodeOf(pickStop(budget, ban)), STOP_EXIT, 'the drive classifies the latched ban, not the thrown budget stop');
+  assert.equal(pickStop(budget, budget), budget); assert.equal(pickStop(budget, null), budget); assert.equal(exitCodeOf(pickStop(budget, undefined)), 0);
+});
+test('step 0: a Z location that kept no view queues its spare (zorder.json) before its 0-record .done', () => withTmp('apv-close-', (d) => {
+  const L = [0, 1, 2].map((id) => ({ id, split: 'val' })), { locations, spares } = withSpares(L, 2), logs = [];
+  const D = { dir: d, family: 'Z', zplan: { locations, spares }, log: (o) => logs.push(o) };
+  const write = (dir, recs, files, e) => { assert.ok(fs.existsSync(path.join(dir, 'zorder.json')), 'zorder.json exists when the .done is written'); writeEpisode(dir, recs, files, e); };
+  assert.equal(closeEpisode(D, 0, [], {}, { why: 'discarded', write }), 0); assert.ok(fs.existsSync(path.join(d, 'episode_00000.done')));
+  assert.deepEqual(logs, [{ spare: 0, for_episode: 0, why: 'discarded' }]);
+  const S = { dir: path.join(d, 's'), family: 'S', log: () => { throw new Error('no spare for S'); } }; assert.equal(closeEpisode(S, 3, [], {}), null); assert.ok(fs.existsSync(path.join(S.dir, 'episode_00003.done')));
+}));

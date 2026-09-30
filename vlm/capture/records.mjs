@@ -36,6 +36,8 @@ export function startGate(runDir) {
   return s ? { refuse: true, code: STOP_EXIT, why: `${runDir}/stop.json: ${s.status} from ${s.host} at ${new Date(s.utc_ms).toISOString()}; delete it only once the host allows traffic again` } : { refuse: false, code: 0, why: null };
 }
 export const exitCodeOf = (err) => (stopOf(err).kind === 'http' ? STOP_EXIT : 0);
+// the stop the drive classifies at its end: a latched 403/429 (routes.latchStop) wins over the error that was thrown
+export const pickStop = (thrown, latched) => (latched && stopOf(latched).kind === 'http' ? latched : thrown);
 export function scanRun(dir) {
   const out = { samples: 0, episodes: new Set(), removed: [] }; if (!fs.existsSync(dir)) return out;
   const names = fs.readdirSync(dir).filter((n) => !n.startsWith('._'));

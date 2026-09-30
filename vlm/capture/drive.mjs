@@ -9,8 +9,8 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { scanRun, writeEpisode, startGate, stopOf, writeStop, exitCodeOf, STOP_EXIT, RESOURCE_EXIT } from './records.mjs';
-import { nextEpisode, replaceDiscarded } from './families.mjs';
+import { scanRun, writeEpisode, startGate, stopOf, writeStop, exitCodeOf, pickStop, STOP_EXIT, RESOURCE_EXIT } from './records.mjs';
+import { nextEpisode, closeEpisode } from './families.mjs';
 import { ledgerCounts } from './routes.mjs';
 export { fnv1a32, renderSeed, scanRun, writeEpisode, assemble, startGate, stopOf, writeStop, readStop, exitCodeOf, STOP_EXIT } from './records.mjs';
 const REPO = fileURLToPath(new URL('../../', import.meta.url)), LACIE = '/Volumes/LaCie/astro-pilot/vlm';
@@ -63,8 +63,7 @@ if (process.argv[1] && process.argv[1].endsWith('drive.mjs')) {
   let samples = scan.samples, since = 0, code = 0, fatal = null;
   const ckpt = (e) => { saveBudget(); fs.writeFileSync(path.join(dir, 'checkpoint.json'), JSON.stringify({ samples, episode: e, t: Date.now(), upstream: D.upstream.stats(), eox_used_run: eoxUsed() })); };
   // Z: a discarded location (or one with no view kept) is closed with a 0-record .done, so a resume never reruns it, and a
-  // spare of the same split takes its place (families.replaceDiscarded, zplan.mjs spares)
-  const replaceZ = (e, why) => { const s = replaceDiscarded(D, e); D.log({ spare: s, for_episode: e, why }); };
+  // spare of the same split takes its place; closeEpisode writes zorder.json before the .done (families.mjs, zplan.mjs)
   try {
     // twins are episodes e + 50000 (Task 10), so primary episodes stay below 50000; twins count toward the family's size (§8)
     for (let e = 0; samples < n && e < 50000; e++) {
@@ -73,20 +72,22 @@ if (process.argv[1] && process.argv[1].endsWith('drive.mjs')) {
       if (free < 25) { D.log({ stop: `memory_pressure shows ${free} % free (< 25 %) before episode ${e}`, kind: 'resources' }); code = RESOURCE_EXIT; break; }
       const res = await nextEpisode(D, { episode: e, seed0: +arg('seed0', 1), rsOverride: arg('rs-override', null), forceWhen: arg('force-when', null) });
       if (res && res.exhausted) { D.log({ exhausted: e }); break; }
-      if (!res) { D.ledger.length = 0; saveBudget(); if (D.stop.error) throw D.stop.error; if (family === 'Z') { writeEpisode(dir, [], {}, e); replaceZ(e, 'discarded'); } continue; }
+      if (!res) { D.ledger.length = 0; saveBudget(); if (D.stop.error) throw D.stop.error; if (family === 'Z') closeEpisode(D, e, [], {}, { why: 'discarded' }); continue; }
       const kept = res.records.filter((r) => !r.error), tw = res.twin ? res.twin.records.filter((r) => !r.error) : [];
       for (const r of res.records.concat(res.twin ? res.twin.records : []).filter((x) => x.error)) D.log({ drop: r.rec.key, why: r.error });
-      writeEpisode(dir, kept.map((r) => r.rec), Object.assign({}, ...kept.map((r) => r.files)), e);
+      closeEpisode(D, e, kept.map((r) => r.rec), Object.assign({}, ...kept.map((r) => r.files)), { why: 'no view kept' });
       if (res.twin) writeEpisode(dir, tw.map((r) => r.rec), Object.assign({}, ...tw.map((r) => r.files)), res.twin.episode);
-      if (family === 'Z' && !kept.length) replaceZ(e, 'no view kept');
       const counts = ledgerCounts(D.ledger);
       fs.writeFileSync(path.join(dir, `ledger_${String(e).padStart(5, '0')}.jsonl`), D.ledger.map((x) => JSON.stringify(x)).join('\n')); D.ledger.length = 0;
       // measure_extra_s: a --measure run's encode-only passes, which report.mjs takes off the wall time
       fs.appendFileSync(path.join(dir, 'throughput.jsonl'), JSON.stringify({ episode: e, samples: kept.length + tw.length, twins: tw.length, wall_s: res.wallMs / 1000, measure_extra_s: D.measure ? (res.stats.encMs || 0) / 1000 : 0, ...res.stats, ledger: counts }) + '\n');
       samples += kept.length + tw.length; since += kept.length + tw.length; saveBudget(); if (since >= 50) { ckpt(e); since = 0; }
       console.log(`episode ${e}: ${kept.length} kept, ${res.records.length - kept.length} dropped, ${(res.wallMs / 1000).toFixed(1)} s; ${samples}/${n} samples`);
+      // a stop latched during a kept episode (its failed requests already dropped their records) ends the drive here
+      if (D.stop.error) throw D.stop.error;
     }
-  } catch (err) {
+  } catch (err0) {
+    const err = pickStop(err0, D.stop.error); if (err !== err0) D.log({ error: String(err0 && err0.message), superseded_by: String(err.message) });
     if (err instanceof StopDrive) {
       const s = stopOf(err); D.log({ stop: String(err.message), kind: 'StopDrive', ...s });
       code = exitCodeOf(err); if (code === STOP_EXIT) { writeStop(runDir, s); console.error(`STOP ${s.status} from ${s.host}: persisted to ${runDir}/stop.json`); }

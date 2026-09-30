@@ -4,7 +4,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { mulberry32 } from '../../src/mathx.js';
-import { renderSeed, assemble, capSeverity4 } from './records.mjs';
+import { renderSeed, assemble, capSeverity4, writeEpisode } from './records.mjs';
 import { runCorridorEpisode } from './episode_corridor.mjs';
 import { runZoomLocation } from './episode_zoom.mjs';
 import { Discard } from './session.mjs';
@@ -44,6 +44,14 @@ export function replaceDiscarded(D, e) {
   if (s === null) return null;
   Z.order.push(N + s); Z.spareFor[e] = s; fs.mkdirSync(D.dir, { recursive: true }); fs.writeFileSync(path.join(D.dir, 'zorder.json'), JSON.stringify(Z));
   return s;
+}
+// Closes episode e: a Z location that kept no view first queues its spare (zorder.json), then gets its 0-record .done, so a
+// crash between the two never leaves a closed location without its replacement (step 0 of Task 10); returns the spare
+export function closeEpisode(D, e, recs, files, { why = null, write = writeEpisode } = {}) {
+  let spare = null;
+  if (D.family === 'Z' && !recs.length) { spare = replaceDiscarded(D, e); D.log({ spare, for_episode: e, why }); }
+  write(D.dir, recs, files, e);
+  return spare;
 }
 function zStats(res, kept) {
   const n = res.views.length, sum = (f) => res.views.reduce((a, x) => a + f(x), 0), png = (x) => Math.floor(((x.frame.png.length - x.frame.png.indexOf(',') - 1) * 3) / 4);
