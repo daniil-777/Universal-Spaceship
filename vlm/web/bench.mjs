@@ -91,6 +91,7 @@ export async function benchVision({ modelDir, device = 'webgpu', minCos = 0.99, 
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const cmd = process.argv[2], modelDir = arg('model-dir'), device = arg('device', 'webgpu'), minCos = +arg('min-cos', 0.99);
+  if (cmd === 'runtime') { console.log(JSON.stringify(await benchRuntime({ eyeDir: arg('eye'), narratorDir: arg('narrator'), frames: +arg('frames', 60), device: arg('device', 'webgpu'), decoder: arg('decoder', 'q4f16'), vision: arg('vision', 'q8') }))); process.exit(0); }
   if (cmd === 'narrator' && arg('vision') === 'all') {
     const rows = await benchVision({ modelDir, device, minCos, decoder: arg('decoder', 'q4f16') }), cand = JSON.parse(fs.readFileSync(path.join(modelDir, 'parity.json'), 'utf8')).b.candidate;
     for (const r of rows) console.log(JSON.stringify(r));
@@ -107,4 +108,31 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     console.log('G2 transformers.js OK');
   } else { console.log('usage: bench.mjs narrator --model-dir <folder> [--device webgpu|cpu] [--tokens 40] [--decoder q4f16|q4|fp16|fp32] [--vision q8|q4|int8|fp16|all] [--max-ms-per-token 12] [--min-cos 0.99] [--texts-out <json>]'); process.exit(2); }
   process.exit(0);
+}
+
+// ---- runtime (Task 16): the browser runtime modules run in Node — Pilot Eye (pilot-eye.js, ORT-web WASM, 1 thread) per-frame
+// latency on the S grid after 8 warm-up frames (the first two only fill the ring), and the Narrator (narrator.js) cold load and
+// the median of 3 greedy 40-token describes of parity sample 0 squared to 512². Either part runs alone (--eye / --narrator).
+// An untrained Pilot Eye export has no labels.json: its parity.json size stands in. Declared after the CLI (hoisted).
+// node vlm/web/bench.mjs runtime --eye <pilot eye export> --narrator <narrator web folder> [--frames 60] [--device webgpu|cpu] [--decoder q4f16|q4] [--vision q8]
+export async function benchRuntime({ eyeDir = null, narratorDir = null, frames = 60, device = 'webgpu', decoder = 'q4f16', vision = 'q8' }) {
+  const pct = (a, p) => { const s = [...a].sort((x, y) => x - y); return s[Math.min(s.length - 1, Math.floor(p * (s.length - 1)))]; }, r = {};
+  if (eyeDir) {
+    const ort = await import('onnxruntime-web'), { createPilotEye } = await import('./pilot-eye.js'), lp = path.join(eyeDir, 'labels.json');
+    const labels = fs.existsSync(lp) ? JSON.parse(fs.readFileSync(lp, 'utf8')) : { input: (JSON.parse(fs.readFileSync(path.join(eyeDir, 'parity.json'), 'utf8')).size || '160x96').split('x').map(Number) };
+    const eye = await createPilotEye({ ort, encoderUrl: path.join(eyeDir, 'encoder.onnx'), headsUrl: path.join(eyeDir, 'heads.onnx'), labels }), [EW, EH] = labels.input || [160, 96], ms = [];
+    const rgb = new Uint8Array(EW * EH * 3).map((_, i) => (i * 2654435761) >>> 24), statuses = new Set();
+    for (let i = 0; i < frames + 8; i++) { const o = await eye.push({ rgb, sim_t_s: 0.2 * (i + 1), family: 'S', episode_id: 1 }); if (i >= 8) { ms.push(o.ms); statuses.add(o.status); } }
+    r.pilot_eye_frame_ms = { median: med(ms), p90: pct(ms, 0.9), min: Math.min(...ms), n: ms.length, size: `${EW}x${EH}`, all_ok: statuses.size === 1 && statuses.has('ok') };
+  }
+  if (narratorDir) {
+    const tf = await import('@huggingface/transformers'), { createNarrator } = await import('./narrator.js');
+    const nar = await createNarrator({ tf, modelId: path.basename(narratorDir), localModelPath: path.dirname(path.resolve(narratorDir)) + '/', device, fallback: 'cpu', decoder, vision });
+    const img = await tf.RawImage.read(JSON.parse(fs.readFileSync(path.join(narratorDir, 'parity.json'), 'utf8')).samples[0].image), d = [];
+    await nar.describe(img, { maxNewTokens: 8 });
+    for (let i = 0; i < 3; i++) d.push((await nar.describe(img, { maxNewTokens: 40, minNewTokens: 40 })).ms);
+    const text = (await nar.describe(img, { maxNewTokens: 40 })).text; await nar.dispose();
+    r.narrator = { device: nar.device, decoder, vision, cold_load_ms: Math.round(nar.loadMs), median_ms_40: Math.round(med(d)), gate_40_tokens_le_1000_ms: med(d) <= 1000, sample_text: text };
+  }
+  return r;
 }
