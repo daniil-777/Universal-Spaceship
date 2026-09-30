@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { corridorSafety, landingSafety, dockingSafety, eyeView, CORRIDOR_ACTIONS, C_NEAR_DEFAULT } from '../vlm/gen/safety.js';
+import { corridorSafety, landingSafety, dockingSafety, eyeView, CORRIDOR_ACTIONS, C_NEAR_DEFAULT, EYE } from '../vlm/gen/safety.js';
 import { FAMILY_ACTIONS, OUTCOMES, CAUSES } from '../vlm/gen/schema.js';
 
 const seenCorridor = [], seenL = [], seenD = [];
@@ -114,7 +114,7 @@ test('docking truth table', () => {
   for (const o of [{ attDeg: 2.1 }, { rateDps: 0.11 }, { fuelFrac: 0.39 }, { failedJets: 1 }, { breakoutAvailable: false }]) assert.equal(D(o).verdict, 'CAUTION');
   assert.equal(D({ phase: 'H2', holdPhase: true, outsideHoldBox: true }).best_action, 'HOLD_POSITION');
 });
-test('docking safety_eye removes fuel, jets, breakout availability and closing rules beyond 20 m', () => {
+test('docking safety_eye removes fuel, jets, breakout availability and closing rules beyond EYE.closingRhoM', () => {
   for (const o of [{ fuelFrac: 0.3 }, { failedJets: 1 }, { breakoutAvailable: false }, { rho: 60, closing: 0.5, limit: 0.2 }]) assert.equal(D(o, undefined, true).verdict, 'SAFE');
   assert.equal(D({ rho: 5, closing: 0.31, limit: 0.2 }, undefined, true).verdict, 'UNSAFE', 'within the eye scope (EYE.closingRhoM may be lowered by Task 4)');
   assert.equal(D({ attDeg: 3 }, undefined, true).verdict, 'CAUTION');
@@ -122,11 +122,23 @@ test('docking safety_eye removes fuel, jets, breakout availability and closing r
 test('docking closing-speed boundaries: exactly 1.5x the limit is CAUTION not UNSAFE; exactly 20 m stays inside the closing-speed scope', () => {
   assert.equal(D({ rho: 15, closing: 0.3, limit: 0.2 }).verdict, 'CAUTION', 'exactly 1.5x the limit does not exceed it');
   assert.equal(D({ rho: 20, closing: 0.31, limit: 0.2 }).verdict, 'UNSAFE', 'rho = 20 m is inside the 20 m scope (inclusive)');
-  assert.equal(D({ rho: 20, closing: 0.25, limit: 0.2 }, undefined, true).verdict, 'CAUTION', 'the eye-scope 20 m cutoff is inclusive too');
+  assert.equal(D({ rho: EYE.closingRhoM, closing: 0.25, limit: 0.2 }, undefined, true).verdict, 'CAUTION', 'the eye-scope cutoff (EYE.closingRhoM, set by the Task 4 measurement) is inclusive too');
+  assert.equal(D({ rho: EYE.closingRhoM + 0.01, closing: 0.25, limit: 0.2 }, undefined, true).verdict, 'SAFE', 'just beyond the eye scope the closing rules are removed');
 });
-test('docking cause maps a failed CONTINUE to station regardless of failReason; capture and breakout leave it null', () => {
-  assert.equal(D({}, { CONTINUE: 'fail', BREAKOUT: 'breakout', failReason: 'KOS_VIOLATION' }).cause, 'station');
-  assert.equal(D({}, { CONTINUE: 'fail', BREAKOUT: 'breakout', failReason: null }).cause, 'station', 'a fail without a KOS reason is a non-IDSS contact, also station');
+// controller ruling: a failed CONTINUE has cause station only for a KOS violation, a collision, a non-IDSS contact or a
+// keep-in exit (outcome.failKind, from docking.js failKind(rep)); every other fail kind leaves cause null
+const D_FAIL_CAUSE = [['kos', 'station'], ['collision', 'station'], ['non_idss', 'station'], ['keep_in', 'station'], ['propellant', null], ['timeout', null],
+  ['rule_p', null], ['breakout_unsafe', null], ['breakout_kos', null], ['other', null]];
+for (const [failKind, cause] of D_FAIL_CAUSE) {
+  test(`docking cause for a failed CONTINUE of kind ${failKind} is ${cause}`, () => {
+    const s = D({}, { CONTINUE: 'fail', BREAKOUT: 'breakout', failReason: null, failKind });
+    assert.equal(s.verdict, 'UNSAFE'); assert.equal(s.cause, cause);
+    assert.equal(D({}, { CONTINUE: 'fail', BREAKOUT: 'breakout', failReason: null, failKind }, true).cause, cause, 'safety_eye keeps the outcome cause');
+  });
+}
+test('docking cause is null for a fail without failKind, for capture and breakout, and for an immediate rule alone', () => {
+  assert.equal(D({}, { CONTINUE: 'fail', BREAKOUT: 'breakout', failReason: 'KOS_VIOLATION' }).cause, null, 'the REASON code alone does not name the cause');
+  assert.equal(D({}, { CONTINUE: 'capture', BREAKOUT: 'breakout', failReason: null, failKind: 'kos' }).cause, null, 'failKind counts only for a failed CONTINUE');
   assert.equal(D({}).cause, null);
   assert.equal(D({}, { CONTINUE: 'breakout', BREAKOUT: 'breakout', failReason: null }).cause, null);
   const immediate = D({ kosViolation: true });

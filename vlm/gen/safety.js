@@ -5,7 +5,9 @@
 // CAUTION band is |dots| > 1 on GS at hRA >= 50 ft; a go-around outcome adds UNSTABLE_APPROACH; an UNSAFE chain ending
 // at an unsafe CONTINUE becomes NONE_SAFE; the D NO-GO includes breakout availability (guidance.js goOk). cause for L/D
 // maps only the reference branch's (CONTINUE) own outcome: L excursion/overrun -> runway, short/crash/hard/tailstrike
-// -> ground, landed/go_around/else -> null; D fail -> station (either a KOS violation or a non-IDSS contact), else null.
+// -> ground, landed/go_around/else -> null; D fail -> station only when outcome.failKind (labels/docking.js failKind) is
+// kos, collision, non_idss or keep_in (controller ruling), null for every other fail kind (propellant, timeout, Rule P,
+// breakout not passively safe, still in the KOS after the breakout) and for capture/breakout.
 // An UNSAFE verdict from an immediate rule alone, with a safe CONTINUE outcome, leaves cause null.
 import { REASONS } from './schema.js';
 
@@ -14,13 +16,13 @@ export const CORRIDOR_ACTIONS = Object.freeze(['CONTINUE', 'CLIMB', 'DESCEND', '
 export const TIE_ORDER = Object.freeze(['CLIMB', 'TURN_LEFT', 'TURN_RIGHT', 'SLOW_DOWN', 'SPEED_UP', 'DESCEND']);
 export const EYE_REMOVED = Object.freeze({ L: Object.freeze(['TAILWIND', 'GS_DOTS', 'LOC_DOTS_BEYOND_1NM']), D: Object.freeze(['LOW_FUEL', 'JET_FAILURE', 'NO_BREAKOUT_AVAILABLE', 'CLOSING_BEYOND_EYE_CLOSING_RHO']) });
 // safety_eye scope boundaries and extra hidden criteria; Task 4's >= 1 px sensitivity test sets these (spec §4.3 last table)
-export const EYE = Object.freeze({ locNm: 1, closingRhoM: 20, hidden: Object.freeze([]) });
+export const EYE = Object.freeze({ locNm: 1, closingRhoM: 11, hidden: Object.freeze(['GATE_MODES', 'SPEED_BAND', 'SINK_RATE', 'CANNOT_STOP', 'RUNWAY_EDGE', 'ATTITUDE_RATE']) });
 const HAZARDS = ['rock', 'comet', 'satellite', 'airliner', 'birds'], L_BAD = ['crash', 'excursion', 'overrun', 'short', 'tailstrike', 'hard'];
 const CAUSE_REASON = (c) => (HAZARDS.includes(c) ? 'HAZARD_AHEAD' : c === 'terrain' ? 'TERRAIN_CLOSE' : c === 'building' || c === 'roof' ? 'BUILDING_CLOSE' : c === 'overstress' ? 'OVERSTRESS' : null);
 const CLR_REASON = { hazard: 'HAZARD_AHEAD', terrain: 'TERRAIN_CLOSE', building: 'BUILDING_CLOSE' };
 const L_OUTCOME_REASON = { excursion: 'RUNWAY_EDGE', overrun: 'CANNOT_STOP', hard: 'HIGH_SINK_RATE', short: 'UNSTABLE_APPROACH', tailstrike: 'UNSTABLE_APPROACH', crash: 'UNSTABLE_APPROACH' };
 const L_CAUSE = { excursion: 'runway', overrun: 'runway', short: 'ground', crash: 'ground', hard: 'ground', tailstrike: 'ground' };
-const D_CAUSE = { fail: 'station' };
+const D_CAUSE = { kos: 'station', collision: 'station', non_idss: 'station', keep_in: 'station' };
 const GATE_REASON = { lateral: 'LOCALIZER_DEVIATION', loc: 'LOCALIZER_DEVIATION', vertical: 'GLIDESLOPE_DEVIATION', gs: 'GLIDESLOPE_DEVIATION', speed: 'SPEED_OUT_OF_BAND', vs: 'HIGH_SINK_RATE', gear: 'UNSTABLE_APPROACH' };
 export const outcomeRisk = (family, o) => (family === 'L' ? (L_BAD.includes(o) ? 1 : 0) : family === 'D' ? (o === 'fail' ? 1 : 0) : o);
 const sorted = (set) => [...set].filter(Boolean).sort((a, b) => REASONS.indexOf(a) - REASONS.indexOf(b));
@@ -112,7 +114,8 @@ export function dockingSafety(inp, { eye = false } = {}) {
   if (!eye && n.failedJets > 0) { caution = true; R.add('JET_FAILURE'); }
   const verdict = unsafe ? 'UNSAFE' : caution ? 'CAUTION' : 'SAFE';
   const best = unsafe ? (risk.BREAKOUT === 0 ? 'BREAKOUT' : 'NONE_SAFE') : n.holdPhase && noGo.length ? 'HOLD_POSITION' : tooFast ? 'SLOW_DOWN' : 'CONTINUE';
-  return assemble(verdict, R, risk, outcome, best, { cause: D_CAUSE[o.CONTINUE] ?? null, safe: best === 'NONE_SAFE' ? [] : [best], ref: 'GNC', horizon: null, draws: 1, p_pilot: risk.CONTINUE, ttc_s: n.ttc_s });
+  const cause = o.CONTINUE === 'fail' ? D_CAUSE[o.failKind] ?? null : null;
+  return assemble(verdict, R, risk, outcome, best, { cause, safe: best === 'NONE_SAFE' ? [] : [best], ref: 'GNC', horizon: null, draws: 1, p_pilot: risk.CONTINUE, ttc_s: n.ttc_s });
 }
 
 export function eyeView(family, inp, opts = {}) {
