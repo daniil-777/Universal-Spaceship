@@ -7,3 +7,8 @@ export function classWeights(recs) {
   const raw = new Map(recs.map((r) => [r.key, 1 / n.get(cellOf(r))])), sum = [...raw.values()].reduce((a, b) => a + b, 0);
   return new Map([...raw].map(([k, w]) => [k, (w * recs.length) / sum]));
 }
+// the weights within each split (rec.split): train balances family x verdict inside train and sums to N_train (review item 1)
+export function splitClassWeights(recs) {
+  const by = new Map(); for (const r of recs) (by.get(r.split) || by.set(r.split, []).get(r.split)).push(r);
+  return new Map([...by.values()].flatMap((rs) => [...classWeights(rs)]));
+}

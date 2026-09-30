@@ -14,10 +14,15 @@ import { boxResize } from '../boxresize.js';
 export const LACIE = '/Volumes/LaCie/astro-pilot/vlm';
 // ruling T10-g: inside 0.5 m axial the untextured port face fills the D eye view; such records stay for Narrator only
 export const EYE_MIN_AXIAL_M = 0.5;
-export function eyeExcluded(rec) {
+// ruling T11-a: in train, the injected member of a pixel-identical minimal pair is left out (identical pixels with a different
+// label are label noise for a vision-only model); it stays in val/test for the paired metric and in every Narrator row
+export function eyeExcluded(rec, split = null) {
   const a = rec.family === 'D' && rec.facts.axial_m ? rec.facts.axial_m.v : null;
-  return typeof a === 'number' && a < EYE_MIN_AXIAL_M ? `D axial ${a} m < ${EYE_MIN_AXIAL_M} m (ruling T10-g)` : null;
+  if (typeof a === 'number' && a < EYE_MIN_AXIAL_M) return `D axial ${a} m < ${EYE_MIN_AXIAL_M} m (ruling T10-g)`;
+  return split === 'train' && rec.pixel_identical_pair && rec.provenance && rec.provenance.injection ? 'injected member of a pixel-identical pair, train (ruling T11-a)' : null;
 }
+// a dataset name is one plain path segment (build.mjs deletes datasets/<name> before writing it)
+export const datasetNameOk = (n) => typeof n === 'string' && /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(n) && n !== '.' && n !== '..';
 // the context-class ids of a record: its obs:context facts and the safety.* ids text cites
 export function contextClassIds(rec) {
   const s = new Set(Object.entries(rec.facts).filter(([, f]) => f && f.obs === 'context').map(([id]) => id));

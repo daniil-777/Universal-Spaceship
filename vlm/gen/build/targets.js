@@ -29,7 +29,8 @@ export function targetsOf(rec) {
     if (f === 'A' && v(rec, 'air.agl_m') !== null) reg.agl = v(rec, 'air.agl_m') / 1000;
     if (f === 'L') {
       if (v(rec, 'ra_ft') !== null) reg.agl = (v(rec, 'ra_ft') * 0.3048) / 1000;
-      if (v(rec, 'vs_fpm') !== null) reg.vs = (v(rec, 'vs_fpm') * 0.00508) / 10;
+      // the sink-rate regression follows the eye scope: EYE.hidden SINK_RATE means Pilot Eye cannot see it (review item 7)
+      if (v(rec, 'vs_fpm') !== null && !EYE.hidden.includes('SINK_RATE')) reg.vs = (v(rec, 'vs_fpm') * 0.00508) / 10;
       if (v(rec, 'ils.loc_dots') !== null && (v(rec, 'thr_nm') ?? 99) <= EYE.locNm) reg.loc_dots = Math.max(-3, Math.min(3, v(rec, 'ils.loc_dots'))) / 3;
     }
     if (f === 'D' && v(rec, 'closing_cms') !== null && (v(rec, 'rho_m') ?? 1e9) <= EYE.closingRhoM) reg.closing = v(rec, 'closing_cms') / 10;

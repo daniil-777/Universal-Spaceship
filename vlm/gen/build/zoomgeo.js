@@ -16,6 +16,9 @@ import { queryOf } from './split.js';
 const LACIE = '/Volumes/LaCie/astro-pilot/vlm', CELL_PX = 56;
 const rankOf = (x) => { const p = x.feature ? x.feature.props : {}; return p.SCALERANK ?? p.scalerank ?? 20; };
 const salience = (a, b) => rankOf(a) - rankOf(b) || (b.pop ?? 0) - (a.pop ?? 0) || String(a.name).localeCompare(String(b.name));
+// NE writes about 300 region labels in capitals ("NEW GUINEA HIGHLANDS"), which text would read as acronyms: they are
+// title-cased for place.in_view and the gazetteer alike; short all-caps names (USA, UAE) are kept
+export const neName = (s) => (typeof s === 'string' && s.length > 3 && s === s.toUpperCase() && /\p{Lu}{2}/u.test(s) ? s.toLowerCase().replace(/(^|[\s(/-])(\p{L})/gu, (m, a, b) => a + b.toUpperCase()) : s);
 const r1 = (x) => (x === null || x === undefined ? null : +x.toFixed(1));
 function originOf(r) {
   const q = queryOf(r), lat = parseFloat(q.get('lat')), lon = parseFloat(q.get('lon'));
@@ -24,7 +27,7 @@ function originOf(r) {
 export const zoomGeo = {
   async load({ geoDir = path.join(LACIE, 'geo'), tileDir = path.join(LACIE, 'tilecache') } = {}) {
     const ne = await loadNaturalEarth(geoDir);
-    return { ne, names: gazetteerNames(ne), elev: createElevationReader(openTileCache(tileDir, 's3.amazonaws.com')) };
+    return { ne, names: gazetteerNames(ne).map(neName), elev: createElevationReader(openTileCache(tileDir, 's3.amazonaws.com')) };
   },
   async apply(r, g) {
     const ne = g.ne, put = (id, v, unit = null) => { r.facts[id] = fact(v, unit, 'visual'); }, grid = r.facts['grid.latlon'].v, P = new Array(grid.length).fill(null);
@@ -43,9 +46,12 @@ export const zoomGeo = {
     const origin = originOf(r), cam = r.cameras[path.basename(r.frames[0])], view = featuresInView(ne, cam, origin), inView = new Set(view.map((x) => x.feature));
     put('geo.sea_frac', +all.sea_frac.toFixed(3)); put('geo.water_frac', +water.toFixed(3)); put('geo.coast_side', all.coast_side);
     put('geo.elev_min_m', r1(land.min), 'm'); put('geo.elev_max_m', r1(land.max), 'm'); put('geo.elev_mean_m', r1(land.mean), 'm'); put('geo.relief_m', r1(land.relief), 'm'); put('geo.elev_points', land.n);
-    put('place.country', Object.entries(countries).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0]?.[0] ?? null); put('geo.country_frac', frac(countries)); put('geo.admin1_frac', frac(admin1));
+    // place.country: the admin-0 country at the view centre, like place.admin1 (the bank's country templates state it); the
+    // plurality over the grid only when the centre is sea, and always in geo.country_frac (review item 2)
+    const centreCountry = featuresAt(ne, 'ne_10m_admin_0_countries', origin.lon, origin.lat)[0];
+    put('place.country', centreCountry ? nameOf(centreCountry.props) : Object.entries(countries).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0]?.[0] ?? null); put('geo.country_frac', frac(countries)); put('geo.admin1_frac', frac(admin1));
     const centreAdmin = featuresAt(ne, 'ne_10m_admin_1_states_provinces', origin.lon, origin.lat)[0]; put('place.admin1', centreAdmin ? nameOf(centreAdmin.props) ?? null : null);
-    put('place.in_view', view.filter((x) => typeof x.name === 'string' && x.name).sort(salience).map((x) => ({ name: x.name, kind: x.kind, region: x.region })));
+    put('place.in_view', view.filter((x) => typeof x.name === 'string' && x.name).sort(salience).map((x) => ({ name: neName(x.name), kind: x.kind, region: x.region })));
     const np = nearestPlace(ne, origin.lat, origin.lon, { exclude: inView });
     put('place.nearest', np ? { name: np.name, km: +np.km.toFixed(1), bearing: +np.bearing.toFixed(1), compass: np.compass } : null);
     const cellRelief = (thr) => {

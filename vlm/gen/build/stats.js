@@ -83,7 +83,8 @@ export function datasetStats({ kept, recs, splitOfKey, dropped, invalid, zDiscar
     if (r.provenance.t_since_reset_s !== null && r.provenance.t_since_reset_s !== undefined) bump(hist, histBin(r.provenance.t_since_reset_s));
   }
   s.a = { raw_mix: aRaw, natural_mix_sampler_weighted: aNat, by_route_policy: aMix, pages: pages.size, resets_seen: [...pages.values()].reduce((a, b) => a + b, 0), records_by_segment: seg,
-    t_since_reset_hist: hist, post_reset_records: Object.values(hist).reduce((a, b) => a + b, 0) };
+    t_since_reset_hist: hist, post_reset_records: A.filter((x) => !x.provenance.twin_of && x.provenance.t_since_reset_s !== null && x.provenance.t_since_reset_s !== undefined && x.provenance.t_since_reset_s <= 4.6).length,
+    post_reset_weight3: A.filter((x) => !x.provenance.twin_of && x.provenance.t_since_reset_s !== null && x.provenance.t_since_reset_s !== undefined && x.provenance.t_since_reset_s <= 4.6 && x.provenance.sampler_weight === 3).length };
   s.naturalMix = {};
   for (const r of kept.filter((x) => x.natural && x.safety_eye)) { const k = `${r.family}|${r.facts.world ? r.facts.world.v : r.family}|${eyeOf(r)}`, c = (s.naturalMix[k] ||= { n: 0, sampler_weighted: 0 }); c.n++; c.sampler_weighted = +(c.sampler_weighted + (r.provenance.sampler_weight ?? 1)).toFixed(3); }
   const keys = new Set(kept.map((r) => r.key)), twins = kept.filter((r) => r.provenance.twin_of);

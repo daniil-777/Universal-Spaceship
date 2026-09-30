@@ -9,11 +9,11 @@ import { PALETTE, imageFacts, imageFactsOf } from '../vlm/gen/imagefacts.js';
 import { seedSplit, splitOf, groupOf, assertGroupsDisjoint, zRecheck } from '../vlm/gen/build/split.js';
 import { hamming, crossSplitDrops } from '../vlm/gen/build/dedupe.js';
 import { targetsOf, REG } from '../vlm/gen/build/targets.js';
-import { contextClassIds, narratorRows, eyeExcluded } from '../vlm/gen/build/export.js';
-import { classWeights } from '../vlm/gen/build/balance.js';
+import { contextClassIds, narratorRows, eyeExcluded, datasetNameOk } from '../vlm/gen/build/export.js';
+import { classWeights, splitClassWeights } from '../vlm/gen/build/balance.js';
 import { textTally, distinctN } from '../vlm/gen/build/stats.js';
 import { datasheet } from '../vlm/gen/build/datasheet.js';
-import { zoomGeo } from '../vlm/gen/build/zoomgeo.js';
+import { zoomGeo, neName } from '../vlm/gen/build/zoomgeo.js';
 import { PALETTE_NAMES, TEXT_FACTS, TAG_WORDS, validateTextFacts, REASONS } from '../vlm/gen/schema.js';
 import { EYE } from '../vlm/gen/safety.js';
 import { loadNaturalEarth } from '../vlm/gen/geo/naturalearth.js';
@@ -64,11 +64,17 @@ test('Pilot Eye targets and masks follow the family and observability rules', ()
   const L = targetsOf({ family: 'L', safety_eye: { ...eye, reasons: [] }, facts: {}, zoom: null });
   for (const r of ['TAILWIND', 'GLIDESLOPE_DEVIATION', 'SPEED_OUT_OF_BAND']) assert.equal(L.masks.reasons[REASONS.indexOf(r)], 0, r);
   for (const r of ['HIGH_SINK_RATE', 'RUNWAY_EDGE', 'CANNOT_STOP', 'LOCALIZER_DEVIATION']) assert.equal(L.masks.reasons[REASONS.indexOf(r)], 1, r);
+  const Lv = targetsOf({ family: 'L', safety_eye: { ...eye, reasons: [] }, facts: { vs_fpm: { v: -700 }, ra_ft: { v: 300 } }, zoom: null });
+  assert.equal(Lv.masks.reg[REG.indexOf('vs')], EYE.hidden.includes('SINK_RATE') ? 0 : 1, 'the L sink-rate regression follows the eye scope'); assert.equal(Lv.masks.reg[REG.indexOf('agl')], 1);
   const Z = targetsOf({ family: 'Z', safety_eye: null, facts: {}, zoom: { tags: ['COASTLINE'], range_bin: 2 } }); assert.equal(Z.masks.verdict, 0); assert.equal(Z.targets.range_bin, 2);
 });
 test('D records inside 0.5 m axial are excluded from the Pilot Eye export only (ruling T10-g)', () => {
   assert.ok(eyeExcluded({ family: 'D', facts: { axial_m: { v: 0.42 } } })); assert.equal(eyeExcluded({ family: 'D', facts: { axial_m: { v: 0.5 } } }), null);
   assert.equal(eyeExcluded({ family: 'S', facts: {} }), null);
+  const inj = { family: 'S', facts: {}, pixel_identical_pair: true, provenance: { injection: { kind: 'rock_on_course' }, twin_of: null } };
+  assert.ok(eyeExcluded(inj, 'train'), 'ruling T11-a: the injected member of a pixel-identical pair leaves Pilot Eye train');
+  assert.equal(eyeExcluded(inj, 'test'), null); assert.equal(eyeExcluded({ ...inj, provenance: { injection: null, twin_of: 'k' } }, 'train'), null);
+  for (const n of ['apv-open-v0', 'x.y_1']) assert.ok(datasetNameOk(n), n); for (const n of ['..', '.', '', '../x', 'a/b', '-x', '.hidden']) assert.equal(datasetNameOk(n), false, n);
 });
 test('export drops items that need a context-class fact the row does not supply (rowContext is the one rule)', () => {
   const rec = { family: 'S', key: 'k', narrator_frame: 'raw/r/S/k.f2.png', facts: { 'hazard.0.kind': { v: 'rock', obs: 'visual' }, 'hazard.0.dist_u': { v: 3, obs: 'context', unit: 'u' }, 'ship.speed_m_s': { v: 266, obs: 'context', unit: 'm/s' } },
@@ -86,6 +92,12 @@ test('export drops items that need a context-class fact the row does not supply 
 test('class-balanced weights per family x verdict sum to the record count', () => {
   const recs = [...Array(9)].map((_, i) => ({ key: `a${i}`, family: 'S', safety_eye: { verdict: 'SAFE' } })).concat([{ key: 'b', family: 'S', safety_eye: { verdict: 'UNSAFE' } }]);
   const w = classWeights(recs); assert.ok(Math.abs([...w.values()].reduce((a, b) => a + b, 0) - 10) < 1e-9); assert.ok(w.get('b') > w.get('a0'));
+});
+test('class weights balance family x verdict inside each split and sum to that split\'s count (review item 1)', () => {
+  const rec = (key, split, family, verdict) => ({ key, split, family, safety_eye: { verdict } });
+  const recs = [...Array(9)].map((_, i) => rec(`t${i}`, 'train', 'S', 'SAFE')).concat([rec('u', 'train', 'S', 'UNSAFE'), rec('o', 'ood', 'D', 'UNSAFE'), rec('o2', 'ood', 'D', 'SAFE')]);
+  const w = splitClassWeights(recs), sum = (s) => recs.filter((r) => r.split === s).reduce((a, r) => a + w.get(r.key), 0);
+  assert.ok(Math.abs(sum('train') - 10) < 1e-9 && Math.abs(sum('ood') - 2) < 1e-9); assert.ok(Math.abs(w.get('u') - 9 * w.get('t0')) < 1e-9); assert.equal(w.get('o'), 1);
 });
 test('image facts: the 12 PALETTE_NAMES, brightness bins on mean luminance in [0, 1], values that pass validateTextFacts', async () => {
   assert.deepEqual(Object.keys(PALETTE), [...PALETTE_NAMES]);
@@ -106,7 +118,8 @@ test('image facts: the 12 PALETTE_NAMES, brightness bins on mean luminance in [0
 test('Z geo facts: land-only elevation, water_frac with lakes, admin-1 at the centre, TEXT_FACTS shapes, terrain words from TAG_WORDS', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'apv-zg-')), sq = (x0, y0, x1, y1) => [[[x0, y0], [x1, y0], [x1, y1], [x0, y1], [x0, y0]]], F = (layer, props, geometry) => ({ type: 'Feature', properties: { layer, ...props }, geometry });
   fs.writeFileSync(path.join(dir, 'mini.geojson'), JSON.stringify({ type: 'FeatureCollection', features: [
-    F('ne_10m_land', {}, { type: 'Polygon', coordinates: sq(0, 40, 7.45, 50) }), F('ne_10m_admin_0_countries', { NAME: 'Westland', CONTINENT: 'Europe' }, { type: 'Polygon', coordinates: sq(0, 40, 7.45, 50) }),
+    F('ne_10m_land', {}, { type: 'Polygon', coordinates: sq(0, 40, 7.45, 50) }), F('ne_10m_admin_0_countries', { NAME: 'Westland', CONTINENT: 'Europe' }, { type: 'Polygon', coordinates: sq(0, 40, 7.38, 50) }), F('ne_10m_admin_0_countries', { NAME: 'Eastland', CONTINENT: 'Europe' }, { type: 'Polygon', coordinates: sq(7.38, 40, 7.45, 50) }),
+    F('ne_10m_geography_regions_polys', { NAME: 'BIG RANGE MTS.', FEATURECLA: 'Range/mtn', SCALERANK: 3 }, { type: 'Polygon', coordinates: sq(7.3, 45.95, 7.5, 46.05) }),
     F('ne_10m_admin_1_states_provinces', { name: 'Upper Province' }, { type: 'Polygon', coordinates: sq(7, 40, 7.45, 50) }), F('ne_10m_lakes', { name: 'Big Lake', scalerank: 3 }, { type: 'Polygon', coordinates: sq(7.2, 45.6, 7.45, 46.4) }),
     F('ne_10m_populated_places', { NAME: 'Centreville', POP_MAX: 200000, SCALERANK: 2 }, { type: 'Point', coordinates: [7.45, 46.02] }), F('ne_10m_populated_places', { NAME: 'Farburg', POP_MAX: 90000 }, { type: 'Point', coordinates: [5, 44] })] }));
   const ne = await loadNaturalEarth(dir, ['mini']); fs.rmSync(dir, { recursive: true, force: true });
@@ -118,7 +131,9 @@ test('Z geo facts: land-only elevation, water_frac with lakes, admin-1 at the ce
   const f = (id) => rec.facts[id].v;
   assert.ok(f('geo.sea_frac') > 0.3 && f('geo.sea_frac') < 0.7, `sea_frac ${f('geo.sea_frac')}`); assert.ok(f('geo.water_frac') > f('geo.sea_frac'), 'lakes count as water');
   assert.ok(f('geo.elev_min_m') >= 1000, 'the seabed (-3000 m) never enters the land elevation stats'); assert.equal(f('geo.coast_side'), 'right');
-  assert.equal(f('place.country'), 'Westland'); assert.equal(f('place.admin1'), 'Upper Province'); assert.equal(f('place.nearest').name, 'Farburg');
+  assert.equal(f('place.country'), 'Eastland', 'the country at the view centre (review item 2)'); assert.equal(Object.keys(f('geo.country_frac'))[0], 'Westland', 'the plurality stays in country_frac');
+  assert.ok(f('place.in_view').some((x) => x.name === 'Big Range Mts.' && x.kind === 'region'), 'ALL-CAPS NE region names are title-cased');
+  assert.equal(neName('NEW GUINEA HIGHLANDS'), 'New Guinea Highlands'); assert.equal(neName('USA'), 'USA'); assert.equal(neName('Alps'), 'Alps'); assert.equal(f('place.admin1'), 'Upper Province'); assert.equal(f('place.nearest').name, 'Farburg');
   assert.ok(f('place.in_view').some((x) => x.name === 'Centreville' && x.kind === 'place')); assert.ok(rec.zoom.tags.includes('COASTLINE'));
   assert.equal(rec.zoom.tags.includes('WATER_DOMINANT'), f('geo.water_frac') > 0.6);
   const words = Object.values(TAG_WORDS).map((w) => w[0]); assert.ok(words.some((w) => f('geo.terrain').includes(w)));
@@ -135,6 +150,7 @@ test('the datasheet has the 7 sections and the amendment B records', () => {
   const md = datasheet({ counts: {}, text: { rejectRate: 0.01, parserFalseReject: 0 }, upstream: {}, naturalMix: {}, pairs: {} }, { name: 'x', date: 'd', runs: ['r'], git_sha: 's', licence: 'open', capture_mode: 'clock', sizes: null, c_near: 2.5, eye: EYE, playwright: '1.63.0' });
   for (let i = 1; i <= 7; i++) assert.match(md, new RegExp(`^## ${i} `, 'm'));
   assert.match(datasheet({ counts: {}, text: {}, upstream: {}, naturalMix: {}, pairs: {} }, { name: 'x', date: 'd', runs: ['r'], eye: EYE, captured: { S: 700 } }), /records built per family \{"S":700\} of §3.2/);
+  for (const s of ['T3H-1', 'T3H-3', 'T11-a']) assert.ok(md.includes(s), s);
   for (const s of [...EYE.hidden, 'closingRhoM 11', '1600-frame slot', '80,000', '12 u', 'T_VIS 0.1', 'axial < 0.5 m', 'scene.in_cloud']) assert.ok(md.includes(s), s);
 });
 test('a record of a page without .done is left out; an A twin needs its own .done and its original page\'s, not the twin page start', async () => {
