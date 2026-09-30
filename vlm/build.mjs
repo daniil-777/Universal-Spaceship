@@ -30,6 +30,8 @@ import { mulberry32 } from '../src/mathx.js';
 import { EYE, EYE_REMOVED } from './gen/safety.js';
 
 const L = '/Volumes/LaCie/astro-pilot/vlm', REPO = fileURLToPath(new URL('../', import.meta.url));
+// the commit whose code this process loaded: read at startup (a merge during a long build must not relabel it)
+const buildSha = (() => { try { return execFileSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: REPO }).toString().trim(); } catch { return null; } })();
 const arg = (k, d) => { const i = process.argv.indexOf('--' + k); return i > 0 ? process.argv[i + 1] : d; };
 if (!arg('run') || !arg('out')) throw new Error('usage: node vlm/build.mjs --run <run>[,<run>…] --out <name> [--families S,A,L,D,Z] [--sizes sizes.json] [--context gt+noise|oof --context-from preds.jsonl]');
 if (arg('teacher', 'off') !== 'off') throw new Error('the teacher is off for this dataset (controller ruling): no paid API is called by the build');
@@ -133,7 +135,7 @@ fs.writeFileSync(path.join(out, 'cache', 'index.json'), JSON.stringify({ size: E
 say('exports written');
 
 // ---- 8. labels, stats, datasheet, attribution
-const cal = JSON.parse(fs.readFileSync(new URL('./gen/calibration.json', import.meta.url), 'utf8')), buildSha = (() => { try { return execFileSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: REPO }).toString().trim(); } catch { return null; } })();
+const cal = JSON.parse(fs.readFileSync(new URL('./gen/calibration.json', import.meta.url), 'utf8'));
 fs.writeFileSync(path.join(out, 'labels.json'), JSON.stringify({ c_near: cal.c_near, verdicts: VERDICTS, reasons: REASONS, actions: ACTIONS, zoom_tags: ZOOM_TAGS, reg: REG, reason_masks: REASON_SETS, eye: EYE, eye_hidden: EYE.hidden, eye_closing_rho_m: EYE.closingRhoM, eye_removed: EYE_REMOVED,
   eye_export_excludes: { D_axial_below_m: EYE_MIN_AXIAL_M, ruling: 'T10-g' }, nominal_frame_dt: { S: 0.2, A: 0.2, L: 0.25, D: 2 }, input: EYE_SIZE, resize: 'box', context_mode: mode }, null, 1));
 const eyeStats = { records: Object.fromEntries(SPLITS.map((s) => [s, Object.keys(index[s]).length])), excluded_d_contact: kept.filter((r) => /T10-g/.test(r.pilot_eye_excluded || '')).length, excluded_pixel_identical_train: kept.filter((r) => /T11-a/.test(r.pilot_eye_excluded || '')).length };
