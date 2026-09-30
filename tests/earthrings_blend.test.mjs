@@ -10,12 +10,14 @@ import { createLocalFrame, ringLevels } from '../src/earthtiles.js';   // pure g
 register('data:text/javascript,' + encodeURIComponent(`export async function resolve(s, c, next) {
   return s === 'three' || s.startsWith('three/') ? next(s, { ...c, parentURL: ${JSON.stringify(import.meta.url)} }) : next(s, c); }`));
 
-// Task 7 (2026-09-30): at 1000-4000 km every finer ring's box showed as a soft rectangle over the globe. Diagnosis
-// (test/zoom_seam_check.mjs, per-hypothesis variants): each ring's alpha carries the view's far fade V (uFar × day),
+// Task 7 (2026-09-30): in the far fade (2500-4000 km, uFar < 1) every finer ring's box showed as a soft rectangle over
+// the globe. Diagnosis (test/zoom_seam_check.mjs, per-hypothesis variants): each ring's alpha carries V = uFar × day,
 // so where a coarse ring C is still drawn under a finer ring F (F's edge band always, its whole footprint until F is
 // fully in) two "over" blends let the globe G through (1 − V)² instead of (1 − V). The error is
 // V (1 − V) cF cC (C − G): zero with opaque rings (V = 1), 19 % of the ring/globe difference at 3000 km (V = 0.74).
-// Fix: under F, C's alpha is scaled by (1 − c) / (1 − V c), c = F's own cover (its fade-in × its edge fade).
+// Fix: where uFar < 1, under F, C's alpha is scaled by (1 − cF) / (1 − V cF), cF = F's own cover (its fade-in × its
+// edge fade), so the pair composites as V (cF F + (1 − cF) cC C) + (1 − V (cF + (1 − cF) cC)) G. Below 2500 km the
+// factor is off, even at dusk (relief parallax would open holes there; follow-up round).
 const SRC = fs.readFileSync(fileURLToPath(new URL('../src/earthrings.js', import.meta.url)), 'utf8');
 const FRAG = (SRC.match(/const FRAG = \/\* glsl \*\/`([\s\S]*?)`;/) || [])[1];
 const grab = (re, what) => { const m = FRAG && FRAG.match(re); assert.ok(m, `FRAG: ${what} not found`); return m.slice(1); };
@@ -46,7 +48,7 @@ function oneLayer({ V0, day, visF, visC, eF, eC, F, C, G }) {
 }
 let seed = 12345;
 const rnd = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; };
-const sample = (over = {}) => ({ V0: rnd(), day: rnd(), visF: rnd(), visC: rnd(), eF: rnd(), eC: rnd(), F: [rnd(), rnd(), rnd()], C: [rnd(), rnd(), rnd()], G: [rnd(), rnd(), rnd()], ...over });
+const sample = (fixed = {}) => ({ V0: rnd(), day: rnd(), visF: rnd(), visC: rnd(), eF: rnd(), eC: rnd(), F: [rnd(), rnd(), rnd()], C: [rnd(), rnd(), rnd()], G: [rnd(), rnd(), rnd()], ...fixed });
 const maxErr = (a, b) => Math.max(...a.map((x, i) => Math.abs(x - b[i])));
 
 test('FRAG: the coarse ring\'s alpha carries the stack factor, from the finer ring\'s own cover (uInnerVis × edge(iu)) and uFar', () => {
@@ -56,7 +58,7 @@ test('FRAG: the coarse ring\'s alpha carries the stack factor, from the finer ri
   const [cExpr, vExpr] = grab(/float c = ([^,;]+), V = ([^;]+);/, 'c and V');
   assert.match(cExpr, /^under \? uInnerVis \* edge\(iu\) : 0\.0$/, 'c is the finer ring\'s cover, and only where the ring is under it');
   assert.equal(vExpr, 'uFar * day', 'V is the part of every ring\'s alpha they share: the far fade and the day side');
-  assert.match(grab(/float stack = ([^;]+);/, 'stack')[0], /^V < 1\.0 && /, 'with an opaque stack (V = 1) the factor is skipped, not computed as x / x');
+  assert.match(grab(/float stack = ([^;]+);/, 'stack')[0], /^uFar < 1\.0 && /, 'the factor acts only in the far fade (uFar < 1); below 2500 km it is off, even at dusk');
   const [alphaExpr] = grab(/gl_FragColor = vec4\(col, (.+?)\); \}/, 'alpha');
   assert.match(alphaExpr, /\bstack\b/, 'the output alpha is scaled by the stack factor');
 });
@@ -77,11 +79,11 @@ test('stack blend: the old shader (HEAD 8d2f54f) fails the same check by V (1 �
   assert.ok(maxErr(composite(s, shaderAlpha()), oneLayer(s)) < 1e-12, 'the fixed shader has none in the same pixel');
 });
 
-test('stack blend: with opaque rings (uFar = 1, day = 1: below 2500 km in daylight) every ring\'s alpha is exactly the old one', () => {
+test('stack blend: below 2500 km (uFar = 1) every ring\'s alpha is exactly the old one, at any time of day (dusk included)', () => {
   const alpha = shaderAlpha();
   for (let k = 0; k < 5000; k++) {
-    const uVis = rnd(), uInnerVis = rnd() < 0.2 ? 1 : rnd(), eOwn = rnd(), eInner = rnd() < 0.2 ? 1 : rnd(), under = rnd() < 0.7;
-    assert.equal(alpha(uVis, 1, uInnerVis, 1, under, eOwn, eInner), oldAlpha(uVis, 1, uInnerVis, 1, under, eOwn), `sample ${k}`);
+    const uVis = rnd(), uInnerVis = rnd() < 0.2 ? 1 : rnd(), eOwn = rnd(), eInner = rnd() < 0.2 ? 1 : rnd(), under = rnd() < 0.7, day = rnd() < 0.3 ? 1 : rnd();
+    assert.equal(alpha(uVis, 1, uInnerVis, day, under, eOwn, eInner), oldAlpha(uVis, 1, uInnerVis, day, under, eOwn), `sample ${k} (day ${day})`);
   }
 });
 

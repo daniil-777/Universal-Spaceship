@@ -38,13 +38,16 @@ const VERT = /* glsl */`uniform sampler2D tHeight; uniform vec2 uHOff; uniform f
 // longitude (uInnerWrap): a level-2 ring spans the globe twice, and a copy of it left at its true depth would hide the
 // pushed rings. Haze grows with the air crossed (the path below uAirTop km), not with the distance, so a view straight
 // down from orbit stays clear while a low view's horizon fades.
-// The rings are ONE layer over the globe (Task 7, 2026-09-30): every ring's alpha carries the view's far fade uFar
-// (2500 -> 4000 km) and the day side, so where a coarse ring is still drawn under a finer one (the finer ring's edge
-// band, and its whole footprint until it is fully in) two "over" blends let the globe through (1 - a)^2 instead of
-// (1 - a): a soft box around every finer ring at 1000-4000 km. Under the finer ring the coarse ring's alpha is scaled
-// by (1 - c) / (1 - V c), c = the finer ring's own cover there (its fade-in uInnerVis times its edge fade), V = uFar
-// times day: the pair then composites as V (c F + (1 - c) C) + (1 - V) globe. With V = 1 (below 2500 km, in
-// daylight) the factor is skipped rather than computed as x / x, so the near views are unchanged.
+// The rings are ONE layer over the globe (Task 7, 2026-09-30). Above 2500 km every ring's alpha carries the view's far
+// fade uFar (1 at 2500 km -> 0 at 4000 km) and the day side, so where a coarse ring C is still drawn under the next
+// finer ring F (F's edge band, and F's whole footprint until F is fully in) two "over" blends let the globe G through
+// (1 - V)^2 instead of (1 - V): a soft box around every finer ring at 2500-4000 km. There, under F, C's alpha is
+// scaled by (1 - cF) / (1 - V cF), cF = F's own cover (its fade-in uInnerVis times its edge fade), V = uFar times
+// day, so the pair composites exactly as V (cF F + (1 - cF) cC C) + (1 - V (cF + (1 - cF) cC)) G. Below 2500 km
+// (uFar = 1) the factor is off, even at dusk: close up, relief parallax shows C's smoother ridges where F has no
+// fragment, and a C faded out there would open holes. Known limitation: cF only knows the next finer ring, so while
+// three rings fade in together (about 1 s after opening or jumping at far range) the error is reduced, not zero: at
+// most 0.06 (C - G) with all three at the same fade-in, against up to 0.24 (C - G) before.
 const FRAG = /* glsl */`uniform sampler2D tColor, tMask, tInner; uniform vec2 uCOff, uVRange, uInnerMin, uInnerCOff; uniform vec3 uSun, uHazeCol;
   uniform float uVis, uHazeK, uHazeL, uInnerOn, uInnerDone, uInnerScale, uInnerWrap, uAirTop, uInnerVis, uFar; uniform vec3 uSeaCol;
   uniform vec3 uTint; uniform float uTintOn;
@@ -64,7 +67,7 @@ const FRAG = /* glsl */`uniform sampler2D tColor, tMask, tInner; uniform vec2 uC
     float dist = length(cameraPosition - vW), air = dist * min(1.0, uAirTop / max(cameraPosition.y - vW.y, uAirTop));
     col = mix(col, uHazeCol * (0.2 + 0.8 * day), uHazeK * (1.0 - exp(-air / uHazeL)));
     float c = under ? uInnerVis * edge(iu) : 0.0, V = uFar * day;
-    float stack = V < 1.0 && V * c < 0.9999 ? (1.0 - c) / (1.0 - V * c) : 1.0;
+    float stack = uFar < 1.0 && V * c < 0.9999 ? (1.0 - c) / (1.0 - V * c) : 1.0;
     gl_FragDepth = !under ? gl_FragCoord.z : (uInnerDone > 0.5 ? mix(gl_FragCoord.z, 1.0, 0.2) : 0.99999);
     col = mix(col, uTint, uTintOn);
     gl_FragColor = vec4(col, uVis * edge(vUv) * day * stack); }`;          // the night side fades to the globe's city lights
