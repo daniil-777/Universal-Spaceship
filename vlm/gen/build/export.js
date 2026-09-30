@@ -70,4 +70,35 @@ export async function writeCache(outDir, split, recs, { root = LACIE, size = EYE
   } finally { fs.closeSync(fd); }
   return index;
 }
-export function writeJsonl(file, rows) { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, rows.map((r) => JSON.stringify(r)).join('\n') + (rows.length ? '\n' : '')); }
+// the same cache from the build's worker pool (frames.js): up to `window` records in flight, rows written in record order;
+// rows (optional Map key -> the record's 3 rows, from the build's one-pass frame job) are used as they are
+export async function writeCacheParallel(outDir, split, recs, pool, { root = LACIE, size = EYE_SIZE, window = 4 * pool.size, rows = null } = {}) {
+  fs.mkdirSync(path.join(outDir, 'cache'), { recursive: true });
+  const fd = fs.openSync(path.join(outDir, 'cache', `pilot_eye_${split}.u8`), 'w'), index = {}, inflight = [];
+  const ask = (r) => (rows && rows.has(r.key) ? Promise.resolve({ eye: rows.get(r.key) }) : pool.run({ root, frames: r.frames, want: { eye: true }, eyeSize: size }));
+  try {
+    let next = 0;
+    for (let i = 0; i < recs.length; i++) {
+      while (next < recs.length && next < i + window) inflight.push(ask(recs[next++]));
+      const { eye } = await inflight.shift();
+      index[recs[i].key] = 3 * i; fs.writeSync(fd, eye);
+    }
+  } finally { await Promise.allSettled(inflight); fs.closeSync(fd); }
+  return index;
+}
+// JSONL and JSON arrays written in pieces: a v1 build's records.jsonl outgrows one string (V8 caps strings near 512 MB)
+const CHUNK = 1000;
+export function writeJsonl(file, rows) {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const fd = fs.openSync(file, 'w');
+  try { for (let i = 0; i < rows.length; i += CHUNK) fs.writeSync(fd, rows.slice(i, i + CHUNK).map((r) => JSON.stringify(r)).join('\n') + '\n'); } finally { fs.closeSync(fd); }
+}
+export function writeJsonArray(file, items) {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const fd = fs.openSync(file, 'w');
+  try {
+    fs.writeSync(fd, '[');
+    for (let i = 0; i < items.length; i += CHUNK) fs.writeSync(fd, (i ? ',' : '') + items.slice(i, i + CHUNK).map((x) => JSON.stringify(x)).join(','));
+    fs.writeSync(fd, ']');
+  } finally { fs.closeSync(fd); }
+}
