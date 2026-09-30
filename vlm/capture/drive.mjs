@@ -36,7 +36,7 @@ async function preflight(waitS) {
 }
 if (process.argv[1] && process.argv[1].endsWith('drive.mjs')) {
   const arg = (k, d) => { const i = process.argv.indexOf('--' + k); return i > 0 ? process.argv[i + 1] : d; }, family = arg('family'), n = +arg('n', 1), run = arg('run');
-  if (!['S', 'Z'].includes(family) || !run) throw new Error('usage: drive.mjs --family S|Z --n N --run <name> (A, L, D come with Task 10)');
+  if (!['S', 'A', 'L', 'D', 'Z'].includes(family) || !run) throw new Error('usage: drive.mjs --family S|A|L|D|Z --n N --run <name> [--seed0 K] [--force-when cloud|china|city|cloudy|below_base]');
   // APV_RAW_ROOT is a test hook only (the start-gate tests): it relocates raw/ and ends the process right after the gate (exit 2
   // when the gate passes), so a test can never reach the preflight, a browser or the network; captures always use $LACIE/raw
   const RAW = process.env.APV_RAW_ROOT || path.join(LACIE, 'raw'), runDir = path.join(RAW, run), gate = startGate(runDir);
@@ -47,8 +47,9 @@ if (process.argv[1] && process.argv[1].endsWith('drive.mjs')) {
   process.env.AP_SITE ||= REPO.replace(/\/$/, ''); const free0 = await preflight(+arg('wait-browser', 1800));
   const { serve, launch } = await import('/Volumes/LaCie/astro-pilot/test/shot.mjs'), { createUpstream, StopDrive } = await import('./tilecache.mjs');
   const calFile = path.join(REPO, 'vlm/gen/calibration.json'), cal = fs.existsSync(calFile) ? JSON.parse(fs.readFileSync(calFile, 'utf8')) : { c_near: 2.5 };
-  // provenance.policy_sha: the served belt policy, hashed once per drive; the page asserts it flies it (probe setup)
-  const polBuf = family === 'S' ? fs.readFileSync(path.join(REPO, 'model/policy.json')) : null, policy = polBuf ? { sha: crypto.createHash('sha256').update(polBuf).digest('hex'), steps: JSON.parse(polBuf).steps } : null;
+  // provenance.policy_sha: the served belt policy (S; the page asserts it flies it, probe setup) or atmo policy (A-PPO episodes),
+  // hashed once per drive; L (autoland) and D (GNC) fly code, identified by git_sha
+  const polFile = { S: 'model/policy.json', A: 'model/policy_atmo.json' }[family], polBuf = polFile ? fs.readFileSync(path.join(REPO, polFile)) : null, policy = polBuf ? { sha: crypto.createHash('sha256').update(polBuf).digest('hex'), steps: JSON.parse(polBuf).steps } : null;
   const dir = path.join(runDir, family), scan = scanRun(dir), { server, port } = await serve(), { browser, page } = await launch({ w: 896, h: 504 }); await page.context().close();
   const D = { browser, port, run, family, dir, policy, mode: arg('mode', 'clock'), licence: arg('licence', 'open'), cNear: +arg('c-near', cal.c_near ?? 2.5), ledger: [], stop: {}, sizes: arg('sizes', null), measure: process.argv.includes('--measure'),
     gitSha: execFileSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: REPO }).toString().trim(), siteDirty: !!execFileSync('git', ['status', '--porcelain', '--', 'src', 'index.html', 'textures', 'model', 'vlm'], { cwd: REPO }).toString().trim(),

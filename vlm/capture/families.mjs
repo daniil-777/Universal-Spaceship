@@ -3,21 +3,78 @@
 // (a discarded episode) | {exhausted: true} (a Z episode past the end of the plan and of the spares taken).
 import fs from 'node:fs';
 import path from 'node:path';
-import { mulberry32 } from '../../src/mathx.js';
 import { renderSeed, assemble, capSeverity4, writeEpisode } from './records.mjs';
-import { runCorridorEpisode } from './episode_corridor.mjs';
+import { runCorridorEpisode, aWarmup } from './episode_corridor.mjs';
 import { runZoomLocation } from './episode_zoom.mjs';
+import { runLanding } from './episode_landing.mjs';
+import { runDocking } from './episode_docking.mjs';
 import { Discard } from './session.mjs';
 import { viewSplit, buildOodMask } from '../gen/sampler_z.js';
 import { loadNaturalEarth } from '../gen/geo/naturalearth.js';
 import { nextSpare } from './zplan.mjs';
-const rngOf = (seed) => { const r = mulberry32(seed); return { float: r, int: (lo, hi) => lo + Math.floor(r() * (hi - lo + 1)), pick: (a) => a[Math.floor(r() * a.length)] }; };
+import { planEpisode, aCells, landingSchedule, dockingSchedule, rngOf } from '../gen/sampler.js';
+import { landingSafety, dockingSafety, eyeView } from '../gen/safety.js';
 const UTC0 = Date.UTC(2026, 5, 21, 12), LACIE = '/Volumes/LaCie/astro-pilot/vlm';
-function planS(D, e, seed0, rsOverride) {
-  const seed = seed0 + e, rng = rngOf(seed ^ 0x5a5a), density = rng.pick([10, 25, 40]), rs = rsOverride ? +rsOverride : renderSeed(D.run, 'S', seed);
-  // policy: the pretrained belt pilot, asserted in the page (probe setup) against model/policy.json's step count and hashed
-  return { family: 'S', episode: e, seed, renderSeed: rs, utcMs: UTC0 + seed * 60000, rng, policyId: 'belt_ppo', policySha: D.policy ? D.policy.sha : null, params: { density, measure: !!D.measure, policySteps: D.policy ? D.policy.steps : null },
-    url: `/index.html?hud=0&lowpass=0&seed=${seed}&density=${density}&rs=${rs}` };
+// --force-when cases (G4 determinism, §7.5): A in cloud, china, a city route, cloudy; L night + rain + fog below the base
+const FORCE = { cloud: { route: 'alps', sky: 'storm' }, china: { route: 'china', sky: 'fair' }, city: { route: 'newyork', sky: 'fair' }, cloudy: { route: 'alps', sky: 'cloudy' }, below_base: { time: 'night', rain: 1, vis: 'fog' } };
+const lab = (fam, b) => ({ facts: b.facts, safety: (fam === 'L' ? landingSafety : dockingSafety)({ now: b.now, outcome: b.outcome }), safety_eye: eyeView(fam, { now: b.now, outcome: b.outcome }) });
+// A cells (§3.4): the drive fills each route x sky cell toward its quota; on a resume the primary counts are rebuilt from the
+// finished records on disk (the resume scan has already removed unfinished episodes), so the cell order does not restart
+function aCounts(D) {
+  if (D.cellCounts) return D.cellCounts;
+  D.cellCounts = {};
+  for (const n of fs.existsSync(D.dir) ? fs.readdirSync(D.dir).filter((x) => /^A_.+\.json$/.test(x)) : []) {
+    const r = JSON.parse(fs.readFileSync(path.join(D.dir, n), 'utf8')), q = new URLSearchParams(r.provenance.page_url.split('?')[1]), k = `${q.get('route')}|${q.get('sky')}`;
+    if (!r.provenance.twin_of) D.cellCounts[k] = (D.cellCounts[k] || 0) + 1;
+  }
+  return D.cellCounts;
+}
+// a cell whose episodes keep ending before any record (a storm cell the search pilot cannot fly: Task 3's pilot crashed 16/16
+// Node alps storm episodes within 7.3 s) is set aside after DEAD_TRIES tries without one, so the fill loop cannot spin on it
+export const DEAD_TRIES = 30;
+export function pickCell(counts, tries = {}) {
+  const key = (c) => `${c.route}|${c.sky}`, live = aCells(1600).filter((c) => !((tries[key(c)] || 0) >= DEAD_TRIES && !counts[key(c)]));
+  return live.length ? live.map((c) => ({ c, left: (c.quota - (counts[key(c)] || 0)) / c.quota })).sort((a, b) => b.left - a.left)[0].c : null;
+}
+function plan(D, family, e, seed0, rsOverride, forceWhen = null) {
+  let cell = null; const force = forceWhen ? FORCE[forceWhen] || {} : {};
+  if (family === 'A') {
+    const n = aCounts(D); D.cellTries ||= {}; cell = forceWhen ? { ...force, quota: 1 } : pickCell(n, D.cellTries);
+    if (!cell) throw new Discard('every A cell is set aside (no record in its first 30 episodes)');
+    const k = `${cell.route}|${cell.sky}`; D.cellTries[k] = (D.cellTries[k] || 0) + 1;
+  }
+  const seed = seed0 + e, rs = rsOverride ? +rsOverride : renderSeed(D.run, family, seed), p = planEpisode(family, seed, { rs, cell, force }), rngSeed = seed ^ 0xa5a5, rng = rngOf(rngSeed);
+  const ep = { ...p, episode: e, renderSeed: rs, utcMs: UTC0 + seed * 60000, rng, rngSeed, cell, force: forceWhen, policySha: null };
+  // S/A: the pilot the probe asserts (S: the belt policy's step count) and hashes (drive.mjs: policy.json for S, policy_atmo.json for A)
+  if (family === 'S' || family === 'A') { ep.params = { ...p.params, measure: !!D.measure, policySteps: family === 'S' && D.policy ? D.policy.steps : null }; ep.policySha = (family === 'S' || p.policyId === 'atmo_ppo') && D.policy ? D.policy.sha : null; }
+  if (forceWhen) ep.inject = null;
+  if (family === 'A') ep.warmup = (S) => aWarmup(S, D, ep);
+  if (family === 'L') ep.schedule = landingSchedule(rng);
+  if (family === 'D') ep.schedule = dockingSchedule(rng, p.params.start);
+  if (ep.inject && ep.inject.at !== 'runtime' && family !== 'L') ep.inject = family === 'D' && ep.inject.kind === 'failed_p6' ? ep.inject : null;
+  return ep;
+}
+async function runFamily(D, ep) {
+  if (ep.family === 'A' || ep.family === 'S') { const r = await runCorridorEpisode(D, ep); return { ...r, samples: capSeverity4(r.samples) }; }
+  const r = ep.family === 'L' ? await runLanding(D, ep) : await runDocking(D, ep); for (const s of r.samples) s.label = lab(ep.family, s.label); return r;
+}
+// One S/A/L/D episode and, when it has injected samples, its minimal-pair twin (§8; episode e + 50000): S/A twins capture the
+// listed clips (ep.only) without the collision course; L/D twins replay the original's page-time ops with no kick armed (L: the
+// twin URL has no wind injection and hFlare is off; D failed-P6: the probe-owned sim with no failed jet) and keep the
+// injected samples. A twin that is discarded yields no records; the injected records stay (the build counts unpaired ones).
+export async function nextFlightEpisode(D, e, { seed0, rsOverride, forceWhen = null }) {
+  const ep = plan(D, D.family, e, seed0, rsOverride, forceWhen), res = await runFamily(D, ep), eye = ep.family === 'D' ? 'centreline' : 'chase';
+  if (ep.inject && ep.inject.at !== 'runtime') for (const s of res.samples) s.injection = { kind: ep.inject.kind, params: ep.inject.params || {}, step: null, sim_t_s: null };
+  const recs = res.samples.map((s) => assemble(D, ep, s, { eyeView: eye })), stats = { crashed: res.crashed, policy: ep.policyId, cell: ep.cell ? `${ep.cell.route}|${ep.cell.sky}` : null, inject: ep.inject ? ep.inject.kind : null, ...res.stats };
+  if (ep.family === 'A') for (const r of recs) if (!r.error) D.cellCounts[`${ep.cell.route}|${ep.cell.sky}`] = (D.cellCounts[`${ep.cell.route}|${ep.cell.sky}`] || 0) + 1;
+  const injected = res.samples.filter((s) => s.injection);
+  if (!ep.inject || !injected.length) return { records: recs, wallMs: res.wallMs, stats };
+  const flight = ep.family === 'L' || ep.family === 'D', only = flight ? null : injected.map((s) => ({ step: s.step, f0: s.frames[0].step, n: s.n, ci: s.ci }));
+  const tw = { ...ep, twin: true, twinOf: e, episode: e + 50000, url: ep.twinUrl ?? ep.url, params: { ...ep.params, hflare: false }, only, ops: flight ? res.ops : null, keep: new Set(injected.map((s) => s.idx)), rng: rngOf(ep.rngSeed), warmup: null };
+  if (ep.family === 'A') tw.warmup = (S) => aWarmup(S, D, tw);
+  let tr; try { tr = await runFamily(D, tw); } catch (err) { if (!(err instanceof Discard)) throw err; D.log({ discard: 'twin', episode: e, why: err.message }); tr = { samples: [], wallMs: 0, stats: {} }; }
+  const twinRecs = tr.samples.map((s) => assemble(D, tw, s, { eyeView: eye }));
+  return { records: recs, twin: { episode: e + 50000, records: twinRecs }, wallMs: res.wallMs + tr.wallMs, stats: { ...stats, twin: twinRecs.length, twin_wall_s: tr.wallMs / 1000, twin_stats: tr.stats } };
 }
 // The split re-check on the captured 16x9 grid (§8, ruling for T9/T11): the plan's level-3 blocks and the OOD mask rebuilt
 // from the same Natural Earth layers; a captured view that breaks its location's split is discarded (logged), not failed.
@@ -58,12 +115,8 @@ function zStats(res, kept) {
   return { views: n, dropped: res.drops, split_dropped: kept.splitDropped, boot_ms: res.bootMs, frames: res.frames, frame_ms: res.frameMs, settle_s: res.views.map((x) => x.settle_s), settle_frames: res.views.map((x) => x.settle_frames), gate_frames: res.views.map((x) => x.gate_frames), steady_frames: res.views.map((x) => x.steady_frames),
     tiles: res.views.map((x) => x.tiles), cap_host_ms: n ? sum((x) => x.capHostMs) / n : null, png_bytes: n ? sum(png) / n : null, ground_src: res.views.map((x) => x.label.ground.src) };
 }
-export async function nextEpisode(D, { episode, seed0, rsOverride }) {
+export async function nextEpisode(D, { episode, seed0, rsOverride, forceWhen = null }) {
   try {
-    if (D.family === 'S') {
-      const ep = planS(D, episode, seed0, rsOverride), res = await runCorridorEpisode(D, ep), recs = capSeverity4(res.samples).map((s) => assemble(D, ep, s));
-      return { records: recs, wallMs: res.wallMs, stats: { crashed: res.crashed, ...res.stats } };
-    }
     if (D.family === 'Z') {
       if (!D.zplan) D.zplan = JSON.parse(fs.readFileSync(`${LACIE}/raw/${D.run}/Z/plan.json`, 'utf8'));
       const loc = zLocation(D, episode); if (!loc) return { exhausted: true };
@@ -74,6 +127,7 @@ export async function nextEpisode(D, { episode, seed0, rsOverride }) {
       const recs = views.map((x) => assemble(D, ep, { step: x.index, frame: x.frame, label: x.label, v: x.v, ledger0: x.ledger0 }));
       return { records: recs, wallMs: res.wallMs, stats: zStats(res, kept) };
     }
-    throw new Error(`family ${D.family} is added in Task 10`);
+    // the await keeps a rejected Discard inside this try, so a discarded episode returns null instead of ending the drive
+    return await nextFlightEpisode(D, episode, { seed0, rsOverride, forceWhen });
   } catch (err) { if (err instanceof Discard) { D.log({ discard: episode, why: err.message }); return null; } throw err; }
 }
