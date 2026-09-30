@@ -132,7 +132,8 @@ LICENSES = """# Licences and credits
 - patrickfleith/AstroChat — CC-BY-4.0 (https://huggingface.co/datasets/patrickfleith/AstroChat), if present in sft/general.jsonl.
 """
 
-def build(root, version='v1'):
+def build(root, version='v1', include_parts=False):
+    """include_parts: also read unfinished shards' part files (a dev build while generation runs)."""
     root = Path(root); pkg = root / 'data' / f'capcom-{version}'
     kb = json.loads((root / 'kb/kb.json').read_text()); facts = {f['id']: f for f in kb['facts']}
     min_score = kb['retrieval']['min_score']; bm = BM25(kb['facts'])
@@ -141,7 +142,11 @@ def build(root, version='v1'):
     for r in single + unans: ev_grams |= grams(r['user']); ev_exact.add(' '.join(tokens(r['user'])))
     stats = {'invalid': 0, 'dup': 0, 'contaminated': 0}
     dialogs, seen = [], set()
-    for p in sorted((root / 'data/dialogs').glob('shard_*.jsonl')):
+    sources = sorted((root / 'data/dialogs').glob('shard_*.jsonl'))
+    if include_parts:
+        done = {p.stem for p in sources}
+        sources += sorted(p for p in (root / 'data/dialogs/parts').glob('shard_*/part_*.jsonl') if p.parent.name not in done and not p.name.startswith('._'))
+    for p in sources:
         for d in read_jsonl(p):
             if check(d, facts): stats['invalid'] += 1; continue
             k = (d['turns'][0]['content'].strip().lower(), d['turns'][1]['content'].strip().lower())
@@ -182,4 +187,5 @@ def build(root, version='v1'):
 
 if __name__ == '__main__':
     ap = argparse.ArgumentParser(); ap.add_argument('--root', default='/Volumes/LaCie/astro-pilot/chat'); ap.add_argument('--version', default='v1')
-    a = ap.parse_args(); print(json.dumps(build(a.root, a.version), indent=1))
+    ap.add_argument('--include-parts', action='store_true', help='dev build: also read unfinished shards')
+    a = ap.parse_args(); print(json.dumps(build(a.root, a.version, a.include_parts), indent=1))
