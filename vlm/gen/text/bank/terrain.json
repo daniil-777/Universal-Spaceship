@@ -1,0 +1,87 @@
+{
+  "terrain_q": { "kind": "vqa_q", "families": ["A"], "slots": [], "forms": [
+    "What kind of terrain is the ship flying over?",
+    "What is below and around the ship?",
+    "What sort of landscape is this?",
+    "What terrain does this route cross here?",
+    "Describe the ground scenery in this view.",
+    "What does the land below look like?",
+    "Over what kind of scenery is the ship flying?",
+    "What landscape surrounds the ship?",
+    "Which type of terrain is in this frame?",
+    "What is the ship flying through or over?",
+    "What ground is the ship crossing?"
+  ] },
+  "terrain_a": { "kind": "vqa_a", "families": ["A"], "slots": ["terrain"], "forms": [
+    "The ship is flying over {terrain}.",
+    "Below the ship lies {terrain}.",
+    "The landscape is {terrain}.",
+    "This stretch crosses {terrain}.",
+    "The scenery here is {terrain}.",
+    "It flies over {terrain}.",
+    "The terrain is {terrain}.",
+    "The ship is surrounded by {terrain}.",
+    "This view shows {terrain}.",
+    "Around the ship: {terrain}."
+  ] },
+  "route_q": { "kind": "vqa_q", "families": ["A"], "slots": [], "forms": [
+    "Which route is the ship flying?",
+    "What route is this?",
+    "Which of the routes does this view belong to?",
+    "On which route is the ship?",
+    "Name the route being flown.",
+    "Which route are we on?",
+    "What is the name of this route?",
+    "Whose scenery is this: which route?",
+    "Tell me the route of this flight.",
+    "What route does this frame come from?"
+  ] },
+  "route_a": { "kind": "vqa_a", "families": ["A"], "slots": ["route"], "forms": [
+    "This is the {route} route.",
+    "The ship is flying the {route} route.",
+    "We are on the {route} route.",
+    "It is the {route} route.",
+    "The frame comes from the {route} route.",
+    "The route is {route}.",
+    "This view belongs to the {route} route.",
+    "The ship follows the {route} route.",
+    "This frame is on the {route} route.",
+    "That is the {route} route."
+  ] },
+  "tunnel_q": { "kind": "vqa_q", "families": ["A"], "slots": [], "forms": [
+    "Is the ship inside a tunnel?",
+    "Is the ship flying through a tunnel right now?",
+    "Is this view from inside a tunnel?",
+    "Are we in a tunnel?",
+    "Is the ship enclosed in a tunnel here?",
+    "Does the ship pass through a tunnel at this moment?",
+    "Is there a tunnel around the ship?",
+    "Is the ship under cover in a tunnel?",
+    "Is the ship flying inside a tunnel at the moment?",
+    "Is the ship in a tunnel section?"
+  ] },
+  "tunnel_yes_a": { "kind": "vqa_a", "families": ["A"], "slots": [], "forms": [
+    "Yes, the ship is inside a tunnel.",
+    "Yes, it is flying through a tunnel.",
+    "Yes. The view is from inside a tunnel.",
+    "Yes, we are in a tunnel.",
+    "Yes, the tunnel encloses the ship.",
+    "Yes, it is passing through a tunnel.",
+    "Yes, a tunnel surrounds the ship.",
+    "Inside a tunnel, yes.",
+    "Yes, this is a tunnel section.",
+    "Yes: the ship is in a tunnel."
+  ] },
+  "tunnel_no_a": { "kind": "vqa_a", "families": ["A"], "slots": [], "forms": [
+    "No, the ship is not in a tunnel.",
+    "No, it is flying in the open.",
+    "No. The view is not from a tunnel.",
+    "No, we are in open air.",
+    "No, there is no tunnel around the ship.",
+    "No, it is outside any tunnel.",
+    "No, the ship flies in the open air.",
+    "In open air, not in a tunnel.",
+    "No, this is not a tunnel section.",
+    "No: the ship is out in the open."
+  ] }
+}

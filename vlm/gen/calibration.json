@@ -1,0 +1,253 @@
+{
+ "c_near": 2.5,
+ "grid": [
+  {
+   "c": 1.5,
+   "S": 0.1981,
+   "A_search": 0.1377
+  },
+  {
+   "c": 1.75,
+   "S": 0.2173,
+   "A_search": 0.1603
+  },
+  {
+   "c": 2,
+   "S": 0.2404,
+   "A_search": 0.1712
+  },
+  {
+   "c": 2.25,
+   "S": 0.2788,
+   "A_search": 0.192
+  },
+  {
+   "c": 2.5,
+   "S": 0.3212,
+   "A_search": 0.2065
+  },
+  {
+   "c": 2.75,
+   "S": 0.3596,
+   "A_search": 0.2219
+  },
+  {
+   "c": 3,
+   "S": 0.3904,
+   "A_search": 0.24
+  },
+  {
+   "c": 3.25,
+   "S": 0.4077,
+   "A_search": 0.2536
+  },
+  {
+   "c": 3.5,
+   "S": 0.4365,
+   "A_search": 0.279
+  },
+  {
+   "c": 3.75,
+   "S": 0.4596,
+   "A_search": 0.2944
+  },
+  {
+   "c": 4,
+   "S": 0.4923,
+   "A_search": 0.3134
+  }
+ ],
+ "mixes": {
+  "belt_ppo|space|10": {
+   "SAFE": 160,
+   "CAUTION": 28,
+   "UNSAFE": 12,
+   "n": 200
+  },
+  "belt_ppo|space|25": {
+   "SAFE": 101,
+   "CAUTION": 67,
+   "UNSAFE": 32,
+   "n": 200
+  },
+  "belt_ppo|space|40": {
+   "SAFE": 92,
+   "CAUTION": 72,
+   "UNSAFE": 36,
+   "n": 200
+  },
+  "atmo_ppo|alps|clear": {
+   "SAFE": 5,
+   "CAUTION": 34,
+   "UNSAFE": 161,
+   "n": 200
+  },
+  "search_v1|alps|clear": {
+   "SAFE": 41,
+   "CAUTION": 38,
+   "UNSAFE": 121,
+   "n": 200
+  },
+  "atmo_ppo|alps|storm": {
+   "SAFE": 24,
+   "CAUTION": 11,
+   "UNSAFE": 145,
+   "n": 180
+  },
+  "search_v1|alps|storm": {
+   "SAFE": 26,
+   "CAUTION": 23,
+   "UNSAFE": 151,
+   "n": 200
+  },
+  "atmo_ppo|china|clear": {
+   "SAFE": 162,
+   "CAUTION": 17,
+   "UNSAFE": 21,
+   "n": 200
+  },
+  "search_v1|china|clear": {
+   "SAFE": 164,
+   "CAUTION": 12,
+   "UNSAFE": 24,
+   "n": 200
+  },
+  "atmo_ppo|china|storm": {
+   "SAFE": 34,
+   "CAUTION": 7,
+   "UNSAFE": 159,
+   "n": 200
+  },
+  "search_v1|china|storm": {
+   "SAFE": 30,
+   "CAUTION": 14,
+   "UNSAFE": 156,
+   "n": 200
+  },
+  "atmo_ppo|newyork|clear": {
+   "SAFE": 67,
+   "CAUTION": 17,
+   "UNSAFE": 116,
+   "n": 200
+  },
+  "search_v1|newyork|clear": {
+   "SAFE": 84,
+   "CAUTION": 16,
+   "UNSAFE": 100,
+   "n": 200
+  },
+  "atmo_ppo|newyork|storm": {
+   "SAFE": 18,
+   "CAUTION": 15,
+   "UNSAFE": 167,
+   "n": 200
+  },
+  "search_v1|newyork|storm": {
+   "SAFE": 28,
+   "CAUTION": 12,
+   "UNSAFE": 160,
+   "n": 200
+  },
+  "atmo_ppo|london|clear": {
+   "SAFE": 82,
+   "CAUTION": 16,
+   "UNSAFE": 102,
+   "n": 200
+  },
+  "search_v1|london|clear": {
+   "SAFE": 105,
+   "CAUTION": 13,
+   "UNSAFE": 82,
+   "n": 200
+  },
+  "atmo_ppo|london|storm": {
+   "SAFE": 12,
+   "CAUTION": 11,
+   "UNSAFE": 177,
+   "n": 200
+  },
+  "search_v1|london|storm": {
+   "SAFE": 27,
+   "CAUTION": 11,
+   "UNSAFE": 162,
+   "n": 200
+  },
+  "atmo_ppo|moscow|clear": {
+   "SAFE": 28,
+   "CAUTION": 5,
+   "UNSAFE": 167,
+   "n": 200
+  },
+  "search_v1|moscow|clear": {
+   "SAFE": 74,
+   "CAUTION": 16,
+   "UNSAFE": 110,
+   "n": 200
+  },
+  "atmo_ppo|moscow|storm": {
+   "SAFE": 23,
+   "CAUTION": 13,
+   "UNSAFE": 164,
+   "n": 200
+  },
+  "search_v1|moscow|storm": {
+   "SAFE": 24,
+   "CAUTION": 13,
+   "UNSAFE": 163,
+   "n": 200
+  },
+  "atmo_ppo|dubai|clear": {
+   "SAFE": 97,
+   "CAUTION": 20,
+   "UNSAFE": 83,
+   "n": 200
+  },
+  "search_v1|dubai|clear": {
+   "SAFE": 94,
+   "CAUTION": 18,
+   "UNSAFE": 88,
+   "n": 200
+  },
+  "atmo_ppo|dubai|storm": {
+   "SAFE": 20,
+   "CAUTION": 14,
+   "UNSAFE": 166,
+   "n": 200
+  },
+  "search_v1|dubai|storm": {
+   "SAFE": 27,
+   "CAUTION": 12,
+   "UNSAFE": 161,
+   "n": 200
+  },
+  "atmo_ppo|mega|clear": {
+   "SAFE": 79,
+   "CAUTION": 19,
+   "UNSAFE": 102,
+   "n": 200
+  },
+  "search_v1|mega|clear": {
+   "SAFE": 97,
+   "CAUTION": 7,
+   "UNSAFE": 96,
+   "n": 200
+  },
+  "atmo_ppo|mega|storm": {
+   "SAFE": 23,
+   "CAUTION": 25,
+   "UNSAFE": 152,
+   "n": 200
+  },
+  "search_v1|mega|storm": {
+   "SAFE": 55,
+   "CAUTION": 23,
+   "UNSAFE": 122,
+   "n": 200
+  }
+ },
+ "n_per_cell": 200,
+ "git_sha": "b76bfa9",
+ "generator_sha": "4d90a6a",
+ "note": "git_sha is the HEAD this run was launched against; vlm/gen/calibrate.mjs itself was uncommitted at run time and was first committed in generator_sha (4d90a6a). Do not expect b76bfa9 to contain the generator script.",
+ "date": "2026-09-30T01:35:51.063Z"
+}

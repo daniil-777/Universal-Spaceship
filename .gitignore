@@ -6,3 +6,6 @@ node_modules
 node_modules/
 agentdb.rvf
 agentdb.rvf.lock
+__pycache__/
+*.onnx
+*.safetensors

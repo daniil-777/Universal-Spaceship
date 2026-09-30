@@ -1,0 +1,74 @@
+{
+  "stall_q": { "kind": "vqa_q", "families": ["A"], "slots": [], "forms": [
+    "How far is the wing from stalling?",
+    "What is the stall margin?",
+    "How much angle of attack is left before the stall?",
+    "How close is the ship to a stall?",
+    "What margin to the stall angle does the wing have?",
+    "Is the wing near its stall angle?",
+    "How much margin remains before the wing stalls?",
+    "What is the angle-of-attack margin to the stall?",
+    "How far below the stall angle is the wing?",
+    "Give the stall margin in degrees."
+  ] },
+  "stall_a": { "kind": "vqa_a", "families": ["A"], "slots": ["stall_margin"], "forms": [
+    "The wing is {stall_margin} below its stall angle.",
+    "The stall margin is {stall_margin}.",
+    "The wing has {stall_margin} of margin to the stall.",
+    "Margin to the stall: {stall_margin}.",
+    "The angle of attack sits {stall_margin} short of the stall angle.",
+    "It has {stall_margin} in hand before the stall.",
+    "Stall margin: {stall_margin}.",
+    "The wing can take {stall_margin} more angle of attack before it stalls.",
+    "The margin to the stall angle is {stall_margin}.",
+    "Before the stall there is {stall_margin} left."
+  ] },
+  "g_q": { "kind": "vqa_q", "families": ["A"], "slots": [], "forms": [
+    "What g-load is the ship pulling?",
+    "How many g is the ship under?",
+    "What is the load factor right now?",
+    "How hard is the ship pulling?",
+    "What is the current g-load?",
+    "How much g does the pilot feel?",
+    "What load factor is the airframe under?",
+    "Give the g-load.",
+    "How many g are acting on the ship?",
+    "What is the normal load on the ship?"
+  ] },
+  "g_a": { "kind": "vqa_a", "families": ["A"], "slots": ["g"], "forms": [
+    "The ship is pulling {g}.",
+    "The g-load is {g}.",
+    "The load factor is {g}.",
+    "It is loaded to {g}.",
+    "Current load: {g}.",
+    "The pilot feels {g}.",
+    "The airframe carries {g}.",
+    "G-load: {g}.",
+    "It pulls {g}.",
+    "The normal load is {g}."
+  ] },
+  "band_q": { "kind": "vqa_q", "families": ["A"], "slots": [], "forms": [
+    "Is the airspeed in the normal band?",
+    "How does the airspeed compare with the normal band?",
+    "Is the ship flying too slow, normal or too fast?",
+    "Which airspeed band is the ship in?",
+    "Is the speed within limits?",
+    "Is the ship below, inside or above its speed band?",
+    "How is the airspeed relative to the band?",
+    "Is the airspeed normal?",
+    "Where does the airspeed sit against the limits?",
+    "Is the ship slow, normal or overspeed?"
+  ] },
+  "band_a": { "kind": "vqa_a", "families": ["A"], "slots": ["band"], "forms": [
+    "The airspeed is {band}.",
+    "The ship flies {band}.",
+    "Its speed is {band}.",
+    "Airspeed: {band}.",
+    "The speed sits {band}.",
+    "It is flying {band}.",
+    "The airspeed of the ship is {band}.",
+    "Right now the airspeed is {band}.",
+    "Speed-wise, the ship is {band}.",
+    "The airspeed lies {band}."
+  ] }
+}
