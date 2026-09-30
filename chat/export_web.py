@@ -71,7 +71,8 @@ def build(src_dir, cfg, dtype, work):
     shared = ['shared_embeddings=true'] if cfg.get('tie_word_embeddings', cfg.get('tie_embedding', False)) else []
     cmd = [sys.executable, '-m', 'onnxruntime_genai.models.builder', '-i', str(src_dir), '-o', str(out), '-p', precision, '-e', ep,
            '-c', str(Path(work) / 'cache'), '--extra_options', *extra, *shared]
-    subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL)
+    # the source is a local folder: offline, so the builder never blocks on (rate-limited, unauthenticated) Hub requests
+    subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, env={**os.environ, 'HF_HUB_OFFLINE': '1', 'TRANSFORMERS_OFFLINE': '1'})
     return out / 'model.onnx'
 
 def export(src, out, dtypes=('q4f16', 'q4'), ctx=4096):
