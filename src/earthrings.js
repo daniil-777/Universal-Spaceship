@@ -67,7 +67,7 @@ const DEBUG_TINTS = [0xff0000, 0x0080ff, 0x00c000, 0xffd000, 0xffffff];
 const ZEROS = new Map();
 const zeros = (n) => { if (!ZEROS.has(n)) ZEROS.set(n, new Uint8Array(n)); return ZEROS.get(n); };
 
-export function createEarthRings(scene, renderer, { loader = createTileLoader({ maxInFlight: 24, pin: (url) => tileLevelOf(url) <= 8 }) } = {}) {
+export function createEarthRings(scene, renderer, { wantedUrls = new Set(), loader = createTileLoader({ maxInFlight: 24, pin: (url) => tileLevelOf(url) <= 8, keepIf: (url) => wantedUrls.has(url) }) } = {}) {
   const uploads = [], dst = new THREE.Vector2(), cpu = new Map(), _p = [0, 0, 0], _u = [0, 0, 0];
   const zero = new THREE.DataTexture(zeros(T * T * 4), T, T, THREE.RGBAFormat); zero.needsUpdate = true;
   let frame = null, scratch = null, retryT = 0, debugTint = false;
@@ -115,6 +115,17 @@ export function createEarthRings(scene, renderer, { loader = createTileLoader({ 
     }
     pos.needsUpdate = true; up.needsUpdate = true;
   }
+  // Every used ring's current colour and height tile URLs, so the loader's cache never evicts a tile another ring
+  // still wants (a shared coarse Terrarium height tile, read by several rings at once). Rebuilt only here, from every
+  // ring, whenever a ring is placed or re-placed — never per frame. Bounded by RING_COUNT * (RING_TILES^2 + HEIGHT_TILES^2).
+  function rebuildWanted() {
+    wantedUrls.clear();
+    for (const q of rings) {
+      if (!q.win) continue;
+      for (let s = 0; s < q.want.length; s++) if (q.want[s]) wantedUrls.add(tileUrl(sourceForLevel(q.level), q.level, q.tile[s].x, q.tile[s].y));
+      for (let s = 0; s < q.hwant.length; s++) if (q.hwant[s]) wantedUrls.add(tileUrl(HEIGHT_SOURCE, q.hwin.level, q.htile[s].x, q.htile[s].y));
+    }
+  }
   function place(r, level, lat, lon) {
     const win = ringWindow(lon, lat, level);
     if (r.level === level && r.win && r.win.x0 === win.x0 && r.win.y0 === win.y0) return;
@@ -144,6 +155,7 @@ export function createEarthRings(scene, renderer, { loader = createTileLoader({ 
       r.hfail[t.slot] = '';
       requestHeight(r, t);
     }
+    rebuildWanted();
   }
   function requestColour(r, t) {
     const level = r.level; r.pend[t.slot] = t.key;

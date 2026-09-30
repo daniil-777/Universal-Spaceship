@@ -2,9 +2,10 @@
 // `maxInFlight` requests overall and `perHost` per host, the lowest priority number first, requests nobody wants any
 // more dropped before they start (prune), a failed tile retried only after `retryMs`, Esri's "no imagery here"
 // placeholder recognised by its size and SHA-1 and never fetched again, `pin(url)` tiles cached for good in their own
-// map (GIBS sends `Cache-Control: no-store`, so its low levels must not be re-fetched), a second request for a URL
-// already queued or in flight joins the first instead of firing a second fetch, and suspend() / resume() so a closed
-// view stops fetching.
+// map (GIBS sends `Cache-Control: no-store`, so its low levels must not be re-fetched), `keepIf(url)` protects a tile
+// still in use by the caller from LRU eviction even past `keep` (a shared height tile at the loader's size cap does not
+// get evicted out from under a ring that still wants it), a second request for a URL already queued or in flight joins
+// the first instead of firing a second fetch, and suspend() / resume() so a closed view stops fetching.
 // A job is { url, prio, raw, wanted(), done(bitmap | null, why) }, why = 'ok' | 'failed' | 'blank' | 'dropped'.
 import { ESRI_BLANK } from './earthtiles.js';
 
@@ -36,8 +37,10 @@ const sha1Hex = async (buf) => (globalThis.crypto && crypto.subtle ? hex(await c
 const hostOf = (url) => { try { return new URL(url).host; } catch (e) { return url; } };
 
 export function createTileLoader({ maxInFlight = 8, perHost = { default: 6, 'gibs.earthdata.nasa.gov': 10, 'tiles.maps.eox.at': 10 },
-  pin = () => false, keep = 512, retryMs = 30000, timeoutMs = 15000, blank = ESRI_BLANK, fetchImpl = (url, opts) => fetch(url, opts),
+  pin = () => false, keepIf = () => false, keep = 256, retryMs = 30000, timeoutMs = 15000, blank = ESRI_BLANK, fetchImpl = (url, opts) => fetch(url, opts),
   decode = (blob, opts) => createImageBitmap(blob, opts), hashHex = sha1Hex, now = () => performance.now() } = {}) {
+  // pin(url) is bounded on its own: z ≤ 8 is at most Σ 4^z (z = 0..8) ≈ 87k URLs per source (GIBS colour, Terrarium
+  // height), and a real session's rings only ever touch a few hundred of them.
   const cache = new Map(), pinned = new Map(), failed = new Map(), warned = new Set(), queue = [], pending = new Map(), recent = [];
   const stats = { requested: 0, loaded: 0, failed: 0, blank: 0, deduped: 0 };
   const hostLoad = new Map();
@@ -45,7 +48,9 @@ export function createTileLoader({ maxInFlight = 8, perHost = { default: 6, 'gib
   const isBlank = async (buf) => !!blank && buf.byteLength === blank.bytes && (await hashHex(buf)) === blank.sha1;
   const remember = (url, bmp) => {
     if (pin(url)) { pinned.set(url, bmp); return; }
-    cache.delete(url); cache.set(url, bmp); if (cache.size > keep) cache.delete(cache.keys().next().value);
+    cache.delete(url); cache.set(url, bmp);
+    // evict the oldest entry that keepIf does not claim; if every cached entry is claimed, keep is exceeded for now
+    if (cache.size > keep) for (const k of cache.keys()) if (!keepIf(k)) { cache.delete(k); break; }
   };
   const note = (bad) => { recent.push(bad ? 1 : 0); if (recent.length > 24) recent.shift(); };
   const hostCap = (host) => perHost[host] ?? perHost.default ?? Infinity;
@@ -95,7 +100,7 @@ export function createTileLoader({ maxInFlight = 8, perHost = { default: 6, 'gib
       if (t !== undefined && now() - t < retryMs) { job.done(null, t === Infinity ? 'blank' : 'failed'); return; }
       const entry = pending.get(job.url);
       if (entry) { entry.jobs.push(job); entry.prio = Math.min(entry.prio, job.prio); stats.deduped++; return; }
-      stats.requested++;
+      stats.requested++; // requested counts only the fetch that started it; an attached duplicate is deduped instead
       const fresh = { url: job.url, prio: job.prio, raw: job.raw, jobs: [job] };
       pending.set(job.url, fresh); queue.push(fresh); pump();
     },

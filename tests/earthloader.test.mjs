@@ -123,3 +123,53 @@ test('without crypto.subtle, blank detection falls back to sha1Js', async () => 
     assert.deepEqual(log[0], ['a', null, 'blank']);
   } finally { Object.defineProperty(globalThis, 'crypto', restore); }
 });
+
+test('keepIf holds a wanted URL through repeated evictions, and releases it once it is no longer wanted', async () => {
+  const net = fakeNet(), held = new Set(['wanted']);
+  const L = createTileLoader({ keep: 2, keepIf: (url) => held.has(url), fetchImpl: net.fetchImpl, decode }), log = [];
+  L.request(job('wanted', 0, log)); net.reply('wanted'); await settle();
+  for (let i = 0; i < 12; i++) {
+    const u = `x${i}`; L.request(job(u, 0, log)); net.reply(u); await settle();
+    assert.ok(L.peek('wanted'), `wanted still cached after eviction ${i}`);
+  }
+  held.delete('wanted');
+  L.request(job('x12', 0, log)); net.reply('x12'); await settle();
+  assert.equal(L.peek('wanted'), null, 'released once no longer held by keepIf');
+});
+
+test('prune drops every unwanted job on a shared entry exactly once, and keeps the entry queued for the wanted job', async () => {
+  const net = fakeNet(), L = createTileLoader({ maxInFlight: 1, fetchImpl: net.fetchImpl, decode }), log = [];
+  L.request(job('busy', 0, log));   // occupies the only in-flight slot, so 'a' below stays queued
+  let w1 = true, w2 = true, w3 = true;
+  L.request(job('a', 1, log, () => w1)); L.request(job('a', 2, log, () => w2)); L.request(job('a', 3, log, () => w3));
+  assert.equal(L.queued, 1, 'one shared queue entry for the three attached jobs'); assert.equal(L.stats.deduped, 2);
+  w1 = false; w2 = false; L.prune();
+  const dropped = log.filter((l) => l[0] === 'a' && l[2] === 'dropped');
+  assert.equal(dropped.length, 2, 'each unwanted job dropped exactly once'); assert.equal(L.queued, 1, 'the entry stays queued for the still-wanted job');
+  net.reply('busy'); await settle(); net.reply('a'); await settle();
+  const finishedA = log.filter((l) => l[0] === 'a');
+  assert.equal(finishedA.length, 3, 'no job forgotten: 2 dropped earlier plus 1 ok now'); assert.deepEqual(finishedA[2], ['a', 'bitmap', 'ok']);
+  assert.equal(L.inFlight, 0, 'no in-flight count leak');
+});
+
+test('suspend drops every job on a shared queued entry, once each, with no in-flight count leak', async () => {
+  const net = fakeNet(), L = createTileLoader({ maxInFlight: 1, fetchImpl: net.fetchImpl, decode }), log = [];
+  L.request(job('busy', 0, log));
+  L.request(job('b', 1, log)); L.request(job('b', 2, log)); L.request(job('b', 3, log));
+  assert.equal(L.queued, 1); assert.equal(L.stats.deduped, 2);
+  L.suspend();
+  const dropped = log.filter((l) => l[0] === 'b' && l[2] === 'dropped');
+  assert.equal(dropped.length, 3, 'all three jobs dropped, once each'); assert.equal(L.queued, 0);
+  net.reply('busy'); await settle();
+  assert.deepEqual(log.find((l) => l[0] === 'busy'), ['busy', null, 'dropped'], 'the pre-suspend in-flight job resolves discarded');
+  assert.equal(L.inFlight, 0, 'no in-flight count leak');
+});
+
+test('cross-host starvation: a saturated host does not block a lower-priority job on a free host', async () => {
+  const net = fakeNet(), L = createTileLoader({ maxInFlight: 8, perHost: { default: 1 }, fetchImpl: net.fetchImpl, decode }), log = [];
+  L.request(job('https://a.example/busy', 5, log));     // host A: takes its one slot
+  L.request(job('https://a.example/urgent', 0, log));   // host A: higher priority (lower number), but A is saturated
+  L.request(job('https://b.example/1', 9, log));         // host B: free; lower priority than 'urgent', runs anyway
+  assert.deepEqual(net.calls, ['https://a.example/busy', 'https://b.example/1'], 'B is not starved by a higher-priority job stuck on a saturated host');
+  assert.equal(L.inFlight, 2); assert.equal(L.queued, 1, 'only the A-urgent job is left queued');
+});
