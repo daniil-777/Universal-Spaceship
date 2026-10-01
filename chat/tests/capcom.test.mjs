@@ -14,11 +14,11 @@ const KB = { retrieval: { min_score: 0.5 }, facts: [
   { id: 'HOWTO-001', title: 'Landing', text: 'Open ?scenario=landing to watch the airliner land.', keywords: ['landing', 'airliner'] }] };
 
 // a mock tf: generate emits `gen(i)` token ids one per tick until max_new_tokens, eos (7) or the stopping criteria
-function mockTf({ fail = [], zeros = [], gen = (i) => 10 + i, eosAt = null, tick = 2 } = {}) {
+function mockTf({ fail = [], zeros = [], gen = (i) => 10 + i, eosAt = null, tick = 2, config = {} } = {}) {
   const tok = (text) => { const n = text.length % 50 + 5; return { input_ids: { dims: [1, n], data: new BigInt64Array(n).fill(3n) }, attention_mask: {} }; };
   tok.apply_chat_template = (msgs) => JSON.stringify(msgs); tok.decode = (ids) => ids.filter((x) => x !== 7).map((x) => `t${x}`).join(' ');
   const calls = [];
-  return { calls, env: {}, AutoTokenizer: { from_pretrained: async () => tok },
+  return { calls, env: {}, AutoTokenizer: { from_pretrained: async () => tok }, AutoConfig: { from_pretrained: async () => config },
     AutoModelForCausalLM: { from_pretrained: async (id, { device, dtype }) => {
       calls.push(`${device}/${dtype}`);
       if (fail.includes(`${device}/${dtype}`)) throw new Error(`no ${device}/${dtype}`);
@@ -44,14 +44,17 @@ const withGpu = async (f16, fn) => {
   try { return await fn(); } finally { if (d) Object.defineProperty(globalThis.navigator, 'gpu', d); else delete globalThis.navigator.gpu; }
 };
 
-test('ladder: shader-f16 → q4f16, no f16 → q4, no WebGPU → WASM; explicit device / dtype', () => {
-  assert.deepEqual(ladder('auto', null, { f16: true }), [['webgpu', 'q4f16'], ['webgpu', 'q4'], ['wasm', 'q4']]);
-  assert.deepEqual(ladder('auto', null, { f16: false }), [['webgpu', 'q4'], ['wasm', 'q4']]);
-  assert.deepEqual(ladder('auto', null, null), [['wasm', 'q4']]);
+test('ladder: shader-f16 → q4f16 → q4 → cards; WASM only when the folder declares it; explicit device / dtype', () => {
+  assert.deepEqual(ladder('auto', null, { f16: true }), [['webgpu', 'q4f16'], ['webgpu', 'q4']]);
+  assert.deepEqual(ladder('auto', null, { f16: false }), [['webgpu', 'q4']]);
+  assert.deepEqual(ladder('auto', null, null), []);
+  assert.deepEqual(ladder('auto', null, { f16: true }, 'q4'), [['webgpu', 'q4f16'], ['webgpu', 'q4'], ['wasm', 'q4']]);
+  assert.deepEqual(ladder('auto', null, null, 'q4'), [['wasm', 'q4']]);
+  assert.deepEqual(ladder('none', null, { f16: true }, 'q4'), []);
   assert.deepEqual(ladder('webgpu', null, { f16: true }), [['webgpu', 'q4f16']]);
   assert.deepEqual(ladder('webgpu', 'q4', { f16: true }), [['webgpu', 'q4']]);
   assert.deepEqual(ladder('wasm', null, { f16: true }), [['wasm', 'q4']]);
-  assert.deepEqual(ladder('auto', 'q4f16', null), [['wasm', 'q4']]);
+  assert.deepEqual(ladder('auto', 'q4f16', null), []);
 });
 test('modelSource: same origin → root-relative local path; other origin → remoteHost; else a Hub id', () => {
   const b = 'http://127.0.0.1:5/chat/web/capcom-worker.js';
@@ -66,17 +69,19 @@ test('retrieval-only cards: the top note, else a deflection that leads to an uns
   assert.deepEqual(K.card('how does the ppo policy learn').notes[0], 'RL-001');
   assert.equal(retrievalAnswer([], K.bm.byId, { scene: 'belt', seen: ['comets'] }), "That's not in my flight notes. Want to see Earth orbit next?");
 });
-test('every rung fails → notes only; ask answers with the top note', async () => {
-  const tf = mockTf({ fail: ['wasm/q4'] }), c = await createCapcom({ tf, modelId: 'm', kb: KB, device: 'auto' });
-  assert.equal(c.info.ready, false); assert.match(c.info.error, /wasm\/q4: no wasm\/q4/);
+test('no WebGPU and no declared WASM graph → retrieval-only cards; ask answers with the top note', async () => {
+  const tf = mockTf(), c = await createCapcom({ tf, modelId: 'm', kb: KB, device: 'auto' });
+  assert.deepEqual(tf.calls, []); assert.equal(c.info.ready, false); assert.equal(c.info.error, 'no runtime');
   const r = await c.ask('what speed does the station orbit at?');
   assert.equal(r.fallback, true); assert.equal(r.text, KB.facts[1].text); assert.deepEqual(r.notes.slice(0, 1), ['ORBIT-001']);
 });
-test('auto walks the ladder: q4f16 load error → q4 NaN warm-up (all <|pad|>) → WASM q4', async () => withGpu(true, async () => {
-  const tf = mockTf({ fail: ['webgpu/q4f16'], zeros: ['webgpu/q4'] }), c = await createCapcom({ tf, modelId: 'm', kb: KB });
+test('auto walks the ladder: q4f16 load error → q4 NaN warm-up (all <|pad|>) → the declared WASM q4', async () => withGpu(true, async () => {
+  const tf = mockTf({ fail: ['webgpu/q4f16'], zeros: ['webgpu/q4'], config: { capcom: { wasm: 'q4' } } }), c = await createCapcom({ tf, modelId: 'm', kb: KB });
   assert.deepEqual(tf.calls, ['webgpu/q4f16', 'webgpu/q4', 'wasm/q4']);
   assert.equal(c.info.ready, true); assert.equal(c.info.device, 'wasm');
   assert.deepEqual(c.info.attempts.map((a) => a.ok), [false, false, true]); assert.match(c.info.attempts[1].error, /degenerate/);
+  const t2 = mockTf({ fail: ['webgpu/q4f16', 'webgpu/q4'] }), c2 = await createCapcom({ tf: t2, modelId: 'm', kb: KB });
+  assert.deepEqual(t2.calls, ['webgpu/q4f16', 'webgpu/q4']); assert.equal(c2.info.ready, false); assert.equal((await c2.ask('ppo policy learn')).fallback, true);
 }));
 test('ask: streams, stops at eos, reports notes / TTFT / tok/s; history + state reach the prompt', async () => {
   const tf = mockTf({ eosAt: 5 }), c = await createCapcom({ tf, modelId: 'm', kb: KB, device: 'wasm' });

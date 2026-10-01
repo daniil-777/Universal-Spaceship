@@ -1,9 +1,10 @@
 // chat/web/capcom.js — CAPCOM in the page (spec §7, R7): transformers.js 4.3 (injected as `tf`), BM25 notes from kb.json (retriever.js,
 // kb.retrieval.min_score), the prompt contract (prompt.js) rendered by the tokenizer's chat template, greedy decoding with repetition
 // penalty 1.1 until the end-of-turn token, token streaming, and a serial request queue where a new ask cancels the running one.
-// Runtime ladder: WebGPU + shader-f16 → q4f16; WebGPU without it → q4; no WebGPU → WASM q4 ('auto' walks it and falls through on a
-// failed load or a degenerate warm-up). If every rung fails, info.ready is false and ask() answers from retrieval alone (the top note,
-// or a deflection that leads to an unseen highlight) so the page can still show answer cards.
+// Runtime ladder (ruling 2026-10-01): WebGPU + shader-f16 → q4f16; WebGPU → q4; then retrieval-only answer cards ('auto' falls through on
+// a failed load or a degenerate warm-up). A WASM rung exists only when the model folder declares a WASM-safe graph (stock LFM2 int4
+// graphs fail or crawl on ORT-web WASM). Without a runtime, info.ready is false and ask() answers from retrieval alone (the top note,
+// or a deflection that leads to an unseen highlight).
 import { BM25, TOP_K, MIN_SCORE } from './retriever.js';
 import { messages, prevUser, unseen } from './prompt.js';
 export const REPETITION_PENALTY = 1.1, MAX_NEW_TOKENS = 120;
@@ -22,13 +23,15 @@ export async function probeGpu() {
   } catch { return null; }
 }
 
-// the [device, dtype] rungs to try, in order
-export function ladder(device = 'auto', dtype = null, gpu = null) {
+// the [device, dtype] rungs to try, in order. 'auto': WebGPU q4f16 (shader-f16) → WebGPU q4 → the folder's WASM-safe graph only when its
+// config.json declares one ({"capcom": {"wasm": "q4"}}, chat/web/tools/wasm_rewrite.py) → none (retrieval-only cards). 'none': cards only.
+export function ladder(device = 'auto', dtype = null, gpu = null, wasm = null) {
   const best = gpu && gpu.f16 ? 'q4f16' : 'q4';
+  if (device === 'none') return [];
   if (device === 'webgpu') return [['webgpu', dtype || best]];
-  if (device !== 'auto') return [[device, dtype || 'q4']]; // 'wasm', or 'cpu' under Node
+  if (device !== 'auto') return [[device, dtype || wasm || 'q4']]; // 'wasm' (explicit), or 'cpu' under Node
   const l = gpu ? (dtype ? [['webgpu', dtype]] : best === 'q4f16' ? [['webgpu', 'q4f16'], ['webgpu', 'q4']] : [['webgpu', 'q4']]) : [];
-  return [...l, ['wasm', dtype && dtype !== 'q4f16' ? dtype : 'q4']];
+  return wasm ? [...l, ['wasm', wasm]] : l;
 }
 
 // the answer without a model: the top note, or a deflection that leads to the first unseen highlight
@@ -76,7 +79,10 @@ export async function createCapcom({ tf, modelId, localModelPath = null, remoteH
     }
   };
   const t0 = now();
-  for (const [dev, dt] of ladder(device, dtype, gpu)) {
+  let wasm = null; // the folder's own declaration of a WASM-safe graph (stock exports have none: GatherBlockQuantized, slow MatMulNBits)
+  if (device === 'auto') try { wasm = ((await tf.AutoConfig.from_pretrained(modelId)) || {}).capcom?.wasm || null; } catch { /* no config: no WASM rung */ }
+  info.wasm = wasm;
+  for (const [dev, dt] of ladder(device, dtype, gpu, wasm)) {
     const t1 = now(); files = {}; say({ status: 'load', device: dev, dtype: dt });
     try {
       tok ||= await tf.AutoTokenizer.from_pretrained(modelId, { progress_callback: progress });

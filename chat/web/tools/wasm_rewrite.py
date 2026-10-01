@@ -3,14 +3,15 @@ WASM build has no GatherBlockQuantized kernel ("Could not find an implementation
 tied-embedding LFM2 graph uses (ours and onnx-community's). Replace it with standard ops on the same packed int4 table (no new bytes):
   x = Cast(Gather(data[V, D/2] uint8, ids), int32); hi = Div(x, 16); lo = x - 16*hi; q = interleave(lo, hi) → [.., D/bs, bs]
   emb = Reshape((Cast(q, float) - zp) * Gather(scales[V, D/bs], ids)[..., None], [.., D])  (zp: the zero_points input or 2^(bits-1))
-Writes <dst>/onnx/model_<dtype>.onnx and links the tokenizer/config files; --check compares logits with the original on ORT CPU.
+Writes <dst>/onnx/model_<dtype>.onnx, links the tokenizer files and writes config.json with {"capcom": {"wasm": "<dtype>"}} — the
+declaration capcom.js's 'auto' ladder needs to offer a WASM rung; --check compares logits with the original on ORT CPU.
 --accuracy-level N also sets every MatMulNBits accuracy_level (the builder writes 4 = int8-activation compute; see wasm_speed.mjs).
 --dq-matmul: the WASM fast path. ORT-web 1.30 WASM has no SIMD int4 GEMM: MatMulNBits dequantizes its weight on every call (~25x slower
 than the fp32 MatMul). Each MatMulNBits (4 bit, no zp) becomes DequantizeLinear(UINT4 [N, K] = the same bytes, scales, zp 8, axis 1,
 block) → Transpose → MatMul, and the tied embedding Gathers rows of the lm_head's dequantized table; loaded with the session config
 session.disable_quant_qdq=1 ORT constant-folds all of it to fp32 once (download unchanged, ~4 bytes/param of WASM heap).
   python chat/web/tools/wasm_rewrite.py <src web folder> <dst web folder> [--dtypes q4] [--accuracy-level 0] [--dq-matmul] [--check]"""
-import argparse, os, sys
+import argparse, json, os, sys
 from pathlib import Path
 import numpy as np, onnx
 from onnx import TensorProto, helper, numpy_helper
@@ -112,7 +113,11 @@ if __name__ == '__main__':
     ap.add_argument('--accuracy-level', type=int, default=None); ap.add_argument('--dq-matmul', action='store_true')
     a = ap.parse_args(); s, d = Path(a.src), Path(a.dst); (d / 'onnx').mkdir(parents=True, exist_ok=True)
     for f in s.iterdir():
-        if f.is_file() and not f.name.startswith('._') and not (d / f.name).exists(): os.symlink(f.resolve(), d / f.name)
+        if f.is_file() and not f.name.startswith('._') and f.name != 'config.json' and not (d / f.name).exists(): os.symlink(f.resolve(), d / f.name)
+    # the folder declares its WASM-safe graph: capcom.js's 'auto' ladder offers a WASM rung only then
+    cfg = json.loads((s / 'config.json').read_text()); cfg['capcom'] = {**cfg.get('capcom', {}), 'wasm': a.dtypes.split(',')[0]}
+    if (d / 'config.json').is_symlink(): (d / 'config.json').unlink()
+    (d / 'config.json').write_text(json.dumps(cfg, indent=1))
     for dt in a.dtypes.split(','):
         f = s / 'onnx' / f'model_{dt}.onnx'; m = onnx.load(str(f)); k = dq_matmul(m) if a.dq_matmul else 0; k2 = rewrite(m)
         if a.dq_matmul: print(dt, 'MatMulNBits -> DequantizeLinear+MatMul:', k)
