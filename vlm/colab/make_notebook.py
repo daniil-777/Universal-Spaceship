@@ -22,13 +22,16 @@ It uses the dataset package you uploaded to **My Drive/apv-open-v1/** and, in or
 If Colab disconnects, open the notebook again and **Run all**: finished stages are skipped and training resumes from its
 last Drive checkpoint (in `apv-open-v1/runs/v1/`). The time budgets count across re-runs."""
 
-SETTINGS = """#@title Settings (the defaults are fine) { display-mode: "form" }
-DATA_DIR = '/content/drive/MyDrive/apv-open-v1'   # the uploaded package folder on Google Drive
-TIME_BUDGET_EYE_MIN = 30          # Pilot Eye training minutes (counted across re-runs)
-TIME_BUDGET_NARRATOR_MIN = 180    # Narrator LoRA training minutes (counted across re-runs)
-NARRATOR_EPOCH_ROWS = 400_000     # one stratified epoch (family x task); the time budget usually ends it first
-CHECKPOINT_EVERY_MIN = 15         # a Drive checkpoint every N minutes (a disconnect loses at most this much)
-INCLUDE_FP32_REFERENCE = False    # also zip the 540 MB fp32 parity-reference decoder (the web app never loads it)
+SETTINGS = """#@title Settings (the defaults are fine)
+# DATA_DIR: the uploaded package folder on Google Drive. The time budgets count across re-runs. NARRATOR_EPOCH_ROWS: one
+# stratified epoch (family x task); the time budget usually ends it first. CHECKPOINT_EVERY_MIN: a disconnect loses at most
+# this much. INCLUDE_FP32_REFERENCE: also zip the 540 MB fp32 parity-reference decoder (the web app never loads it).
+DATA_DIR = '/content/drive/MyDrive/apv-open-v1'  #@param {type:"string"}
+TIME_BUDGET_EYE_MIN = 30  #@param {type:"integer"}
+TIME_BUDGET_NARRATOR_MIN = 180  #@param {type:"integer"}
+NARRATOR_EPOCH_ROWS = 400000  #@param {type:"integer"}
+CHECKPOINT_EVERY_MIN = 15  #@param {type:"integer"}
+INCLUDE_FP32_REFERENCE = False  #@param {type:"boolean"}
 
 import os
 DRY_RUN = os.environ.get('APV_DRYRUN') == '1'     # a CPU smoke test of every cell with tiny steps (vlm/colab/dryrun.py)
