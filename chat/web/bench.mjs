@@ -8,7 +8,7 @@
 //                                [--tokens 120] [--prompts <jsonl>] [--isolate] [--parity-tokens 32] [--ref-dtypes q4] [--no-parity]
 //                                [--torch-src <hf dir>]   (adds PyTorch fp32 greedy + teacher-forced agreement: the gold reference)
 //                                [--ref-model-dir <web folder>]   (the ORT CPU reference graph; default: the benched folder)
-//   node chat/web/bench.mjs demo [--device webgpu|wasm] [--model …] [--ask "…"] [--out <png>]   (a demo.html screenshot)
+//   node chat/web/bench.mjs demo [--device webgpu|wasm|none] [--model …] [--asks "q1|q2|…"] [--out <png>]   (a demo.html screenshot)
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -153,7 +153,9 @@ export async function benchRun({ model, name, configs, n, tokens, promptsFile, i
   return report;
 }
 
-export async function benchDemo({ model, device, dtype, ask, out, debug = true }) {
+// the demo panel in one browser: ask each question in turn through the UI (Enter), wait for its debug line, then a tall screenshot
+// (the card is expanded so every exchange shows) and the replies with their TTFT / tok/s
+export async function benchDemo({ model, device, dtype, asks, out, debug = true }) {
   const { chromium } = await import(PW), srv = await startServer({ port: 0 });
   let b = null;
   try {
@@ -162,15 +164,18 @@ export async function benchDemo({ model, device, dtype, ask, out, debug = true }
     page.on('pageerror', (e) => logs.push(`[pageerror] ${e.message}`));
     const qs = new URLSearchParams({ model, device, ...(dtype ? { dtype } : {}), ...(debug ? { debug: '1' } : {}) });
     await page.goto(`http://127.0.0.1:${srv.port}/chat/web/demo.html?${qs}`);
-    const info = await page.evaluate(() => window.capcomDemo.ready);
-    await page.fill('#q', ask); await page.press('#q', 'Enter');
-    const r = await page.evaluate(async () => {
-      for (let i = 0; i < 1200 && !document.querySelector('.meta b'); i++) await new Promise((ok) => setTimeout(ok, 100));
-      return [...document.querySelectorAll('.msg.bot')].at(-1)?.textContent;
-    });
-    await page.waitForTimeout(400); await page.screenshot({ path: out });
+    const info = await page.evaluate(() => window.capcomDemo.ready), replies = [];
+    for (const [i, ask] of asks.entries()) {
+      await page.fill('#q', ask); await page.press('#q', 'Enter');
+      replies.push(await page.evaluate(async (n) => {
+        for (let k = 0; k < 1200 && document.querySelectorAll('.meta b').length <= n; k++) await new Promise((ok) => setTimeout(ok, 100));
+        return { reply: [...document.querySelectorAll('.msg.bot')].at(-1)?.textContent, meta: [...document.querySelectorAll('.meta')].at(-1)?.textContent };
+      }, i));
+    }
+    await page.addStyleTag({ content: 'body{overflow:visible;height:auto;padding:24px 0}.card{height:auto!important}#log{overflow:visible}' });
+    await page.waitForTimeout(500); await page.screenshot({ path: out, fullPage: true });
     if (logs.length) console.log(logs.slice(0, 20).join('\n'));
-    return { info: { device: info.device, dtype: info.dtype, ready: info.ready, loadMs: info.loadMs, error: info.error }, answer: r, out };
+    return { info: { device: info.device, dtype: info.dtype, ready: info.ready, loadMs: info.loadMs, error: info.error }, replies: replies.map((r, i) => ({ ask: asks[i], ...r })), out };
   } finally { if (b) await b.browser.close(); await srv.close(); }
 }
 
@@ -182,7 +187,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(fs.realpathSync(process
       doParity: !process.argv.includes('--no-parity'), torchSrc: arg('torch-src', null), refModelDir: arg('ref-model-dir', null) });
   } else if (cmd === 'demo') {
     const device = arg('device', 'webgpu');
-    console.log(JSON.stringify(await benchDemo({ model, device, dtype: arg('dtype', null), ask: arg('ask', 'How does it learn to dodge asteroids?'), out: arg('out', `${LOGS}/demo_${device}.png`) })));
+    console.log(JSON.stringify(await benchDemo({ model, device, dtype: arg('dtype', null), asks: arg('asks', 'How does it learn to dodge asteroids?').split('|'), out: arg('out', `${LOGS}/demo_${device}.png`) })));
   } else { console.log('usage: bench.mjs run|demo [--model …] (see the header)'); process.exit(2); }
   process.exit(0);
 }
