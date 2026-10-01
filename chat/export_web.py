@@ -18,7 +18,7 @@ SUFFIX = {'q4f16': '_q4f16', 'q4': '_q4', 'fp16': '_fp16'}
 # int4 accuracy level: 4 lets MatMulNBits quantize activations to int8 (fast; on WebGPU it may cost quality), 1 keeps them in float.
 # onnxruntime-genai 0.17.1 reads the extra options 'block_size' and 'accuracy_level' (int4_-prefixed keys are silently ignored).
 BUILD = {'q4f16': ('int4', 'webgpu', ['block_size=32']), 'q4': ('int4', 'cpu', ['block_size=32']), 'fp16': ('fp16', 'webgpu', [])}
-ACC = {'q4f16': 4, 'q4': 4}
+ACC = {'q4f16': 1, 'q4': 4}  # browser A/B 2026-10-01 (pilot, M3 Pro WebGPU): q4f16 level 1 = same agreement (0.897 vs 0.902), +7 % tok/s, faster load
 TOKENIZER_FILES = ('tokenizer.json', 'tokenizer_config.json', 'special_tokens_map.json', 'vocab.json', 'merges.txt')
 
 def rename(g, old, new):

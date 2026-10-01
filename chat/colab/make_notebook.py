@@ -60,7 +60,7 @@ SMOKE = int(os.environ.get('CAPCOM_SMOKE', '0'))              # 1 = a few steps 
 DRIVE_DIR = os.environ.get('CAPCOM_DRIVE', '/content/drive/MyDrive/capcom')
 DATA_ZIP = os.environ.get('CAPCOM_DATA_ZIP', 'capcom-data-v1.zip')
 RUN_NAME = os.environ.get('CAPCOM_RUN', 'run1-smoke' if SMOKE else 'run1')
-EXPORT_ACC = int(os.environ.get('CAPCOM_EXPORT_ACC', '4'))    # S7 int4 accuracy level: 4 = int8 activations (fast), 1 = float (A/B pending)
+EXPORT_ACC = int(os.environ['CAPCOM_EXPORT_ACC']) if os.environ.get('CAPCOM_EXPORT_ACC') else None  # S7 int4 accuracy level; None = per dtype (q4f16 1, q4 4: browser A/B)
 HF_PUSH = False                                               # push the web model folder to a private Hub repo (Colab secret HF_TOKEN)
 HF_REPO = 'your-hf-name/capcom-' + STUDENT
 LOCAL = os.environ.get('CAPCOM_LOCAL') == '1'                 # local run (chat/tests/nb_e2e.py): no Colab, no pip, paths under CAPCOM_ROOT
