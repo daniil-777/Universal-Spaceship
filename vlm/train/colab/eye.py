@@ -54,10 +54,12 @@ def train_eye(data, out, plan, budget_min=30, max_epochs=40, ckpt_min=5, size='1
                         'freeze_backbone': False, 'backbone': BACKBONE, 'data': os.path.basename(str(data).rstrip('/'))}, f'{out}/model.pt')
         log(f'Pilot Eye epoch {S["epoch"]} step {S["step"]}: val loss {vl if vl is None else round(vl, 4)} (best {S["best"]:.4f} at {S["best_step"]}); {S["elapsed"] / 60:.1f} min')
     to = lambda d: {k: v.to(dev, non_blocking=True) for k, v in d.items()}; m.train(); t_ck = tick = time.time(); stop = None; losses = []; mark = None
+    # one loader for every epoch (its workers persist); the sampler draws a fresh class-balanced epoch each pass
+    sampler = WeightedRandomSampler([r['weight'] for r in ds.rows], num_samples=len(ds), replacement=True, generator=torch.Generator().manual_seed(seed + S['epoch']))
+    dl = DataLoader(ds, batch_size=bs, sampler=sampler, drop_last=True, **kw)
     while stop is None:
-        sampler = WeightedRandomSampler([r['weight'] for r in ds.rows], num_samples=len(ds), replacement=True, generator=torch.Generator().manual_seed(seed + S['epoch']))
         t_ep = time.time()
-        for f, dt, T, M, _ in DataLoader(ds, batch_size=bs, sampler=sampler, drop_last=True, **kw):
+        for f, dt, T, M, _ in dl:
             # size the schedule to the budget once the speed is known (steps 10-30 of this session, past the warm-up costs)
             if S['total'] is None and mark is None and S['step'] >= 10: mark = (S['step'], S['elapsed'])
             if S['total'] is None and mark and S['step'] - mark[0] >= 20:
