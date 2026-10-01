@@ -279,15 +279,16 @@ class Run:
         return None
 
     def finish(self, stage, **info):
-        """Mirror work/<stage>/model to Drive, drop the stage's Drive checkpoints, then write DONE.json (last: a partial copy never counts)."""
+        """Mirror work/<stage>/model to Drive, write DONE.json (after the copy: a partial copy never counts), then drop the stage's Drive
+        checkpoints (after DONE: a disconnect in between never loses both the checkpoint and the marker)."""
         src = self.work / stage / 'model'; info = {'stage': stage, 'finished': time.strftime('%Y-%m-%d %H:%M:%S'), 'has_model': src.exists(), **info}
         if self.drive:
             d = self.ddir(stage); d.mkdir(parents=True, exist_ok=True)
             if src.exists(): shutil.rmtree(d / 'model', ignore_errors=True); copy_tree(src, d / 'model')
             for f in self.dir(stage).glob('*.json*'):  # small artefacts (pairs.jsonl, ...)
                 if f.name != 'DONE.json' and not f.name.startswith('._'): shutil.copy(f, d / f.name)
-            shutil.rmtree(d / 'ckpt', ignore_errors=True)
             (d / 'DONE.json').write_text(json.dumps(info, indent=1))
+            shutil.rmtree(d / 'ckpt', ignore_errors=True)
         self.dir(stage).joinpath('DONE.json').write_text(json.dumps(info, indent=1))
         log(f'{stage} done', json.dumps({k: v for k, v in info.items() if k not in ('stage', 'finished')})[:300])
         return info
