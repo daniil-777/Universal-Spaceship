@@ -152,6 +152,10 @@ export async function pack({ dataset, out, maxGb = 8, shardMb = 500, quality = 9
   man.total_bytes = [...sums.keys()].reduce((a, f) => a + fs.statSync(path.join(out, f)).size, 0);
   write('manifest.json', JSON.stringify(man, null, 1));
   fs.writeFileSync(path.join(out, 'SHA256SUMS'), [...sums].sort().map(([f, h]) => `${h}  ${f}`).join('\n') + '\n');
+  // macOS writes an AppleDouble ._<name> beside every file on exFAT (the provenance xattr): left in, a browser upload copies
+  // them all to Drive, so they go (nothing in the package lists or reads them)
+  const dropDouble = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const p = path.join(d, e.name); if (e.name.startsWith('._')) fs.rmSync(p, { force: true }); else if (e.isDirectory()) dropDouble(p); } };
+  dropDouble(out);
   if (man.total_bytes > maxBytes) throw new Error(`the package is ${(man.total_bytes / 1e9).toFixed(2)} GB, over the ${maxGb} GB cap`);
   log(`packed ${recs.length} records into ${out}: ${(man.total_bytes / 1e9).toFixed(2)} GB, ${shards.length} shards, JPEG q${q}, id ${id}`);
   return man;

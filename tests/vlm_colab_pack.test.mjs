@@ -67,6 +67,8 @@ test('pack: shards with JPEG frames and records, shard-relative rows, cache part
   assert.ok(joined.equals(fs.readFileSync(path.join(root, 'datasets/tiny/cache/pilot_eye_train.u8'))), 'the parts join back to the cache');
   const sums = fs.readFileSync(path.join(out, 'SHA256SUMS'), 'utf8').trim().split('\n').map((l) => l.split(/\s+/));
   for (const [h, f] of sums) assert.equal(sha(fs.readFileSync(path.join(out, f))), h, f);
+  const doubles = []; const walk = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { if (e.name.startsWith('._')) doubles.push(e.name); else if (e.isDirectory()) walk(path.join(d, e.name)); } }; walk(out);
+  assert.deepEqual(doubles, [], 'no AppleDouble sidecars left for the upload');
   for (const f of ['manifest.json', 'README.md', 'code/vlm/train/colab/pack_io.py', 'code/processor/tokenizer.json', 'code/baselines/g2_parity.json', 'code/package.json', 'splits.json']) assert.ok(fs.existsSync(path.join(out, f)), f);
   assert.deepEqual(JSON.parse(fs.readFileSync(path.join(out, 'code/baselines/g2_parity.json'), 'utf8')).c, { q4f16: { ours: 0.63, published: 0.63 } });
   assert.ok(man.files.includes('narrator/train.jsonl') && !man.files.some((f) => f.startsWith('shards/')));
