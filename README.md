@@ -346,19 +346,17 @@ Two pretrained pilots fly the page. The belt pilot (`model/policy.json`, run 24)
 headless browser training, several runs chained (torque-command runs failed to learn dodging at all — a zero-action
 baseline survived as long — so the action space became rate commands; later runs added soft sensor beams, then mixed
 asteroid / mountain / city worlds, bird flocks, the Zhangjiajie pillars, and last 8 M steps with the edge guard). The
-atmospheric pilot (`model/policy_atmo.json`, run 20, 59 M steps): continued in city-heavy mixes as the Meshy
-districts, the joined tile cities and the megacity arrived; it takes over whenever atmospheric flight is on, because
-every continuation traded belt skill for atmospheric skill and one policy could not hold both (and further
-continuations of it, with or without the guard in the loop, only lost skill). Deterministic evaluation with the edge
-guard on, crashes per minute (48 episodes per belt level, 40 per atmospheric world; "straight" = flying dead ahead, no
-policy): belt pilot — asteroid belt 25 + 2 comets 0.9 (straight 1.5), 31 + 3 → 1.3 (straight 9.6), 40 + 4 → 1.8
-(straight 5.3); atmospheric pilot — the Avatar valley 0.3; Alps with 6 airliners and 3 flocks 2.6 (straight 14.2 — the
-densest world); the first Zhangjiajie clusters 2.1 (straight 16.2); New York 0.6 (straight 2.1); Dubai 0.3 (straight
-1.5); Moscow 0.6 (straight 4.9); London 0.8 (straight 6.4); the Megacity 1.5 (straight 2.8) — on average the same as
-without the guard (1.22 vs 1.23 over the seven older worlds), while the time spent scraping a side edge fell from up to
-2 % to at most 0.3 % (the Alps, where the terrain is lowest along the edges, from 13 % to 7 %). They cruise at 13–14 ± 4
-units/s (2.5–22), braking or boosting most of the
-time, mean turn rate 0.5–0.6 rad/s, and slow down among the peaks and pillars. The Training panel shows the belt run's
+atmospheric pilot (`model/policy_atmo.json`, run 34, 140 M steps): retrained for the aerodynamic flight model and
+the weather (runs 30–33, 130 M steps), then 10 M steps with half the fleet in the Avatar valley and the rest in the
+first Zhangjiajie clusters, the Alps and the cities, so it keeps the other worlds; it takes over whenever atmospheric
+flight is on, because every continuation traded belt skill for atmospheric skill and one policy could not hold both.
+Deterministic evaluation with the edge guard on, crashes per minute: belt pilot (48 episodes per level; "straight" =
+flying dead ahead, no policy) — asteroid belt 25 + 2 comets 0.9 (straight 1.5), 31 + 3 → 1.3 (straight 9.6), 40 + 4 →
+1.8 (straight 5.3); atmospheric pilot in the page's default fair weather (40 unseen episodes per world; the previous
+pilot, run 20, in brackets) — the Avatar valley 2.5 (4.7; in calm air 0.5, flying straight 2.8); Alps with 6 airliners
+and 3 flocks 8.8 (29.2 — the densest world); the first Zhangjiajie clusters 7.0 (17.4); New York 6.6 (12.5); Dubai 2.9
+(4.5); Moscow 6.5 (15.0); London 3.0 (4.9); the Megacity 6.1 (8.2). The belt pilot cruises at 13–14 ± 4 units/s
+(2.5–22), the atmospheric pilot at about 16, braking or boosting most of the time, mean turn rate 0.3–0.6 rad/s, and slow down among the peaks and pillars. The Training panel shows the belt run's
 curves on load; press *Train* to keep improving the belt pilot in your browser (the curves continue; while you train,
 it flies everywhere), or *New policy* to watch learning from scratch.
 
