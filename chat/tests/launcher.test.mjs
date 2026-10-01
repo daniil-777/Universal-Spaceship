@@ -115,3 +115,15 @@ test('free spot: bottom-right when clear, else beside or above the HUD boxes, ne
   assert.equal(blocked({ right: 22, bottom: 22 }, 120, 40, main, 1280, 860), true);
   assert.equal(blocked({ right: 2000, bottom: 22 }, 120, 40, [], 1280, 860), true);
 });
+
+test('throttleFrames: lets every n-th frame through while busy, restores rAF after', async () => {
+  const { throttleFrames, frameGate } = await import('../web/launcher.js');
+  const queue = []; const win = { requestAnimationFrame: (cb) => { queue.push(cb); return queue.length; } }; const orig = win.requestAnimationFrame;
+  const g = frameGate(3); assert.deepEqual([g(), g(), g(), g(), g(), g()], [false, false, true, false, false, true]);
+  throttleFrames(win, true, 3); assert.notEqual(win.requestAnimationFrame, orig);
+  let ran = 0; win.requestAnimationFrame(() => { ran++; });
+  for (let i = 0; i < 3 && queue.length; i++) queue.shift()(i);
+  assert.equal(ran, 1, 'the callback runs on the 3rd frame');
+  throttleFrames(win, false); assert.equal(win.requestAnimationFrame, orig);
+  throttleFrames(win, true, 1); assert.equal(win.requestAnimationFrame, orig, 'n = 1 = off');
+});

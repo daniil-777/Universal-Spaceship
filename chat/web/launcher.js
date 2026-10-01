@@ -66,7 +66,18 @@ export function resolveConfig(search, cfg = CONFIG, host = globalThis.location ?
   return { model: c && !['1', 'on', 'true', 'yes'].includes(c.toLowerCase()) ? c : cfg.model, kbs: q.get('capcomkb') ? [q.get('capcomkb')]
     : LOOPBACK.has(host) ? [...cfg.kb].reverse() : [...cfg.kb],
     device: ['auto', 'webgpu', 'wasm', 'none'].includes(device) ? device : 'auto', dtype: ['q4f16', 'q4'].includes(dtype) ? dtype : null,
-    debug: q.get('capcomdebug') === '1' };
+    debug: q.get('capcomdebug') === '1', throttle: q.get('capcomthrottle') === '0' ? 1 : Math.max(1, +q.get('capcomthrottle') || THROTTLE) };
+}
+// While CAPCOM generates, the page draws only every n-th animation frame so WebGPU inference is not starved by the WebGL scene (the
+// scene's physics is dt-based; three.js calls requestAnimationFrame through the window at each frame, so the wrapper sees every
+// frame). Restored the moment the answer ends. ?capcomthrottle=0 turns it off, =N sets N.
+export const THROTTLE = 3;
+export function frameGate(n) { let k = 0; return () => (k = (k + 1) % n) === 0; }
+export function throttleFrames(win, on, n = THROTTLE) {
+  if (on && n > 1 && !win.__capcomRaf) {
+    const raf = win.requestAnimationFrame, gate = frameGate(n); win.__capcomRaf = raf;
+    win.requestAnimationFrame = (cb) => raf.call(win, function tick(t) { if (gate()) cb(t); else raf.call(win, tick); });
+  } else if (!on && win.__capcomRaf) { win.requestAnimationFrame = win.__capcomRaf; delete win.__capcomRaf; }
 }
 // the first kb candidate that answers a HEAD request (the last one when none does: the panel then reports it cannot start)
 export async function pickKb(kbs, fetchFn = globalThis.fetch) {
@@ -164,6 +175,7 @@ export function mount({ doc = document, cfg = resolveConfig(location.search), st
   const post = (m) => { if (frame && frame.dataset.loaded) frame.contentWindow.postMessage(m, location.origin); };
   const focusChat = () => { if (matchMedia('(pointer: fine)').matches) post({ type: 'capcom:focus' }); }; // phones: no keyboard pop-up
   const show = (on) => {
+    if (!on) throttleFrames(globalThis, false);
     open = on; root.classList.toggle('capcom-open', on); btn.setAttribute('aria-expanded', String(on));
     if (on) { const s = scene(); remember(s); post({ type: 'capcom:state', scene: s, seen: seenFor(seen, s) }); focusChat(); }
     else { place(true); btn.focus({ preventScroll: true }); }
@@ -180,6 +192,7 @@ export function mount({ doc = document, cfg = resolveConfig(location.search), st
   addEventListener('message', (e) => {
     if (!frame || e.source !== frame.contentWindow || e.origin !== location.origin || !e.data) return;
     if (e.data.type === 'capcom:close') show(false);
+    else if (e.data.type === 'capcom:busy') throttleFrames(globalThis, !!e.data.busy, cfg.throttle);
   });
   addEventListener('keydown', (e) => { if (open && e.key === 'Escape') show(false); });
   addEventListener('resize', () => place(true));

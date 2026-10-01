@@ -129,7 +129,7 @@ async function send(text) {
   if (busy) client.abort();
   add('msg me', text); input.value = '';
   const bubble = add('msg bot'), meta = add('meta'), dots = document.createElement('span'); dots.className = 'dots'; dots.innerHTML = '<span></span><span></span><span></span>'; bubble.append(dots);
-  const mine = {}; busy = mine; card.classList.add('busy');
+  const mine = {}; busy = mine; card.classList.add('busy'); busySignal(true);
   let got = '';
   try {
     const state = { scene, seen: [...seen] };
@@ -143,8 +143,10 @@ async function send(text) {
         `<b>TTFT</b> ${fmt(r.ttftMs)} ms · <b>${fmt(r.tokPerSec, 1)}</b> tok/s · ${r.tokens} tok · ${r.promptTokens ?? '–'} prompt · ${r.device}/${r.dtype}${r.aborted ? ' · stopped' : ''}`);
     scroll(); return r;
   } catch (e) { bubble.textContent = `Error: ${e.message}`; return null; }
-  finally { if (busy === mine) { busy = null; card.classList.remove('busy'); } }
+  finally { if (busy === mine) { busy = null; card.classList.remove('busy'); busySignal(false); } }
 }
+// embedded: tell the launcher when an answer is being generated (it eases the page's render loop meanwhile)
+function busySignal(on) { if (document.documentElement.classList.contains('embed') && parent !== window) parent.postMessage({ type: 'capcom:busy', busy: on }, location.origin); }
 $('f').onsubmit = (e) => { e.preventDefault(); if (busy && !input.value.trim()) client.abort(); else send(input.value); };
 window.capcomDemo = { ready, send, client, state: () => ({ scene, seen: [...seen] }) };
 </script></body></html>
