@@ -49,6 +49,16 @@ try:
     drive.mount('/content/drive'); ON_COLAB = True
 except ImportError:
     ON_COLAB = False; print('Not on Colab: Google Drive is not mounted.')
+if not os.path.exists(f'{DATA_DIR}/manifest.json') and ON_COLAB:   # not where expected: look one or two folders down in My Drive
+    import glob
+    def _pkg(p):
+        try: return json.load(open(p)).get('format') == 'apv-colab/1'
+        except (OSError, ValueError): return False
+    hits = [p for p in glob.glob('/content/drive/MyDrive/*/manifest.json') + glob.glob('/content/drive/MyDrive/*/*/manifest.json') if _pkg(p)]
+    if hits:
+        old, DATA_DIR = DATA_DIR, os.path.dirname(max(hits, key=os.path.getmtime)); print(f'{old} not found; using the package at {DATA_DIR}')
+        if OUT_DIR.startswith(old): OUT_DIR = DATA_DIR + OUT_DIR[len(old):]
+        if ZIP_PATH.startswith(old): ZIP_PATH = DATA_DIR + ZIP_PATH[len(old):]
 if not os.path.exists(f'{DATA_DIR}/manifest.json'):
     raise FileNotFoundError(f'{DATA_DIR}/manifest.json not found: upload the package folder to the top of My Drive (see its README.md), '
                             'or set DATA_DIR in the first cell to where it is.')
