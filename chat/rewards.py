@@ -11,15 +11,15 @@ from chat.retrieval import tokens
 W = {'recall': 0.30, 'grounded': 0.20, 'lead': 0.15, 'abstain': 0.10, 'length': 0.10, 'first': 0.05, 'repetition': 0.05, 'leak': 0.05}
 MIN_W, MAX_W = 8, 70
 NUM = re.compile(r'(?<![\w.])\d[\d,]*(?:\.\d+)?')
-FLAG = re.compile(r'\?[a-z][a-z_]*(?:=[\w.,-]+)?')
-KEY = re.compile(r"\b(?:press|key|hit|tap)\s+['\"]?([A-Za-z0-9+\-])['\"]?(?![\w-])", re.I)
-ABSTAIN = re.compile(r"\b(not in my (?:flight )?notes|(?:i )?don'?t (?:know|have)|not sure|no (?:info|information|notes)|can'?t (?:tell|say|find)|"
+FLAG = re.compile(r'\?[a-z][a-z_]*(?:=[\w.,|-]*[\w-])?')  # a value never ends in . or , (sentence punctuation after a flag)
+KEY = re.compile(r"\b(?:press|key|hit|tap)\s+(?:['\"]([A-Za-z0-9+\-])['\"]|([A-Za-z0-9])(?![\w-]))", re.I)  # + and - only when quoted
+ABSTAIN = re.compile(r"(\bnot in (?:my|the) (?:flight )?notes|n'?t in (?:my|the) (?:flight )?notes|(?:i )?don'?t (?:know|have)|not sure|no (?:info|information|notes)|can'?t (?:tell|say|find)|"
                      r"isn'?t (?:covered|something i)|outside (?:what|my)|beyond (?:what|my)|i'?m (?:only|just) (?:the|a) guide|not (?:something )?i can help)", re.I)
 CUE = re.compile(r"\b(try|open|switch|press|click|tap|want to|would you like|how about|check out|take a look|head (?:to|over)|flip|turn on|"
                  r"toggle|pick|jump|watch|ask me|curious|shall we|next)\b", re.I)
 LEAK = re.compile(r"<\|im_|<\|endoftext|^(?:user|assistant|system|capcom)\s*:|\n(?:user|assistant|system)\s*:|^notes:|\nnotes:|^state:|\nstate:", re.I)
 SMALL = {str(i) for i in range(11)}
-QMARK = re.compile(r'\?(?![A-Za-z_])')  # a question mark, not the '?' that starts a URL flag such as ?scenario=landing
+QMARK = re.compile('\\?(?![A-Za-z_\"\'\u2019\u201d])')  # a question mark: not the '?' that starts a URL flag (?scenario=landing), nor one inside a quoted label ("Is it safe?")
 
 def questions(text): return len(QMARK.findall(text))
 
@@ -42,7 +42,7 @@ def comp_grounded(answer, notes, user):
     low = src.lower()
     bad += [f for f in FLAG.findall(answer.lower()) if f not in low]
     # a key is grounded when that exact character stands alone somewhere in the notes/message ("key Z", "(Z)", "Z opens…")
-    bad += [k for k in KEY.findall(answer) if not re.search(rf'(?<![A-Za-z0-9]){re.escape(k)}(?![A-Za-z0-9])', src)]
+    bad += [k for k in (a or b for a, b in KEY.findall(answer)) if not re.search(rf'(?<![A-Za-z0-9]){re.escape(k)}(?![A-Za-z0-9])', src)]
     return max(0.0, 1.0 - 0.5 * len(bad))
 
 def comp_lead(answer, expected=True):
