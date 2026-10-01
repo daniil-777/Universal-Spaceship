@@ -1,6 +1,7 @@
 """vlm/train/narrator/data.py — Narrator chat rows -> processor tensors (single 512² image, do_image_splitting False, the
 processor loaded from the exported folder so training, parity and the browser share one config) with the prefix loss mask.
 Every frame is first resized to 512² with Task 8's square(): the exported preprocessor_config.json has do_resize false."""
+import os
 import torch
 from PIL import Image
 from torch.utils.data import Dataset
@@ -10,8 +11,9 @@ from vlm.train.narrator.export_decoder import square
 IMG_KW = {'return_tensors': 'pt', 'images_kwargs': {'do_image_splitting': False}}
 
 def frame_path(p):
-    """Dataset frames are stored relative to the LaCie VLM root; absolute paths pass through."""
-    return p if p.startswith('/') else f'{LACIE}/{p}'
+    """Dataset frames are stored relative to the LaCie VLM root (APV_FRAMES_ROOT instead: the Colab package's unpacked
+    shards, where a row names '<shard>/<key>.jpg'); absolute paths pass through."""
+    return p if p.startswith('/') else f"{os.environ.get('APV_FRAMES_ROOT') or LACIE}/{p}"
 
 def load_image(p): return square(Image.open(frame_path(p)))
 

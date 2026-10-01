@@ -1,4 +1,6 @@
 import os, unittest
+# before transformers is imported (huggingface_hub reads HF_HOME once): the suite's first module fixes the cache for every later one
+os.environ.setdefault('HF_HOME', '/Volumes/LaCie/astro-pilot/vlm/hf')
 from PIL import Image
 from transformers import AutoProcessor
 from vlm.train.common import build_labels, check_row, EOU, NL, PAD, IMAGE_IDS

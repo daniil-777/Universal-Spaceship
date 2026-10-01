@@ -168,6 +168,14 @@ def model_card(src):
             'Intended use: on-demand captions and safety explanations for Astro Pilot frames in the browser. Trained on simulator frames: '
             'there is a sim-to-real gap; do not use for real flight decisions.\n')
 
+def chat_template(src):
+    """The chat template of a processor folder: tokenizer_config.json (the explorer's copy), else a hub snapshot's
+    chat_template.json or chat_template.jinja."""
+    src = Path(src); tok = json.loads((src / 'tokenizer_config.json').read_text())
+    if tok.get('chat_template'): return tok['chat_template']
+    if (src / 'chat_template.json').exists(): return json.loads((src / 'chat_template.json').read_text())['chat_template']
+    return (src / 'chat_template.jinja').read_text()
+
 def export_folder(src, out, processor_src=SMOLVLM_DIR, dtypes=DTYPES, vision=VISION):
     from transformers import AutoModelForVision2Seq
     out = Path(out); (out / 'onnx').mkdir(parents=True, exist_ok=True)
@@ -183,7 +191,7 @@ def export_folder(src, out, processor_src=SMOLVLM_DIR, dtypes=DTYPES, vision=VIS
     quantize_vision_w8(published('vision_encoder.onnx'), out / 'onnx' / f"vision_encoder{SUFFIX['q8']}.onnx")
     for f in ('config.json', 'processor_config.json', 'tokenizer.json', 'tokenizer_config.json'): shutil.copy(Path(processor_src) / f, out / f)
     # transformers 4.57 AutoProcessor reads the template only from chat_template.json/.jinja, not from tokenizer_config.json
-    tok = json.loads((Path(processor_src) / 'tokenizer_config.json').read_text()); (out / 'chat_template.json').write_text(json.dumps({'chat_template': tok['chat_template']}))
+    (out / 'chat_template.json').write_text(json.dumps({'chat_template': chat_template(processor_src)}))
     pre = preprocessor_config(json.loads((Path(processor_src) / 'preprocessor_config.json').read_text()))
     (out / 'preprocessor_config.json').write_text(json.dumps(pre, indent=1))
     gen = json.loads((Path(processor_src) / 'generation_config.json').read_text()); gen['eos_token_id'] = EOU

@@ -48,7 +48,7 @@ def main(argv=None):
     from transformers import AutoProcessor
     ap = argparse.ArgumentParser(); ap.add_argument('--model', help='PyTorch model id or dir'); ap.add_argument('--onnx', choices=('q4f16', 'q4', 'fp16', 'fp32'), help='deploy decoder dtype of --processor-dir')
     ap.add_argument('--vision', default='q8'); ap.add_argument('--processor-dir', required=True); ap.add_argument('--rows', required=True); ap.add_argument('--out', required=True)
-    ap.add_argument('--max-new', type=int, default=90); ap.add_argument('--limit', type=int); ap.add_argument('--device', choices=('cpu', 'mps'), default='cpu'); a = ap.parse_args(argv)
+    ap.add_argument('--max-new', type=int, default=90); ap.add_argument('--limit', type=int); ap.add_argument('--device', choices=('cpu', 'mps', 'cuda'), default='cpu'); a = ap.parse_args(argv)
     if bool(a.model) == bool(a.onnx): ap.error('give exactly one of --model and --onnx')
     p = AutoProcessor.from_pretrained(a.processor_dir)
     if a.onnx: run = OnnxNarrator(a.processor_dir, a.onnx, a.vision).generate
