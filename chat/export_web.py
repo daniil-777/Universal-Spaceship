@@ -15,8 +15,9 @@ import onnx
 from onnx import TensorProto, helper
 
 SUFFIX = {'q4f16': '_q4f16', 'q4': '_q4', 'fp16': '_fp16'}
-# int4 accuracy level: 4 lets MatMulNBits quantize activations to int8 (fast; on WebGPU it costs quality), 1 keeps them in float
-BUILD = {'q4f16': ('int4', 'webgpu', ['int4_block_size=32']), 'q4': ('int4', 'cpu', ['int4_block_size=32']), 'fp16': ('fp16', 'webgpu', [])}
+# int4 accuracy level: 4 lets MatMulNBits quantize activations to int8 (fast; on WebGPU it may cost quality), 1 keeps them in float.
+# onnxruntime-genai 0.17.1 reads the extra options 'block_size' and 'accuracy_level' (int4_-prefixed keys are silently ignored).
+BUILD = {'q4f16': ('int4', 'webgpu', ['block_size=32']), 'q4': ('int4', 'cpu', ['block_size=32']), 'fp16': ('fp16', 'webgpu', [])}
 ACC = {'q4f16': 4, 'q4': 4}
 TOKENIZER_FILES = ('tokenizer.json', 'tokenizer_config.json', 'special_tokens_map.json', 'vocab.json', 'merges.txt')
 
@@ -68,13 +69,20 @@ def prepare_src(src, work, ctx):
 
 def build(src_dir, cfg, dtype, work, acc=None):
     precision, ep, extra = BUILD[dtype]; out = Path(work) / dtype
-    if dtype in ACC: extra = [*extra, f'int4_accuracy_level={acc or ACC[dtype]}']
+    if dtype in ACC: extra = [*extra, f'accuracy_level={acc or ACC[dtype]}']
     shared = ['shared_embeddings=true'] if cfg.get('tie_word_embeddings', cfg.get('tie_embedding', False)) else []
     cmd = [sys.executable, '-m', 'onnxruntime_genai.models.builder', '-i', str(src_dir), '-o', str(out), '-p', precision, '-e', ep,
            '-c', str(Path(work) / 'cache'), '--extra_options', *extra, *shared]
     # the source is a local folder: offline, so the builder never blocks on (rate-limited, unauthenticated) Hub requests
     subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, env={**os.environ, 'HF_HUB_OFFLINE': '1', 'TRANSFORMERS_OFFLINE': '1'})
+    if dtype in ACC: assert_quant(out / 'model.onnx', acc or ACC[dtype])
     return out / 'model.onnx'
+
+def assert_quant(path, acc, block=32):
+    """Fail loudly when the builder ignored the requested options (it drops unknown --extra_options keys without a word)."""
+    got = {(a['accuracy_level'], a['block_size']) for a in (
+        {x.name: x.i for x in n.attribute} for n in onnx.load(str(path), load_external_data=False).graph.node if n.op_type == 'MatMulNBits')}
+    if got != {(acc, block)}: raise RuntimeError(f'MatMulNBits (accuracy_level, block_size) {sorted(got)} != {(acc, block)}')
 
 def export(src, out, dtypes=('q4f16', 'q4'), ctx=4096, acc=None):
     out = Path(out); (out / 'onnx').mkdir(parents=True, exist_ok=True)
