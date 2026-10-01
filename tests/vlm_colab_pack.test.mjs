@@ -36,7 +36,7 @@ test('code/: the training code without its tests, and every module slot_eval.mjs
 });
 async function dataset(root) {
   const ds = path.join(root, 'datasets', 'tiny'), raw = path.join(root, 'raw', 'r', 'S'); fs.mkdirSync(raw, { recursive: true });
-  const recs = [['S_r_00000_000001', 'train'], ['S_r_00000_000002', 'train'], ['S_r_00001_000001', 'val'], ['S_r_00002_000001', 'test']].map(([key, split], i) => ({ key, family: 'S', split, narrator_frame: `raw/r/S/${key}.f2.png`, frames: [`raw/r/S/${key}.f2.png`], texts: [], facts: {} }));
+  const recs = [['S_r_00000_000001', 'train'], ['S_r_00000_000002', 'train'], ['S_r_00001_000001', 'val'], ['S_r_00002_000001', 'test']].map(([key, split], i) => ({ key, family: 'S', split, narrator_frame: `raw/r/S/${key}.f2.png`, frames: [`raw/r/S/${key}.f2.png`], texts: [], facts: {}, snapshot: { v: 1 } }));
   for (const [i, r] of recs.entries()) await sharp({ create: { width: 896, height: 504, channels: 4, background: { r: 40 * i, g: 90, b: 160, alpha: 1 } } }).png().toFile(path.join(root, r.narrator_frame));
   const w = (f, s) => { fs.mkdirSync(path.dirname(path.join(ds, f)), { recursive: true }); fs.writeFileSync(path.join(ds, f), s); };
   w('records.jsonl', recs.map((r) => JSON.stringify(r)).join('\n') + '\n');
@@ -61,7 +61,7 @@ test('pack: shards with JPEG frames and records, shard-relative rows, cache part
   const m0 = readTar(path.join(out, man.shards[0].path));
   assert.deepEqual(m0.map((m) => m.name), ['S_r_00000_000001.jpg', 'S_r_00000_000001.json']);
   const meta = await sharp(m0[0].data).metadata(); assert.deepEqual([meta.format, meta.width, meta.height], ['jpeg', 896, 504]);
-  assert.equal(JSON.parse(m0[1].data).narrator_frame, `${man.shards[0].name}/S_r_00000_000001.jpg`);
+  assert.equal(JSON.parse(m0[1].data).narrator_frame, `${man.shards[0].name}/S_r_00000_000001.jpg`); assert.equal(JSON.parse(m0[1].data).snapshot, undefined, 'the raw snapshot stays on LaCie');
   const row = JSON.parse(fs.readFileSync(path.join(out, 'narrator/train.jsonl'), 'utf8').split('\n')[1]); assert.equal(row.images[0], `${man.shards[1].name}/S_r_00000_000002.jpg`);
   const joined = Buffer.concat(man.eye_parts.train.map((p) => fs.readFileSync(path.join(out, p)))); assert.equal(joined.length, 2 * ROW);
   assert.ok(joined.equals(fs.readFileSync(path.join(root, 'datasets/tiny/cache/pilot_eye_train.u8'))), 'the parts join back to the cache');

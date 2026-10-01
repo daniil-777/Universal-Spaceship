@@ -20,6 +20,8 @@ const LACIE = '/Volumes/LaCie/astro-pilot/vlm', REPO = fileURLToPath(new URL('..
 const G2 = path.join(LACIE, 'models', 'narrator-base-g2-fused'), SPLITS = ['train', 'val', 'test', 'ood'], ROW = 3 * 160 * 96 * 3;
 const readJsonl = (f) => (fs.existsSync(f) ? fs.readFileSync(f, 'utf8').split('\n').filter((l) => l.trim()).map((l) => JSON.parse(l)) : []);
 const sha256 = (buf) => crypto.createHash('sha256').update(buf).digest('hex');
+// the v1 raw snapshot (per-frame state for later build-side labels) stays in the LaCie dataset, not in the Colab package
+const slim = ({ snapshot, ...r }) => r;
 async function mapOrdered(xs, k, fn, each) { const q = []; let next = 0; for (let i = 0; i < xs.length; i++) { while (next < xs.length && next < i + k) { q.push(fn(xs[next], next)); next++; } await each(await q.shift(), i); } }
 
 // a family x split stratified sample of n records (at least one per cell while n allows), deterministic
@@ -105,7 +107,7 @@ export async function pack({ dataset, out, maxGb = 8, shardMb = 500, quality = 9
       const r = bySplit[s][i];
       if (!tar || tar.bytes >= shardBytes) { roll(); name = `narrator-${s}-${String(shards.filter((x) => x.split === s).length).padStart(5, '0')}`; fs.mkdirSync(path.join(out, 'shards'), { recursive: true }); tar = createTar(path.join(out, 'shards', `${name}.tar`)); n = 0; }
       const img = `${name}/${r.key}.jpg`; where.set(r.key, img);
-      tar.add(`${r.key}.jpg`, jpg); tar.add(`${r.key}.json`, JSON.stringify({ ...r, narrator_frame: img, narrator_frame_raw: r.narrator_frame })); n++;
+      tar.add(`${r.key}.jpg`, jpg); tar.add(`${r.key}.json`, JSON.stringify({ ...slim(r), narrator_frame: img, narrator_frame_raw: r.narrator_frame })); n++;
     });
     roll();
   }
@@ -131,7 +133,7 @@ export async function pack({ dataset, out, maxGb = 8, shardMb = 500, quality = 9
     if (rows.some((r) => !r.images[0])) throw new Error(`narrator/${s}.jsonl names a record without a packed frame`);
     write(`narrator/${s}.jsonl`, rows.map((r) => JSON.stringify(r)).join('\n') + (rows.length ? '\n' : ''));
   }
-  write('records.jsonl', recs.map((r) => JSON.stringify({ ...r, narrator_frame: where.get(r.key), narrator_frame_raw: r.narrator_frame })).join('\n') + '\n');
+  write('records.jsonl', recs.map((r) => JSON.stringify({ ...slim(r), narrator_frame: where.get(r.key), narrator_frame_raw: r.narrator_frame })).join('\n') + '\n');
   for (const f of ['labels.json', 'stats.json', 'datasheet.md', 'ATTRIBUTION.txt']) if (fs.existsSync(path.join(src, f))) write(f, fs.readFileSync(path.join(src, f)));
   write('splits.json', JSON.stringify(Object.fromEntries(SPLITS.map((s) => [s, bySplit[s].map((r) => r.key)]))));
   // code/: the training code, the Node slot evaluation and what it imports, the G2 processor files and parity baseline
