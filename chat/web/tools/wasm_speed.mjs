@@ -1,7 +1,8 @@
 // chat/web/tools/wasm_speed.mjs — onnxruntime-web 1.30 WASM (Node, same V8/wasm as Chrome) decode speed of a CAPCOM q4 graph.
 // A fresh --prompt-token prefill, then --steps single-token decode steps with the KV/conv cache. Needs a GatherBlockQuantized-free
 // graph (tools/wasm_rewrite.py; its --accuracy-level makes the MatMulNBits variants compared here).
-//   node chat/web/tools/wasm_speed.mjs <model.onnx> [--threads 1] [--steps 16] [--prompt 300]
+// --no-qdq sets session.disable_quant_qdq=1 (ORT then constant-folds DequantizeLinear weights: the --dq-matmul graphs need it).
+//   node chat/web/tools/wasm_speed.mjs <model.onnx> [--threads 1] [--steps 16] [--prompt 300] [--no-qdq]
 import fs from 'node:fs';
 const arg = (k, d) => { const i = process.argv.indexOf('--' + k); return i > 0 ? process.argv[i + 1] : d; };
 const NM = process.env.NODE_MODULES || '/Volumes/LaCie/astro-pilot/vlm/node/node_modules';
@@ -9,7 +10,8 @@ const ort = await import(`${NM}/onnxruntime-web/dist/ort.node.min.mjs`).catch(()
 const threads = +arg('threads', 1), steps = +arg('steps', 16), plen = +arg('prompt', 300);
 const bytes = fs.readFileSync(process.argv[2]);
 ort.env.wasm.numThreads = threads;
-const t0 = performance.now(), s = await ort.InferenceSession.create(bytes, { executionProviders: ['wasm'] });
+const t0 = performance.now(), s = await ort.InferenceSession.create(bytes, { executionProviders: ['wasm'],
+  ...(process.argv.includes('--no-qdq') ? { extra: { session: { disable_quant_qdq: '1' } } } : {}) });
 console.log(`session ${(performance.now() - t0).toFixed(0)} ms, ${threads} thread(s)`);
 const feed0 = {}, meta = Object.fromEntries(s.inputNames.map((n, i) => [n, s.inputMetadata[i]]));
 for (const [n, md] of Object.entries(meta)) if (n.startsWith('past_')) { const shape = md.shape.map((d) => (d === 'batch_size' ? 1 : typeof d === 'string' ? 0 : d)); feed0[n] = new ort.Tensor('float32', new Float32Array(shape.reduce((a, b) => a * b, 1)), shape); }
@@ -21,4 +23,5 @@ const run = async (ids) => {
 };
 let t = performance.now(); await run([1, ...new Array(plen - 1).fill(1098)]); const prefill = performance.now() - t;
 t = performance.now(); for (let i = 0; i < steps; i++) { len++; await run([1098]); } const per = (performance.now() - t) / steps;
-console.log(JSON.stringify({ model: process.argv[2].split('/').slice(-3).join('/'), threads, prefill_ms: Math.round(prefill), prompt: plen, decode_ms_per_token: +per.toFixed(1), tok_s: +(1000 / per).toFixed(1) }));
+const heapMb = Math.round(process.memoryUsage().rss / 2 ** 20);
+console.log(JSON.stringify({ model: process.argv[2].split('/').slice(-3).join('/'), noQdq: process.argv.includes('--no-qdq'), rss_mb: heapMb, threads, prefill_ms: Math.round(prefill), prompt: plen, decode_ms_per_token: +per.toFixed(1), tok_s: +(1000 / per).toFixed(1) }));

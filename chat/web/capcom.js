@@ -80,7 +80,10 @@ export async function createCapcom({ tf, modelId, localModelPath = null, remoteH
     const t1 = now(); files = {}; say({ status: 'load', device: dev, dtype: dt });
     try {
       tok ||= await tf.AutoTokenizer.from_pretrained(modelId, { progress_callback: progress });
-      model = await tf.AutoModelForCausalLM.from_pretrained(modelId, { device: dev, dtype: dt, progress_callback: progress });
+      // WASM: let ORT constant-fold DequantizeLinear weights (a no-op for MatMulNBits graphs; ORT-web's WASM MatMulNBits re-dequantizes
+      // its weight every call, ~1 tok/s, so a WASM export should use DequantizeLinear+MatMul — chat/web/tools/wasm_rewrite.py --dq-matmul)
+      const session_options = dev === 'wasm' ? { extra: { session: { disable_quant_qdq: '1' } } } : undefined;
+      model = await tf.AutoModelForCausalLM.from_pretrained(modelId, { device: dev, dtype: dt, progress_callback: progress, session_options });
       Object.assign(info, { device: dev, dtype: dt, loadMs: Math.round(now() - t0) });
       if (doWarmup) { say({ status: 'warmup', device: dev, dtype: dt }); await warm(); }
       info.ready = true; info.attempts.push({ device: dev, dtype: dt, ok: true, ms: Math.round(now() - t1) });

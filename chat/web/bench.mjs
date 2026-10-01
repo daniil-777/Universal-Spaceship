@@ -133,7 +133,8 @@ export async function benchRun({ model, name, configs, n, tokens, promptsFile, i
     const same = ran.filter(([, r]) => r.raw.rows.every((x, i) => JSON.stringify(x.ids) === JSON.stringify(rows0[i].ids)));
     const cands = Object.fromEntries(same.map(([cfg, r]) => [cfg, r.raw.rows.map((x) => x.out)]));
     for (const [k, rd] of refDtypes.entries()) {
-      const ref = reference(refDir, rows0, rd, parityTokens, cands, k === 0 ? torchSrc : null), p = { reference: `ORT CPU ${rd} greedy (python) of ${refDir}`, eos: ref.eos };
+      let ref; try { ref = reference(refDir, rows0, rd, parityTokens, cands, k === 0 ? torchSrc : null); } catch (e) { report.parity[rd] = { error: String(e.message).slice(0, 500) }; continue; }
+      const p = { reference: `ORT CPU ${rd} greedy (python) of ${refDir}`, eos: ref.eos };
       p.prompt_ids_match = rows0.filter((r, i) => JSON.stringify(r.ids) === JSON.stringify(ref.rows[i].py_ids)).length + `/${rows0.length}`;
       p.template_text_match = rows0.filter((r, i) => r.text === ref.rows[i].template).length + `/${rows0.length}`;
       p.ref_ms_median = q(ref.rows.map((r) => r.ms), 0.5);
