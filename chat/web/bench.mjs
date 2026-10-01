@@ -168,7 +168,8 @@ export async function benchDemo({ model, device, dtype, asks, out, debug = true 
     for (const [i, ask] of asks.entries()) {
       await page.fill('#q', ask); await page.press('#q', 'Enter');
       replies.push(await page.evaluate(async (n) => {
-        for (let k = 0; k < 1200 && document.querySelectorAll('.meta b').length <= n; k++) await new Promise((ok) => setTimeout(ok, 100));
+        const done = () => [...document.querySelectorAll('.meta')].filter((m) => m.textContent).length; // one filled debug line per answer
+        for (let k = 0; k < 1200 && done() <= n; k++) await new Promise((ok) => setTimeout(ok, 100));
         return { reply: [...document.querySelectorAll('.msg.bot')].at(-1)?.textContent, meta: [...document.querySelectorAll('.meta')].at(-1)?.textContent };
       }, i));
     }

@@ -69,7 +69,7 @@ import { HIGHLIGHTS } from './prompt.js';
 const q = new URLSearchParams(location.search), $ = (id) => document.getElementById(id);
 const MODEL = q.get('model') || '/__capcom/models/lfm350-base-web', KB = q.get('kb') || '/__capcom/kb/kb.json';
 const GREETING = 'CAPCOM here. Ask me anything about the pilot, or try one of these:';
-const SUGGEST = ['How does it learn to dodge asteroids?', 'How fast does the station orbit?', 'How do I try the landing?'];
+const SUGGEST = ['How does the AI pilot learn?', 'How fast does the space station go?', 'Is this real physics?'];
 const card = $('card'), log = $('log'), pill = $('pill'), bar = $('bar'), sel = $('scene'), dbg = $('dbg'), input = $('q');
 const history = [], seen = new Set(); let info = null, busy = null, scene = q.get('scene') || 'belt';
 const setPill = (t, cls = '') => { pill.className = `pill ${cls}`; pill.lastChild.textContent = t; };
@@ -103,7 +103,7 @@ const ready = client.load({ model: MODEL, kb: KB, device: q.get('device') || 'au
 async function send(text) {
   text = text.trim(); if (!text) return null;
   if (busy) client.abort();
-  chips.remove(); add('msg me', text); input.value = '';
+  add('msg me', text); input.value = '';
   const bubble = add('msg bot'), meta = add('meta'), dots = document.createElement('span'); dots.className = 'dots'; dots.innerHTML = '<span></span><span></span><span></span>'; bubble.append(dots);
   const mine = {}; busy = mine; card.classList.add('busy');
   let got = '';
@@ -115,7 +115,8 @@ async function send(text) {
     if (!r.fallback && !r.aborted && r.text) history.push({ role: 'user', content: text }, { role: 'assistant', content: r.text });
     meta.innerHTML = `<b>notes</b> ${r.notes.length ? r.notes.map((id, i) => `<span class="n" title="${esc((r.noteTitles || [])[i] || '')}">${esc(id)} ${fmt(r.scores[i], 1)}</span>`).join('') : 'none'}<br>` +
       (r.fallback ? `<b>${r.fallback === 'loading' ? 'model loading' : 'notes only'}</b> · retrieval card` :
-        `<b>TTFT</b> ${fmt(r.ttftMs)} ms · <b>${fmt(r.tokPerSec, 1)}</b> tok/s · ${r.tokens} tok · ${r.promptTokens} prompt · ${r.device}/${r.dtype}${r.aborted ? ' · stopped' : ''}`);
+        r.aborted && r.ttftMs == null ? '<b>cancelled</b> by a newer question' :
+        `<b>TTFT</b> ${fmt(r.ttftMs)} ms · <b>${fmt(r.tokPerSec, 1)}</b> tok/s · ${r.tokens} tok · ${r.promptTokens ?? '–'} prompt · ${r.device}/${r.dtype}${r.aborted ? ' · stopped' : ''}`);
     scroll(); return r;
   } catch (e) { bubble.textContent = `Error: ${e.message}`; return null; }
   finally { if (busy === mine) { busy = null; card.classList.remove('busy'); } }
