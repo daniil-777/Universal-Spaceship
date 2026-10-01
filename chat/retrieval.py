@@ -22,7 +22,8 @@ def plural(w):
 def tokens(text):
     out = []
     for w in _WORD.findall(text.lower()):
-        w = plural(w)
+        if w in STOP: continue
+        w = plural(w)  # the stop list is checked before and after stemming ('does' must not become 'doe')
         if w not in STOP: out.append(w)
     return out
 
