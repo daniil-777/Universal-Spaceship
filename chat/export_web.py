@@ -15,9 +15,9 @@ import onnx
 from onnx import TensorProto, helper
 
 SUFFIX = {'q4f16': '_q4f16', 'q4': '_q4', 'fp16': '_fp16'}
-BUILD = {'q4f16': ('int4', 'webgpu', ['int4_block_size=32', 'int4_accuracy_level=4']),
-         'q4': ('int4', 'cpu', ['int4_block_size=32', 'int4_accuracy_level=4']),
-         'fp16': ('fp16', 'webgpu', [])}
+# int4 accuracy level: 4 lets MatMulNBits quantize activations to int8 (fast; on WebGPU it costs quality), 1 keeps them in float
+BUILD = {'q4f16': ('int4', 'webgpu', ['int4_block_size=32']), 'q4': ('int4', 'cpu', ['int4_block_size=32']), 'fp16': ('fp16', 'webgpu', [])}
+ACC = {'q4f16': 4, 'q4': 4}
 TOKENIZER_FILES = ('tokenizer.json', 'tokenizer_config.json', 'special_tokens_map.json', 'vocab.json', 'merges.txt')
 
 def rename(g, old, new):
@@ -66,8 +66,9 @@ def prepare_src(src, work, ctx):
     (d / 'config.json').write_text(json.dumps(cfg, indent=1))
     return d, cfg
 
-def build(src_dir, cfg, dtype, work):
+def build(src_dir, cfg, dtype, work, acc=None):
     precision, ep, extra = BUILD[dtype]; out = Path(work) / dtype
+    if dtype in ACC: extra = [*extra, f'int4_accuracy_level={acc or ACC[dtype]}']
     shared = ['shared_embeddings=true'] if cfg.get('tie_word_embeddings', cfg.get('tie_embedding', False)) else []
     cmd = [sys.executable, '-m', 'onnxruntime_genai.models.builder', '-i', str(src_dir), '-o', str(out), '-p', precision, '-e', ep,
            '-c', str(Path(work) / 'cache'), '--extra_options', *extra, *shared]
@@ -75,13 +76,13 @@ def build(src_dir, cfg, dtype, work):
     subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, env={**os.environ, 'HF_HUB_OFFLINE': '1', 'TRANSFORMERS_OFFLINE': '1'})
     return out / 'model.onnx'
 
-def export(src, out, dtypes=('q4f16', 'q4'), ctx=4096):
+def export(src, out, dtypes=('q4f16', 'q4'), ctx=4096, acc=None):
     out = Path(out); (out / 'onnx').mkdir(parents=True, exist_ok=True)
     work = Path(tempfile.mkdtemp(prefix='.export_', dir=out.parent))
     try:
         s, cfg = prepare_src(src, work, ctx)
         hd = cfg.get('head_dim') or cfg['hidden_size'] // cfg['num_attention_heads']
-        for d in dtypes: fix_io(build(s, cfg, d, work), out / 'onnx' / f'model{SUFFIX[d]}.onnx', hd)
+        for d in dtypes: fix_io(build(s, cfg, d, work, acc), out / 'onnx' / f'model{SUFFIX[d]}.onnx', hd)
         for f in TOKENIZER_FILES + ('config.json', 'generation_config.json', 'chat_template.jinja'):
             if (s / f).exists(): shutil.copy(s / f, out / f)
         tk = out / 'tokenizer_config.json'
@@ -117,5 +118,6 @@ if __name__ == '__main__':
     os.environ.setdefault('HF_HOME', '/Volumes/LaCie/astro-pilot/chat/hf')
     ap = argparse.ArgumentParser(); ap.add_argument('--src', required=True); ap.add_argument('--out', required=True)
     ap.add_argument('--dtypes', default='q4f16,q4'); ap.add_argument('--ctx', type=int, default=4096); ap.add_argument('--check', action='store_true')
-    a = ap.parse_args(); sizes = export(a.src, a.out, a.dtypes.split(','), a.ctx); print(json.dumps({'sizes_mb': sizes}))
+    ap.add_argument('--acc', type=int, choices=(1, 2, 3, 4), help='int4 accuracy level (default 4)')
+    a = ap.parse_args(); sizes = export(a.src, a.out, a.dtypes.split(','), a.ctx, a.acc); print(json.dumps({'sizes_mb': sizes}))
     if a.check: print(json.dumps(check(a.src, a.out)))

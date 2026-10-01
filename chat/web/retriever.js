@@ -19,7 +19,8 @@ export function plural(w) {
 export function tokens(text) {
   const out = [];
   for (let w of String(text).toLowerCase().match(WORD) || []) {
-    w = plural(w);
+    if (STOP.has(w)) continue;
+    w = plural(w); // the stop list is checked before and after stemming ('does' must not become 'doe')
     if (!STOP.has(w)) out.push(w);
   }
   return out;

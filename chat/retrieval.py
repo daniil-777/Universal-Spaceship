@@ -22,7 +22,8 @@ def plural(w):
 def tokens(text):
     out = []
     for w in _WORD.findall(text.lower()):
-        w = plural(w)
+        if w in STOP: continue
+        w = plural(w)  # the stop list is checked before and after stemming ('does' must not become 'doe')
         if w not in STOP: out.append(w)
     return out
 
@@ -67,4 +68,4 @@ class BM25:
 def load_facts(path):
     p = Path(path)
     if p.suffix == '.json': return json.loads(p.read_text())['facts']
-    return [json.loads(l) for l in p.read_text().splitlines() if l.strip()]
+    return [json.loads(l) for l in p.read_text().split('\n') if l.strip()]

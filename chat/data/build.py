@@ -33,7 +33,7 @@ def plain(text):
 
 def read_jsonl(p):
     p = Path(p)
-    return [json.loads(l) for l in p.read_text().splitlines() if l.strip()] if p.exists() else []
+    return [json.loads(l) for l in p.read_text().split('\n') if l.strip()] if p.exists() else []
 
 def write_jsonl(p, rows):
     p.parent.mkdir(parents=True, exist_ok=True); p.write_text(''.join(json.dumps(r, ensure_ascii=False) + '\n' for r in rows))

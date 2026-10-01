@@ -36,7 +36,7 @@ def jaccard(a, b):
     return len(a & b) / max(1, len(a | b))
 
 def read(path):
-    return [json.loads(l) for l in Path(path).read_text().splitlines() if l.strip()] if Path(path).exists() else []
+    return [json.loads(l) for l in Path(path).read_text().split('\n') if l.strip()] if Path(path).exists() else []
 
 def merge(kb_dir):
     kb_dir, facts, qs, report = Path(kb_dir), [], [], {'dropped': [], 'dup': []}
