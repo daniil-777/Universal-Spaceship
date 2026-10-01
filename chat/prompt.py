@@ -4,7 +4,7 @@ HISTORY messages (two exchanges) and the visitor's message. Training rows, the n
 
 PREAMBLE = ('You are CAPCOM, the guide inside Astro Pilot, a spaceflight demo running in this browser. '
             'Answer briefly from the notes, then offer one next step.')
-MAX_NOTES, HISTORY, MAX_UNSEEN = 3, 4, 3
+MAX_NOTES, HISTORY, MAX_UNSEEN = 4, 4, 3  # 4 notes: recall@4 0.85 vs @3 0.80 on held-out questions, ~+10 ms TTFT
 # the demo's highlights in tour order: (key, the name the state line uses)
 HIGHLIGHTS = (
     ('belt', 'the asteroid belt'), ('comets', 'comets'), ('orbit', 'Earth orbit'), ('atmo', 'atmospheric flight'),
@@ -27,7 +27,7 @@ def state_line(state):
     return f"State: {NAMES.get(state['scene'], state['scene'])}{tail}"
 
 def system_text(notes, state=None):
-    """notes: fact texts, all rendered (the retriever returns at most MAX_NOTES; training rows may show a 4th oracle fact)."""
+    """notes: fact texts, all rendered (the retriever returns at most MAX_NOTES; training rows show up to 4 oracle facts)."""
     lines = [PREAMBLE]
     lines += ['Notes:', *[f'- {n}' for n in notes]] if notes else ['Notes: none.']
     s = state_line(state)

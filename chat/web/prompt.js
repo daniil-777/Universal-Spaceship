@@ -3,7 +3,7 @@
 // exchanges) and the visitor's message. Parity: chat/tests/prompt_parity.test.mjs renders both on the same cases.
 export const PREAMBLE = 'You are CAPCOM, the guide inside Astro Pilot, a spaceflight demo running in this browser. ' +
   'Answer briefly from the notes, then offer one next step.';
-export const MAX_NOTES = 3, HISTORY = 4, MAX_UNSEEN = 3;
+export const MAX_NOTES = 4, HISTORY = 4, MAX_UNSEEN = 3;
 // the demo's highlights in tour order: [key, the name the state line uses]
 export const HIGHLIGHTS = Object.freeze([
   ['belt', 'the asteroid belt'], ['comets', 'comets'], ['orbit', 'Earth orbit'], ['atmo', 'atmospheric flight'],
