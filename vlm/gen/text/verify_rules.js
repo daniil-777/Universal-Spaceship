@@ -156,7 +156,7 @@ const CAT = { size: (F, v) => idsWhere(F, (id, x) => /^hazard\.\d+\.size_bin$/.t
 // ---- position claims, bound to their subject ----
 const COMPASS = ['north', 'north-east', 'east', 'south-east', 'south', 'south-west', 'west', 'north-west'];
 const nearBearing = (b, c) => Math.abs(((b - COMPASS.indexOf(c) * 45 + 540) % 360) - 180) <= 22.5;
-function positionSupport(cl, F) {
+function positionSupport(cl, F, rec = null) {
   const v = cl.value, subj = cl.subject, off = subj && (subj.kind === 'body' || subj.kind === 'object');
   if (cl.type === 'clock') {
     if (off || (subj && subj.kind !== 'hazard')) return [];
@@ -171,9 +171,10 @@ function positionSupport(cl, F) {
     const boxes = hazards(F, subj).filter(inRegion).map((i) => `hazard.${i}.box_px`);
     return subj ? boxes : [...boxes, ...featuresWhere(F, null, (r) => r === v)];
   }
-  // compass: a place's bearing from the view centre
-  if (subj && subj.kind !== 'entity') return [];
-  const name = subj ? norm(subj.value) : null;
+  // compass: a place's bearing from the view centre. A Z view has no docking port, runway or windsock, so an object noun
+  // there is part of a place name ('Port Elizabeth', 'Port Moresby') and binds nothing (v1)
+  if (subj && subj.kind !== 'entity' && !(subj.kind === 'object' && rec && rec.family === 'Z')) return [];
+  const name = subj && subj.kind === 'entity' ? norm(subj.value) : null;
   const placed = (x) => x && typeof x === 'object' && Number.isFinite(x.bearing) && (!name || norm(x.name) === name);
   return idsWhere(F, (id, x) => placed(x) && nearBearing(x.bearing, v));
 }
@@ -227,7 +228,7 @@ export function support(cl, F, rec, ctx, attributed) {
   const S = rec.safety, v = cl.value, mon = attributed && ctx && ctx.monitor ? ctx.monitor : null;
   if (cl.type === 'number' || cl.type === 'range') return numberSupport(cl, F, ctx, attributed);
   if (cl.type === 'count') return countSupport(cl, F);
-  if (cl.type === 'clock' || cl.type === 'region' || cl.type === 'compass') return positionSupport(cl, F);
+  if (cl.type === 'clock' || cl.type === 'region' || cl.type === 'compass') return positionSupport(cl, F, rec);
   if (GROUND_TYPES.includes(cl.type)) return groundSupport(cl, F);
   if (cl.type === 'bearing_clock') return idsWhere(F, (id, x) => id.endsWith('.bearing_clock') && x === v);
   if (cl.type === 'entity') return idsWhere(F, (id) => !id.startsWith('safety.') && factNames(id, F[id]).has(norm(v)));

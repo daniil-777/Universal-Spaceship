@@ -110,3 +110,10 @@ test('Z country names: the full ADMIN name where Natural Earth abbreviates (the 
   const t = verifyFreeText('The centre lies near 1° S, 29° E, in Democratic Republic of the Congo.', { family: 'Z', facts: { 'view.lat_deg': V(-1.2), 'view.lon_deg': V(29.1), 'place.country': V('Democratic Republic of the Congo') }, zoom: { tags: [] } }, { gaz: makeGazetteer([...BASE_NAMES, 'Democratic Republic of the Congo']) });
   assert.ok(t.verified, t.errors.join('; '));
 });
+test('Z compass claims: "Port Elizabeth ... to the north-west" binds to the place, not to a docking port (v1)', () => {
+  const z = { family: 'Z', facts: { 'place.nearest': V({ name: 'Port Elizabeth', km: 5000, bearing: 315, compass: 'north-west' }) }, zoom: { tags: [] } };
+  const gaz = makeGazetteer([...BASE_NAMES, 'Port Elizabeth']), ok = (t) => verifyFreeText(t, z, { gaz }).verified;
+  assert.ok(ok('To the north-west, about 5,000 km away, lies Port Elizabeth.') && ok('The closest large town is Port Elizabeth, about 5,000 km away to the north-west.'));
+  assert.ok(!ok('The closest large town is Port Elizabeth, about 5,000 km away to the south-east.'), 'the bearing still has to hold');
+  const d = { family: 'D', facts: {} }; assert.equal(verifyFreeText('The port lies to the north-west.', d, { gaz }).verified, false, 'a docking port is never placed by a compass word');
+});
