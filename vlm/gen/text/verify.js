@@ -24,6 +24,7 @@ import { UNITS, unitOf, inIv } from './verify_numbers.js';
 import { CONT_CUE } from './verify_words.js';
 import { parseClaims, norm } from './verify_claims.js';
 import { factsOf, derive, support } from './verify_rules.js';
+import { GROUND_TYPES, groundSlotError } from './verify_ground.js';
 
 export { niceStep, roundNice, UNITS, unitOf, numText, unitText, fmtSlot, rangeText } from './verify_numbers.js';
 export { W, NOUNS, ROUTE_NAMES, TERMS, BASE_NAMES, SENTENCE_WORDS } from './verify_words.js';
@@ -37,7 +38,7 @@ const SEMANTIC = ['category', 'outcome', 'adjective', 'kind', 'cause', 'disagree
 // claims only a Context line can ground in a flight row
 const CONTEXT_TYPES = [...MONITOR_TYPES, 'outcome', 'cause'];
 // claims a question states (verdict/action/reason/category/outcome/kind/cause words in a question are not claims)
-const PROMPT_TYPES = ['number', 'range', 'count', 'clock', 'bearing_clock', 'region', 'compass', 'entity', 'unknown_entity', 'adjective'];
+const PROMPT_TYPES = ['number', 'range', 'count', 'clock', 'bearing_clock', 'region', 'compass', 'entity', 'unknown_entity', 'adjective', 'box', 'point', 'latlon'];
 const sentencesOf = (text) => [...String(text).matchAll(/(?:[^.!?;]|\.(?=\d))+[.!?;]?/g)].map((m) => m[0].trim());
 // a claim is the monitor's when its sentence names the monitor, or opens with a continuation cue ("It advises...", "Best
 // action:") after one that does
@@ -106,6 +107,7 @@ function slotError(s, F) {
   if (s.type === 'entity') {
     return typeof x === 'string' && norm(x) === norm(s.value) ? null : `slot ${s.fact_id}: ${JSON.stringify(x)} is not ${s.value}`;
   }
+  if (s.type === 'latlon') return groundSlotError(s, F);
   return deq(x, s.value) ? null : `slot ${s.fact_id}: ${JSON.stringify(x)} is not ${JSON.stringify(s.value)}`;
 }
 const keyOfClaim = (c) => `${c.type}:${c.type === 'range' ? `${c.lo}-${c.hi === Infinity ? 'inf' : c.hi}` : c.value}`;
@@ -113,6 +115,7 @@ function slotKeys(s, gaz) {
   if (s.type === 'number') return [`number:${s.shown ?? +s.text.replace(/[^\d.]/g, '')}`];
   if (s.type === 'range' || s.type === 'monitor_range') return [`range:${s.shownLo}-${s.shownHi === Infinity ? 'inf' : s.shownHi}`];
   if (['count', 'clock', 'bearing_clock', 'region', 'compass'].includes(s.type)) return [`${s.type}:${s.value}`];
+  if (GROUND_TYPES.includes(s.type)) return [`${s.type}:${s.shown ?? s.value}`];
   if (s.type === 'entity') return [`entity:${gaz.canonical(String(s.value)) ?? s.value}`];
   const place = s.type === 'category' && typeof s.value === 'string' && gaz.has(s.value) && /^\p{Lu}/u.test(String(s.text));
   if (place) return [`entity:${gaz.canonical(s.value)}`];

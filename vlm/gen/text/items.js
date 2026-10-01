@@ -12,6 +12,7 @@ import { verifyTemplateItem, factsOf, catSlot, entSlot, countSlot, clockSlot, re
 import { QFAMILIES, makeNegative, NEGATIVE_TYPES, exportable, stationSlot, predictionOf, KIND_A, KIND_N, reasonsText } from './vqa.js';
 import { PALETTE_NAMES, BRIGHTNESS_BINS, EDGE_BINS, COAST_SIDES, TAG_WORDS } from '../schema.js';
 import { ACTION_TEXT, normContext } from './context.js';
+import { groundItems } from './ground_items.js';
 
 const list = (xs) => (xs.length < 2 ? xs.join('') : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`);
 const pick = (xs, rng) => xs[Math.floor(rng() * xs.length)];
@@ -151,5 +152,7 @@ export function recordTexts(rec, { bank, gaz, rng, split = 'train', context = nu
   for (const n of negs) { n.context_facts = contextFacts(n.fact_ids, rec); n.needsContext = n.context_facts.length > 0; hide(n); if (!n.verified) rejected.push({ item: n, errors: n.errors, parserOk: !n.errors.some((e) => e.startsWith('parser')) }); }
   const good = negs.filter((n) => n.verified).map((n) => ({ n, x: rng(), ok: exportable(n.fact_ids, rec, context) })).sort((p, r) => (p.ok === r.ok ? p.x - r.x : p.ok ? -1 : 1));
   if (good.length) texts.push(good[0].n); else skipped.push({ task: 'negative', why: 'no negative type fits the facts' });
+  // v1: grounding (boxes, points, counting by pointing, the runway outline, Z features and coordinates; ground_items.js)
+  for (const it of groundItems(rec, { bank, rng, split })) keep(it);
   return { texts, rejected, skipped };
 }

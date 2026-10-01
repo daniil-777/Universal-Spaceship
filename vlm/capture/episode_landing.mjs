@@ -10,7 +10,7 @@
 // and frames before the fault shows are byte-identical (build.mjs flags them pixel_identical_pair).
 import sharp from 'sharp';
 import { openPage, boot, BOOT, loadProbe, call, frame, waitIdle, Discard } from './session.mjs';
-import { frameStats, saneFrame, straddles, keepProb, landingW } from './probe/frame.js';
+import { frameStats, saneFrame, straddles, keepProb, freeSlots, dudKick, landingW } from './probe/frame.js';
 export const H = 1 / 120, PRE = 63, MAX_SAMPLES = 12;
 const chk = (S) => S.page.evaluate(() => window.__apv.check());
 async function step1(S, D, ops) { await waitIdle(S, null, { stop: D.stop }); await frame(S, D.mode); if (ops) ops.push(['frame']); }
@@ -67,13 +67,13 @@ async function clip(S, D, ep, out, ops, c, T, weight = 1) {
 }
 async function sampleRun(S, D, ep, out, ops, c0, T) {
   const tInj = c0.injAt === null || c0.injAt === undefined ? null : c0.injAt * H, endT = c0.endT ?? 900;
-  let pending = tInj !== null, k = 0, needPre = false;
+  let pending = tInj !== null, k = 0, needPre = false; const dud = dudKick(ep, c0);
   const adv = async (dt) => { await S.page.evaluate((x) => window.__landing.advance(x), dt); ops.push(['adv', dt]); needPre = true; };
   const preroll = async () => { if (needPre) for (let i = 0; i < PRE; i++) await step1(S, D, ops); needPre = false; };
   for (;;) {
     let c = await chk(S); if (c.done) break;
     // one slot stays free for a pending injection; the scheduled times left before the clean run's end share the others
-    const slots = MAX_SAMPLES - out.length - (pending ? 1 : 0), tS = slots > 0 ? ep.schedule[k] : undefined;
+    const slots = freeSlots(MAX_SAMPLES, out.length, pending, ep.preKick ?? MAX_SAMPLES, dud), tS = slots > 0 ? ep.schedule[k] : undefined;
     if (pending && (tS === undefined || Math.max(tS, c.t) + 1 >= tInj)) {
       pending = false;
       if (tInj - 1.1 > c.t + 2) await adv(tInj - 1.1 - c.t);

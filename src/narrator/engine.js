@@ -2,7 +2,8 @@
 //   Pilot Eye: vlm/web/pilot-eye-worker.js (ORT-web WASM, 6 MB), started when the Narrator opens; frames arrive as bitmaps.
 //   Narrator:  vlm/web/narrator.js (transformers.js 4.3 from jsdelivr, SmolVLM v0, 244 MB of ONNX), loaded only after
 //              the user agrees to the download; the browser's Cache Storage keeps it for later visits.
-// Both come from /__vlm/models/ (node vlm/web/serve.mjs); ?eye= and ?narrator= pick other folders there.
+// Both come from /__vlm/models/ (node vlm/web/serve.mjs): the folders models/current.json names (written by
+// vlm/tools/install_models.mjs), else the v0 ones; ?eye= and ?narrator= pin other folders there.
 import { createNarrator, contextLine, NARRATOR_TASKS } from '../../vlm/web/narrator.js';
 
 const TF_URL = 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.3.0';
@@ -10,13 +11,26 @@ const STORE = 'astro.narrator';
 export const DOWNLOAD_MB = 244;
 // the trained prompts: caption_detail, safety, and the VQA "What action is recommended?" (80 training rows)
 export const TASKS = Object.freeze({ describe: NARRATOR_TASKS.describe, safety: NARRATOR_TASKS.safety, now: 'What action is recommended?' });
-export const TOKENS = Object.freeze({ describe: 90, safety: 64, now: 48, ask: 56 });
+// safety: room for the 4 sentences the gate keeps (V1-10)
+export const TOKENS = Object.freeze({ describe: 90, safety: 88, now: 48, ask: 56 });
 
 // ?narratorMock=1 (canned text, no models) is for local QA only: it is ignored on any host but this machine
 const LOCAL = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
+export const V0 = Object.freeze({ eye: 'pilot-eye-v0/export', narrator: 'narrator-v0' });
+const folder = (s) => (typeof s === 'string' && /^[\w./-]+$/.test(s) && !s.includes('..') ? s : null);
 export function config(search = location.search, host = location.hostname) {
-  const q = new URLSearchParams(search), clean = (s, d) => (s && /^[\w./-]+$/.test(s) && !s.includes('..') ? s : d);
-  return { base: '/__vlm/models/', eye: clean(q.get('eye'), 'pilot-eye-v0/export'), narrator: clean(q.get('narrator'), 'narrator-v0'), mock: q.get('narratorMock') === '1' && LOCAL.has(host) };
+  const q = new URLSearchParams(search), eye = folder(q.get('eye')), narrator = folder(q.get('narrator'));
+  return { base: '/__vlm/models/', eye: eye || V0.eye, narrator: narrator || V0.narrator, pinned: { eye: !!eye, narrator: !!narrator }, mock: q.get('narratorMock') === '1' && LOCAL.has(host) };
+}
+// the installed models: cfg.eye / cfg.narrator from models/current.json unless the URL pinned them; v0 when it is missing
+export async function resolveCurrent(cfg, get = (...a) => globalThis.fetch(...a)) {
+  const pin = cfg.pinned || {};
+  if (pin.eye && pin.narrator) return cfg;
+  try {
+    const r = await get(`${cfg.base}current.json`, { cache: 'no-store' });
+    if (r && r.ok) { const c = await r.json(); if (!pin.eye && folder(c.eye)) cfg.eye = c.eye; if (!pin.narrator && folder(c.narrator)) cfg.narrator = c.narrator; }
+  } catch { /* no current.json: the v0 folders */ }
+  return cfg;
 }
 // consent and download state, remembered per browser (a blocked storage just asks again)
 export const memory = {
@@ -34,14 +48,16 @@ function bitmapImage(tf, bitmap) {
 // io: Worker, fetch and importTf are injectable (tests). Pilot Eye has backpressure: a frame is posted only once the
 // worker is ready and no other frame is outstanding; any other frame is dropped and its bitmap closed at once.
 export function createEngine(cfg = config(), { Worker: WorkerCtor = globalThis.Worker, fetch: get = (...a) => globalThis.fetch(...a), importTf = () => import(TF_URL) } = {}) {
-  let labels = null, worker = null, onResult = null, nid = 0, tf = null, narrator = null, loading = null, eyeReady = false, outstanding = 0;
-  const eyeUrl = (f) => `${cfg.base}${cfg.eye}/${f}`;
+  let labels = null, worker = null, onResult = null, nid = 0, tf = null, narrator = null, loading = null, eyeReady = false, outstanding = 0, resolved = null;
+  const eyeUrl = (f) => `${cfg.base}${cfg.eye}/${f}`, current = () => (resolved ||= resolveCurrent(cfg, get));
   return {
     mock: false,
     get device() { return narrator ? narrator.device : null; },
     get ready() { return !!narrator; },
     get loadMs() { return narrator ? narrator.loadMs : null; },
+    get models() { return { eye: cfg.eye, narrator: cfg.narrator }; },
     async probe() {
+      await current();
       try { const r = await get(eyeUrl('labels.json'), { cache: 'no-store' }); if (!r.ok) return { ok: false }; labels = await r.json(); return { ok: true, labels }; } catch { return { ok: false }; }
     },
     startEye(cb) {
@@ -68,7 +84,7 @@ export function createEngine(cfg = config(), { Worker: WorkerCtor = globalThis.W
     // resolves once the Narrator is in memory; onProgress({loaded, total}) in bytes while it downloads or reads the cache
     loadNarrator(onProgress) {
       return (loading ||= (async () => {
-        tf = await importTf();
+        await current(); tf = await importTf();
         narrator = await createNarrator({ tf, modelId: cfg.narrator, localModelPath: cfg.base, onProgress });
         return narrator;
       })().catch((e) => { loading = null; throw e; }));

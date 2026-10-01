@@ -1,0 +1,425 @@
+{
+ "ground_box_q": {
+  "kind": "vqa_q",
+  "families": [
+   "S",
+   "A"
+  ],
+  "slots": [
+   "kind"
+  ],
+  "forms": [
+   "Where is the nearest {kind} in the image? Answer with its box.",
+   "Give the bounding box of the nearest {kind}.",
+   "Draw a box around the closest {kind} and give its corners.",
+   "Locate the nearest {kind}: what is its box?",
+   "Which box holds the closest {kind} in view?",
+   "Find the nearest {kind} and answer with a bounding box.",
+   "Box the closest {kind} in the frame.",
+   "What box encloses the nearest {kind}?",
+   "Detect the closest {kind} and give its box.",
+   "Show me where the nearest {kind} is, as a box.",
+   "Mark the nearest {kind} with a bounding box.",
+   "Where does the closest {kind} sit in the frame, as a box?"
+  ]
+ },
+ "ground_box_a": {
+  "kind": "vqa_a",
+  "families": [
+   "S",
+   "A"
+  ],
+  "slots": [
+   "a_kind",
+   "box"
+  ],
+  "forms": [
+   "The nearest one is {a_kind} at {box}.",
+   "It is {a_kind}, boxed at {box}.",
+   "Box: {box}, holding {a_kind}.",
+   "The closest is {a_kind} in the box {box}.",
+   "I see {a_kind} at {box}.",
+   "The box {box} holds {a_kind}.",
+   "Nearest: {a_kind}, box {box}.",
+   "That is {a_kind}, and its box is {box}.",
+   "You can find {a_kind} inside {box}.",
+   "The bounding box is {box}; it is {a_kind}.",
+   "Closest in view: {a_kind} at {box}."
+  ]
+ },
+ "ground_point_q": {
+  "kind": "vqa_q",
+  "families": [
+   "S",
+   "A"
+  ],
+  "slots": [
+   "kind"
+  ],
+  "forms": [
+   "Point to the nearest {kind}.",
+   "Where is the closest {kind}? Answer with a point.",
+   "Give one point on the nearest {kind}.",
+   "Point at the closest {kind} in the image.",
+   "Which point marks the nearest {kind}?",
+   "Tap the nearest {kind}: where is it?",
+   "Show the closest {kind} with a single point.",
+   "Where in the frame is the nearest {kind}, as a point?",
+   "Mark the nearest {kind} with a point.",
+   "Pick out the closest {kind} with a point.",
+   "Point out the nearest {kind} in view."
+  ]
+ },
+ "ground_point_a": {
+  "kind": "vqa_a",
+  "families": [
+   "S",
+   "A"
+  ],
+  "slots": [
+   "pt"
+  ],
+  "forms": [
+   "It is at {pt}.",
+   "Here: {pt}.",
+   "The point is {pt}.",
+   "You will find it at {pt}.",
+   "At {pt}.",
+   "It sits at {pt}.",
+   "Look at {pt}.",
+   "The nearest one is at {pt}.",
+   "That one is at {pt}.",
+   "Point: {pt}.",
+   "It shows up at {pt}."
+  ]
+ },
+ "ground_count_q": {
+  "kind": "vqa_q",
+  "families": [
+   "S",
+   "A"
+  ],
+  "slots": [],
+  "forms": [
+   "How many hazards can you see? Point to each one.",
+   "Count the hazards in view by pointing to them.",
+   "Point to every hazard in the frame and say how many there are.",
+   "How many hazards are visible? Give a point for each.",
+   "List the hazards in the image as points and count them.",
+   "Point at each hazard you can see; how many is that?",
+   "Count the visible hazards and point to them.",
+   "Mark every visible hazard with a point and give the count.",
+   "How many hazards does the frame show? Point to them all.",
+   "Give the number of hazards in view, pointing to each.",
+   "Find all the hazards in the picture and point to each of them."
+  ]
+ },
+ "ground_count_a": {
+  "kind": "vqa_a",
+  "families": [
+   "S",
+   "A"
+  ],
+  "slots": [
+   "count",
+   "points"
+  ],
+  "forms": [
+   "I can point to {count}: {points}.",
+   "In view I find {count}, at {points}.",
+   "Counting by pointing: {count}, at {points}.",
+   "I see {count}: {points}.",
+   "The frame holds {count}, at {points}.",
+   "Visible: {count}, at {points}.",
+   "I count {count}, at {points}.",
+   "Pointing to each gives {count}: {points}.",
+   "The image shows {count}, located at {points}.",
+   "Visible in the frame: {count}, at {points}.",
+   "My count is {count}: {points}."
+  ]
+ },
+ "ground_refer_q": {
+  "kind": "vqa_q",
+  "families": [
+   "S",
+   "A"
+  ],
+  "slots": [
+   "pt"
+  ],
+  "forms": [
+   "What is at {pt} in the image?",
+   "What object sits at {pt}?",
+   "Identify the object at {pt}.",
+   "What do you see at {pt}?",
+   "Name the hazard at {pt}.",
+   "What kind of hazard is at {pt}?",
+   "Tell me what is at the point {pt}.",
+   "Which object is found at {pt}?",
+   "What lies at {pt} in the frame?",
+   "Look at {pt}: what is there?",
+   "What is the thing at {pt}?"
+  ]
+ },
+ "ground_refer_a": {
+  "kind": "vqa_a",
+  "families": [
+   "S",
+   "A"
+  ],
+  "slots": [
+   "a_kind"
+  ],
+  "forms": [
+   "That is {a_kind}.",
+   "It is {a_kind}.",
+   "There is {a_kind} there.",
+   "I see {a_kind} at that point.",
+   "The object there is {a_kind}.",
+   "At that point sits {a_kind}.",
+   "It looks like {a_kind}.",
+   "That point marks {a_kind}.",
+   "You are pointing at {a_kind}.",
+   "The hazard there is {a_kind}.",
+   "What sits there is {a_kind}."
+  ]
+ },
+ "runway_box_q": {
+  "kind": "vqa_q",
+  "families": [
+   "L"
+  ],
+  "slots": [],
+  "forms": [
+   "Where is the runway in the image? Answer with its box.",
+   "Give the bounding box of the runway.",
+   "Box the runway outline in view.",
+   "Which box holds the runway?",
+   "Locate the runway and answer with a box.",
+   "Mark the runway with a bounding box.",
+   "Where does the runway appear in the frame, as a box?",
+   "Draw a box around the runway and give its corners.",
+   "Find the runway in the picture: what is its box?",
+   "What box encloses the runway outline?",
+   "Detect the runway and give its bounding box."
+  ]
+ },
+ "runway_box_a": {
+  "kind": "vqa_a",
+  "families": [
+   "L"
+  ],
+  "slots": [
+   "box"
+  ],
+  "forms": [
+   "The runway outline is at {box}.",
+   "Runway box: {box}.",
+   "The runway sits inside {box}.",
+   "You can find the runway at {box}.",
+   "The box {box} holds the runway.",
+   "I see the runway at {box}.",
+   "The runway appears in the box {box}.",
+   "Its bounding box is {box}.",
+   "The runway lies within {box}.",
+   "Boxed, the runway is at {box}.",
+   "The outline of the runway fits in {box}."
+  ]
+ },
+ "runway_point_q": {
+  "kind": "vqa_q",
+  "families": [
+   "L"
+  ],
+  "slots": [],
+  "forms": [
+   "Point to the near end of the runway.",
+   "Where is the runway threshold in the image? Answer with a point.",
+   "Mark the runway threshold with a point.",
+   "Give one point on the near threshold of the runway.",
+   "Point at the start of the runway.",
+   "Which point marks the runway threshold?",
+   "Show the threshold of the runway with a single point.",
+   "Where does the runway begin in the frame, as a point?",
+   "Point out the landing threshold.",
+   "Pick out the near threshold of the runway with a point.",
+   "Where is the touchdown end of the runway, as a point?"
+  ]
+ },
+ "runway_point_a": {
+  "kind": "vqa_a",
+  "families": [
+   "L"
+  ],
+  "slots": [
+   "pt"
+  ],
+  "forms": [
+   "The runway threshold is at {pt}.",
+   "The threshold is at {pt}.",
+   "The runway begins at {pt}.",
+   "You will find the threshold at {pt}.",
+   "The near end of the runway is at {pt}.",
+   "It is at {pt}.",
+   "Threshold: {pt}.",
+   "Look at {pt} for the threshold.",
+   "The start of the runway sits at {pt}.",
+   "The landing threshold shows at {pt}.",
+   "At {pt} the runway begins."
+  ]
+ },
+ "feature_point_q": {
+  "kind": "vqa_q",
+  "families": [
+   "Z"
+  ],
+  "slots": [
+   "feature"
+  ],
+  "forms": [
+   "Where is {feature} in the image? Answer with a point.",
+   "Point to {feature}.",
+   "Give one point on {feature}.",
+   "Where in the frame does {feature} appear?",
+   "Mark {feature} with a point.",
+   "Point at {feature} in this view.",
+   "Which point marks {feature}?",
+   "Show me {feature} with a single point.",
+   "In the picture, where is {feature}? Give a point.",
+   "Pick out {feature} with a point.",
+   "Where can I see {feature} here, as a point?"
+  ]
+ },
+ "feature_point_a": {
+  "kind": "vqa_a",
+  "families": [
+   "Z"
+  ],
+  "slots": [
+   "feature",
+   "pt"
+  ],
+  "forms": [
+   "You can find {feature} at {pt}.",
+   "In this view, {feature} is at {pt}.",
+   "The point for {feature} is {pt}.",
+   "Look at {pt} to see {feature}.",
+   "The image shows {feature} at {pt}.",
+   "It is at {pt}, where {feature} lies.",
+   "At {pt} lies {feature}.",
+   "I would point to {pt} for {feature}.",
+   "Here, {feature} sits at {pt}.",
+   "The frame places {feature} at {pt}.",
+   "Try {pt}: that is {feature}."
+  ]
+ },
+ "geo_q": {
+  "kind": "vqa_q",
+  "families": [
+   "Z"
+  ],
+  "slots": [],
+  "forms": [
+   "Where is this? Give the latitude and longitude of the centre.",
+   "What are the coordinates of the middle of this view?",
+   "Where on Earth is the camera looking? Answer with latitude and longitude.",
+   "Give the approximate latitude and longitude of the view centre.",
+   "Locate this view on the globe.",
+   "At what latitude and longitude is the centre of the image?",
+   "Where am I looking? Give coordinates.",
+   "What latitude and longitude does the image centre show?",
+   "Estimate the coordinates of this place.",
+   "Which coordinates mark the centre point of the frame?",
+   "Where is this spot on the map, in latitude and longitude?"
+  ]
+ },
+ "geo_a": {
+  "kind": "vqa_a",
+  "families": [
+   "Z"
+  ],
+  "slots": [
+   "latlon",
+   "country"
+  ],
+  "forms": [
+   "The view is centred near {latlon}, in {country}.",
+   "This is around {latlon}, in {country}.",
+   "The centre lies near {latlon}, in {country}.",
+   "Roughly {latlon}, in {country}.",
+   "The camera looks at about {latlon}, over {country}.",
+   "Its centre is near {latlon}; the country is {country}.",
+   "Near {latlon}, in {country}.",
+   "The middle of the image is around {latlon}, in {country}.",
+   "I place it near {latlon}, in {country}.",
+   "This spot is close to {latlon}, within {country}.",
+   "The coordinates are about {latlon}, which is in {country}."
+  ]
+ },
+ "geo_sea_a": {
+  "kind": "vqa_a",
+  "families": [
+   "Z"
+  ],
+  "slots": [
+   "latlon"
+  ],
+  "forms": [
+   "The view is centred near {latlon}.",
+   "This is around {latlon}.",
+   "The centre lies near {latlon}.",
+   "Roughly {latlon}.",
+   "The camera looks at about {latlon}.",
+   "Its centre is near {latlon}.",
+   "Near {latlon}.",
+   "The middle of the image is around {latlon}.",
+   "I place it near {latlon}.",
+   "This spot is close to {latlon}.",
+   "The coordinates are about {latlon}."
+  ]
+ },
+ "ground_detect_q": {
+  "kind": "vqa_q",
+  "families": [
+   "S",
+   "A"
+  ],
+  "slots": [],
+  "forms": [
+   "Detect every hazard in the image and give each one a box.",
+   "List the hazards you can see with their bounding boxes.",
+   "Find all the hazards in the frame; answer with a box for each.",
+   "What hazards are in view, and where? Give boxes.",
+   "Box every hazard in the picture.",
+   "Give the kind and the box of each visible hazard.",
+   "Mark each hazard in view with a bounding box and name it.",
+   "Which hazards does the frame show? Answer with boxes.",
+   "Detect the hazards in this view, one box each.",
+   "Name every hazard you can see and box it.",
+   "Show me all the hazards in the frame as boxes."
+  ]
+ },
+ "ground_detect_a": {
+  "kind": "vqa_a",
+  "families": [
+   "S",
+   "A"
+  ],
+  "slots": [
+   "detections"
+  ],
+  "forms": [
+   "I see {detections}.",
+   "The frame shows {detections}.",
+   "In view: {detections}.",
+   "There is {detections}.",
+   "Detected: {detections}.",
+   "The image holds {detections}.",
+   "Visible hazards: {detections}.",
+   "I can make out {detections}.",
+   "Boxed, the hazards are {detections}.",
+   "Here are the hazards: {detections}.",
+   "The picture contains {detections}."
+  ]
+ }
+}

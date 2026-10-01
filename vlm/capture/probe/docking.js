@@ -10,6 +10,7 @@
 // rAF renders that sim (dt, tReal, plume filter and sky warp as for a page sim) and a capture stays a read of the page frame.
 import { dockingFacts, dockingNow, dockingBranches, cycleOf, applyDockingKick, createRealSim, drawRun, SHIP_PORT, portRel } from '../../gen/labels/docking.js';
 import { qRotate } from '../../../src/mathx.js';
+import { dockingState } from '../../gen/labels/rawstate.js';
 const camOf = (c, mode) => ({ mode, fov_deg: c.fov, aspect: c.aspect, near: c.near, far: c.far, matrixWorldInverse: Array.from(c.matrixWorldInverse.elements), projectionMatrix: Array.from(c.projectionMatrix.elements) });
 const sim = (st) => st.own || st.R.sim, r3 = (x) => +x.toFixed(3);
 const qtyOf = (s, qty) => { const p = portRel(s.x, s.q); return qty === 'rho_m' ? Math.hypot(p[0], p[1], p[2]) : -p[0]; };
@@ -71,7 +72,8 @@ export function capture(st, { mode }) {
   if ((mode === 'centreline') !== st.cl) throw new Error(`a ${mode} capture with the centreline override ${st.cl ? 'on' : 'off'}`);
   const cv = document.getElementById('view'), gl = cv.getContext('webgl2') || cv.getContext('webgl');
   if (!gl.getContextAttributes().preserveDrawingBuffer) throw new Error('preserveDrawingBuffer is off');
-  return { png: cv.toDataURL('image/png'), cam: camOf(st.R.scene.camera, mode), clock: { date_ms: Date.now(), perf_ms: performance.now() }, step: cycleOf(sim(st)) };
+  // V1-2: the frame's raw state (ship pose in LVLH, its port's world position); the station port is static (rawstate.js sceneOf)
+  return { png: cv.toDataURL('image/png'), cam: camOf(st.R.scene.camera, mode), clock: { date_ms: Date.now(), perf_ms: performance.now() }, step: cycleOf(sim(st)), state: dockingState(sim(st)) };
 }
 export function snap(st) { const s = sim(st), sp = st.R.scene.space; st.snaps.push({ step: cycleOf(s), now: dockingNow(s), facts: dockingFacts(s, { space: sp ? { sunLit: sp.sunLit, earthInFrame: null } : null }), x: Array.from(s.x), q: Array.from(s.q) }); return cycleOf(s); }
 // s.run() steps the sim's own closure: an armed kick that has not fired by now stays unfired, as in the samples' labels

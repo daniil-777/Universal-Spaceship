@@ -5,6 +5,7 @@ import { UNITS, WORDS, rangeText, aboutHolds, numericEntries, binEntries, inIv, 
 import { W, NOUNS, ROUTE_NAMES, WORLD_TAGS, CAUSE_REASONS } from './verify_words.js';
 import { norm } from './verify_claims.js';
 import { TTC_RANGE, CLR_RANGE_U } from './context.js';
+import { groundSupport, GROUND_TYPES } from './verify_ground.js';
 
 export function factsOf(rec) {
   const F = { ...(rec.facts || {}) };
@@ -155,7 +156,7 @@ const CAT = { size: (F, v) => idsWhere(F, (id, x) => /^hazard\.\d+\.size_bin$/.t
 // ---- position claims, bound to their subject ----
 const COMPASS = ['north', 'north-east', 'east', 'south-east', 'south', 'south-west', 'west', 'north-west'];
 const nearBearing = (b, c) => Math.abs(((b - COMPASS.indexOf(c) * 45 + 540) % 360) - 180) <= 22.5;
-function positionSupport(cl, F) {
+function positionSupport(cl, F, rec = null) {
   const v = cl.value, subj = cl.subject, off = subj && (subj.kind === 'body' || subj.kind === 'object');
   if (cl.type === 'clock') {
     if (off || (subj && subj.kind !== 'hazard')) return [];
@@ -170,9 +171,10 @@ function positionSupport(cl, F) {
     const boxes = hazards(F, subj).filter(inRegion).map((i) => `hazard.${i}.box_px`);
     return subj ? boxes : [...boxes, ...featuresWhere(F, null, (r) => r === v)];
   }
-  // compass: a place's bearing from the view centre
-  if (subj && subj.kind !== 'entity') return [];
-  const name = subj ? norm(subj.value) : null;
+  // compass: a place's bearing from the view centre. A Z view has no docking port, runway or windsock, so an object noun
+  // there is part of a place name ('Port Elizabeth', 'Port Moresby') and binds nothing (v1)
+  if (subj && subj.kind !== 'entity' && !(subj.kind === 'object' && rec && rec.family === 'Z')) return [];
+  const name = subj && subj.kind === 'entity' ? norm(subj.value) : null;
   const placed = (x) => x && typeof x === 'object' && Number.isFinite(x.bearing) && (!name || norm(x.name) === name);
   return idsWhere(F, (id, x) => placed(x) && nearBearing(x.bearing, v));
 }
@@ -198,7 +200,11 @@ function numberSupport(cl, F, ctx, attributed) {
   return out;
 }
 function countSupport(cl, F) {
-  const v = cl.value, n = F['hazards.count_in_frame'], kinds = F.kinds_in_frame, papi = F.papi_whites_cam;
+  const v = cl.value, n = F['hazards.count_in_frame'], kinds = F.kinds_in_frame, papi = F.papi_whites_cam, g = F['ground.hazards'];
+  if (g && Array.isArray(g.v) && F['ground.complete'] && F['ground.complete'].v === true && v > 0) {
+    const mine = g.v.filter((h) => cl.noun === 'hazard' || h.kind === cl.noun);
+    if (mine.length === v && mine.every((h) => h.alone) && (cl.noun === 'hazard' || g.v.every((h) => h.kind === cl.noun))) return ['ground.hazards'];
+  }
   if (cl.noun === 'hazard') return n && n.v === v ? ['hazards.count_in_frame'] : [];
   if (cl.noun === 'white') return papi && papi.v === v ? ['papi_whites_cam'] : [];
   if (cl.noun === 'red') return papi && typeof papi.v === 'number' && 4 - papi.v === v ? ['papi_whites_cam'] : [];
@@ -222,7 +228,8 @@ export function support(cl, F, rec, ctx, attributed) {
   const S = rec.safety, v = cl.value, mon = attributed && ctx && ctx.monitor ? ctx.monitor : null;
   if (cl.type === 'number' || cl.type === 'range') return numberSupport(cl, F, ctx, attributed);
   if (cl.type === 'count') return countSupport(cl, F);
-  if (cl.type === 'clock' || cl.type === 'region' || cl.type === 'compass') return positionSupport(cl, F);
+  if (cl.type === 'clock' || cl.type === 'region' || cl.type === 'compass') return positionSupport(cl, F, rec);
+  if (GROUND_TYPES.includes(cl.type)) return groundSupport(cl, F);
   if (cl.type === 'bearing_clock') return idsWhere(F, (id, x) => id.endsWith('.bearing_clock') && x === v);
   if (cl.type === 'entity') return idsWhere(F, (id) => !id.startsWith('safety.') && factNames(id, F[id]).has(norm(v)));
   if (cl.type === 'category') return CAT[cl.dim] ? CAT[cl.dim](F, v, cl, rec) : [];

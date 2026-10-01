@@ -9,6 +9,7 @@ import { runZoomLocation } from './episode_zoom.mjs';
 import { runLanding } from './episode_landing.mjs';
 import { runDocking } from './episode_docking.mjs';
 import { Discard } from './session.mjs';
+import { PRE_KICK } from './probe/frame.js';
 import { viewSplit, buildOodMask } from '../gen/sampler_z.js';
 import { loadNaturalEarth } from '../gen/geo/naturalearth.js';
 import { nextSpare } from './zplan.mjs';
@@ -56,6 +57,7 @@ function plan(D, family, e, seed0, rsOverride, forceWhen = null) {
   if (family === 'S' || family === 'A') { ep.params = { ...p.params, measure: !!D.measure, policySteps: family === 'S' && D.policy ? D.policy.steps : null }; ep.policySha = (family === 'S' || p.policyId === 'atmo_ppo') && D.policy ? D.policy.sha : null; }
   if (forceWhen) ep.inject = null;
   if (family === 'A') ep.warmup = (S) => aWarmup(S, D, ep);
+  if (family === 'L' || family === 'D') ep.preKick = PRE_KICK[family];
   if (family === 'L') ep.schedule = landingSchedule(rng);
   if (family === 'D') ep.schedule = dockingSchedule(rng, p.params.start);
   if (ep.inject && ep.inject.at !== 'runtime' && family !== 'L') ep.inject = family === 'D' && ep.inject.kind === 'failed_p6' ? ep.inject : null;

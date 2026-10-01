@@ -192,6 +192,10 @@ export const STOP = new Set(['I', 'Context', 'Earth', 'Moon', 'Sun', 'V-bar']);
 // checks it).
 const NUMBER_WORDS = ['zero', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve', 'thirteen',
   'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen', 'twenty'];
+// v1 grounding templates (bank/grounding.json): their sentence openers and the rest of their words
+const GROUND_OPENERS = ['answer', 'box', 'boxed', 'detect', 'detected', 'draw', 'find', 'list', 'locate', 'mark', 'pick', 'pointing', 'runway', 'show', 'tap', 'threshold', 'try'];
+const GROUND_VOCAB = [...GROUND_OPENERS, 'approximate', 'boxes', 'begin', 'begins', 'bounding', 'coordinates', 'corners', 'fits', 'globe', 'latitude', 'longitude', 'map', 'marks', 'outline',
+  'single', 'start', 'thing', 'touchdown'];
 export const SENTENCE_WORDS = new Set([...PALETTE_NAMES, 'gray', 'tan', ...NUMBER_WORDS, ...WORD_LIST(`
   a about above according across actions advice aerial after again against ahead air airspeed all along already also although always am
   an and another any anything are around as at away back be because been before behind being below beside best between beyond both but
@@ -214,7 +218,7 @@ export const SENTENCE_WORDS = new Set([...PALETTE_NAMES, 'gray', 'tan', ...NUMBE
   besides despite via past front rear back apart plenty lots whole entire half certain various different same snow-capped snow sand
   trees fields forests roads rivers lakes streets houses buildings stars lights shadows land cloudless hazy foggy rainy windy sunny
   calm first second third finally lastly later earlier tonight furthermore hence therefore likewise similarly altogether additionally
-  again visibly beyond straight shown viewed pictured captured taken heading approaching`)]);
+  again visibly beyond straight shown viewed pictured captured taken heading approaching`), ...GROUND_OPENERS]);
 // common English verbs, adjectives and irregular participles that open descriptions and instructions ("Watch the rock",
 // "Keep the runway centred", "Lit by the Sun, ..."); words ending in -ing, -ed or -ly, and hyphenated compounds of common
 // words ("Built-up"), count as common too
@@ -300,6 +304,6 @@ const BANK_VOCAB = WORD_LIST(`
   value verdict vertical vertically view viewed viewing viewpoint views visibility visible was water way we weather well wet what when
   where which while white whole whose why will wind windsock wing wings with within without working works world worried worry would
   wrong yellow yes yet you`);
-export const COMMON_LOWER = new Set([...SENTENCE_WORDS, ...COMMON_EN, ...BANK_VOCAB, ...WORD_LIST(`north north-east east south-east
+export const COMMON_LOWER = new Set([...SENTENCE_WORDS, ...COMMON_EN, ...BANK_VOCAB, ...GROUND_VOCAB, ...WORD_LIST(`north north-east east south-east
   south south-west west north-west northeast northwest southeast southwest northern southern eastern western centre center middle upper
   lower top bottom left right`)]);

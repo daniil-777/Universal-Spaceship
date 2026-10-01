@@ -60,7 +60,7 @@ test('narratorFrame: the Narrator row image joined on key; D falls back to its c
   assert.equal(narratorFrame(d), 'raw/apv-pilot/D/D_apv-pilot_00000_000371.chase.png'); assert.equal(narratorFrame(s), s.frames[2]);
   assert.equal(narratorFrame(s, new Map([[s.key, 'raw/x.png']])), 'raw/x.png'); assert.equal(narratorFrame(d, new Map()), 'raw/apv-pilot/D/D_apv-pilot_00000_000371.chase.png');
   assert.deepEqual(NARRATOR_TASKS, { describe: 'Describe the image in detail.', safety: 'Is the situation safe? Explain.' }, 'the demo buttons send trained prompts');
-  const demo = fs.readFileSync(new URL('../vlm/web/demo.html', import.meta.url), 'utf8'); assert.match(demo, /NARRATOR_TASKS/); assert.match(demo, /narratorFrame\(/); assert.doesNotMatch(demo, /'Is it safe\?'/);
+  const demo = fs.readFileSync(new URL('../vlm/web/demo.html', import.meta.url), 'utf8'); assert.match(demo, /NARRATOR_TASKS/); assert.match(demo, /models\/current\.json/, 'the demo reads the installed models'); assert.match(demo, /narratorFrame\(/); assert.doesNotMatch(demo, /'Is it safe\?'/);
 });
 const APV = process.env.APV_DATASET_DIR || '/Volumes/LaCie/astro-pilot/vlm/datasets/apv-pilot';
 test('narratorFrame without the join reproduces images[0] of every Narrator row whose key is a Pilot Eye row (dataset ood split)', { skip: !fs.existsSync(path.join(APV, 'narrator', 'ood.jsonl')) && `no dataset at ${APV}` }, () => {
