@@ -377,5 +377,49 @@
    "This spot is close to {latlon}.",
    "The coordinates are about {latlon}."
   ]
+ },
+ "ground_detect_q": {
+  "kind": "vqa_q",
+  "families": [
+   "S",
+   "A"
+  ],
+  "slots": [],
+  "forms": [
+   "Detect every hazard in the image and give each one a box.",
+   "List the hazards you can see with their bounding boxes.",
+   "Find all the hazards in the frame; answer with a box for each.",
+   "What hazards are in view, and where? Give boxes.",
+   "Box every hazard in the picture.",
+   "Give the kind and the box of each visible hazard.",
+   "Mark each hazard in view with a bounding box and name it.",
+   "Which hazards does the frame show? Answer with boxes.",
+   "Detect the hazards in this view, one box each.",
+   "Name every hazard you can see and box it.",
+   "Show me all the hazards in the frame as boxes."
+  ]
+ },
+ "ground_detect_a": {
+  "kind": "vqa_a",
+  "families": [
+   "S",
+   "A"
+  ],
+  "slots": [
+   "detections"
+  ],
+  "forms": [
+   "I see {detections}.",
+   "The frame shows {detections}.",
+   "In view: {detections}.",
+   "There is {detections}.",
+   "Detected: {detections}.",
+   "The image holds {detections}.",
+   "Visible hazards: {detections}.",
+   "I can make out {detections}.",
+   "Boxed, the hazards are {detections}.",
+   "Here are the hazards: {detections}.",
+   "The picture contains {detections}."
+  ]
  }
 }

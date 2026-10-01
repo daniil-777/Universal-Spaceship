@@ -5,6 +5,7 @@
 //   S/A  ground_box    the nearest visible hazard's box          ground_point  its point
 //        ground_count  counting by pointing: every visible hazard as a point, only when the list is complete and no hazard's
 //                      box is more than half covered by a nearer one (occlusion is not modelled)
+//        ground_detect detection: every visible hazard as its kind and box, under the same condition (2-6 hazards)
 //        ground_refer  a point in the question, the hazard kind there in the answer (a hazard no other box covers)
 //   L    runway_box / runway_point   the runway outline in view and its near threshold (chase camera, fog-gated)
 //   Z    feature_point  a Natural Earth feature's pixel position   geo  the view centre as latitude/longitude (whole
@@ -15,7 +16,7 @@ import { groundSlot, boxText, pointText, latlonText } from './verify_ground.js';
 import { KIND_A, KIND_N } from './vqa.js';
 
 // the answer templates groundItems() produces (tests/vlm_text.test.mjs counts them as produced)
-export const GROUND_ANSWERS = Object.freeze(['ground_box_a', 'ground_point_a', 'ground_count_a', 'ground_refer_a', 'runway_box_a', 'runway_point_a', 'feature_point_a', 'geo_a', 'geo_sea_a']);
+export const GROUND_ANSWERS = Object.freeze(['ground_box_a', 'ground_point_a', 'ground_count_a', 'ground_detect_a', 'ground_refer_a', 'runway_box_a', 'runway_point_a', 'feature_point_a', 'geo_a', 'geo_sea_a']);
 const v = (F, id) => (F[id] && F[id].v !== null && F[id].v !== undefined ? F[id].v : null);
 const list = (xs) => (xs.length < 2 ? xs.join('') : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`);
 const inside = (p, b) => p[0] >= b[0] && p[0] <= b[2] && p[1] >= b[1] && p[1] <= b[3];
@@ -41,6 +42,11 @@ export function groundItems(rec, { bank, rng, split = 'train' }) {
     if (complete && hz.length >= 1 && hz.length <= 8 && hz.every((h) => h.alone) && has('ground_count')) {
       const n = countSlot('ground.hazards', hz.length, 'hazard', ['len']), pts = hz.map((h, i) => groundSlot('point', 'ground.hazards', h.pt, pointText(h.pt), ['idx', i, 'pt']));
       out.push(item(bank, rng, split, 'ground_count', {}, { text: { count: n, points: list(pts.map((p) => p.text)) } }, [n, ...pts]));
+    }
+    // detection: every visible hazard as its kind and box (a complete list of 2-6, none more than half covered)
+    if (complete && hz.length >= 2 && hz.length <= 6 && hz.every((h) => h.alone && KIND_A[h.kind]) && has('ground_detect')) {
+      const kinds = hz.map((h, i) => catSlot('ground.hazards', h.kind, KIND_A[h.kind], ['idx', i, 'kind'])), boxes = hz.map((h, i) => groundSlot('box', 'ground.hazards', h.box, boxText(h.box), ['idx', i, 'box']));
+      out.push(item(bank, rng, split, 'ground_detect', {}, { text: { detections: list(hz.map((_, i) => `${kinds[i].text} at ${boxes[i].text}`)) } }, [...kinds, ...boxes]));
     }
     // a hazard whose point no other listed box covers, so the kind at that point is unambiguous
     const clear = hz.map((h, i) => [h, i]).filter(([h, i]) => KIND_A[h.kind] && hz.every((o, j) => j === i || !inside(h.pt, [o.box[0] - 2, o.box[1] - 2, o.box[2] + 2, o.box[3] + 2])));

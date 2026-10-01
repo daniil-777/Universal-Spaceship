@@ -193,8 +193,8 @@ export const STOP = new Set(['I', 'Context', 'Earth', 'Moon', 'Sun', 'V-bar']);
 const NUMBER_WORDS = ['zero', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve', 'thirteen',
   'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen', 'twenty'];
 // v1 grounding templates (bank/grounding.json): their sentence openers and the rest of their words
-const GROUND_OPENERS = ['answer', 'box', 'boxed', 'detect', 'draw', 'find', 'list', 'locate', 'mark', 'pick', 'pointing', 'runway', 'show', 'tap', 'threshold', 'try'];
-const GROUND_VOCAB = [...GROUND_OPENERS, 'approximate', 'begin', 'begins', 'bounding', 'coordinates', 'corners', 'fits', 'globe', 'latitude', 'longitude', 'map', 'marks', 'outline',
+const GROUND_OPENERS = ['answer', 'box', 'boxed', 'detect', 'detected', 'draw', 'find', 'list', 'locate', 'mark', 'pick', 'pointing', 'runway', 'show', 'tap', 'threshold', 'try'];
+const GROUND_VOCAB = [...GROUND_OPENERS, 'approximate', 'boxes', 'begin', 'begins', 'bounding', 'coordinates', 'corners', 'fits', 'globe', 'latitude', 'longitude', 'map', 'marks', 'outline',
   'single', 'start', 'thing', 'touchdown'];
 export const SENTENCE_WORDS = new Set([...PALETTE_NAMES, 'gray', 'tan', ...NUMBER_WORDS, ...WORD_LIST(`
   a about above according across actions advice aerial after again against ahead air airspeed all along already also although always am
