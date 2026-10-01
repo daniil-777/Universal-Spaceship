@@ -21,6 +21,9 @@ const salience = (a, b) => rankOf(a) - rankOf(b) || (b.pop ?? 0) - (a.pop ?? 0) 
 // title-cased for place.in_view and the gazetteer alike; short all-caps names (USA, UAE) are kept
 export const neName = (s) => (typeof s === 'string' && s.length > 3 && s === s.toUpperCase() && /\p{Lu}{2}/u.test(s) ? s.toLowerCase().replace(/(^|[\s(/-])(\p{L})/gu, (m, a, b) => a + b.toUpperCase()) : s);
 const r1 = (x) => (x === null || x === undefined ? null : +x.toFixed(1));
+// v1: Natural Earth abbreviates 37 country names ('Dem. Rep. Congo', 'Fr. Polynesia'), and the verifier reads 'Dem.' as a
+// sentence end, so every text naming them was rejected: the text facts use the full ADMIN name (in the gazetteer too)
+export const countryName = (p) => { const n = nameOf(p); return typeof n === 'string' && n.includes('.') && typeof p.ADMIN === 'string' && !p.ADMIN.includes('.') ? p.ADMIN : n; };
 function originOf(r) {
   const q = queryOf(r), lat = parseFloat(q.get('lat')), lon = parseFloat(q.get('lon'));
   return Number.isFinite(lat) && Number.isFinite(lon) ? { lat, lon } : { lat: r.facts['view.lat_deg'].v, lon: r.facts['view.lon_deg'].v };
@@ -39,7 +42,7 @@ export const zoomGeo = {
       if (!grid[k]) continue;
       const [lat, lon] = grid[k], sea = !isLand(ne, lon, lat), lake = !sea && featuresAt(ne, 'ne_10m_lakes', lon, lat).length > 0;
       P[k] = { lat, lon, sea, lake, elev: await elevAt(lat, lon), px: ((k % GRID_NX) + 0.5) * CELL_PX, py: (Math.floor(k / GRID_NX) + 0.5) * CELL_PX, coastRefine: true };
-      const c = featuresAt(ne, 'ne_10m_admin_0_countries', lon, lat)[0]; if (c) countries[nameOf(c.props)] = (countries[nameOf(c.props)] || 0) + 1;
+      const c = featuresAt(ne, 'ne_10m_admin_0_countries', lon, lat)[0]; if (c) countries[countryName(c.props)] = (countries[countryName(c.props)] || 0) + 1;
       const a = featuresAt(ne, 'ne_10m_admin_1_states_provinces', lon, lat)[0]; if (a && nameOf(a.props)) admin1[nameOf(a.props)] = (admin1[nameOf(a.props)] || 0) + 1;
     }
     const pts = P.filter(Boolean), n = Math.max(1, pts.length), all = elevStats(pts), land = elevStats(pts.filter((p) => !p.sea)), water = pts.filter((p) => p.sea || p.lake).length / n;
@@ -50,11 +53,11 @@ export const zoomGeo = {
     // place.country: the admin-0 country at the view centre, like place.admin1 (the bank's country templates state it); the
     // plurality over the grid only when the centre is sea, and always in geo.country_frac (review item 2)
     const centreCountry = featuresAt(ne, 'ne_10m_admin_0_countries', origin.lon, origin.lat)[0];
-    put('place.country', centreCountry ? nameOf(centreCountry.props) : Object.entries(countries).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0]?.[0] ?? null); put('geo.country_frac', frac(countries)); put('geo.admin1_frac', frac(admin1));
+    put('place.country', centreCountry ? countryName(centreCountry.props) : Object.entries(countries).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0]?.[0] ?? null); put('geo.country_frac', frac(countries)); put('geo.admin1_frac', frac(admin1));
     const centreAdmin = featuresAt(ne, 'ne_10m_admin_1_states_provinces', origin.lon, origin.lat)[0]; put('place.admin1', centreAdmin ? nameOf(centreAdmin.props) ?? null : null);
     put('place.in_view', view.filter((x) => typeof x.name === 'string' && x.name).sort(salience).map((x) => ({ name: neName(x.name), kind: x.kind, region: x.region })));
     // v1 grounding (ground.js): the same features at their pixel position, integers 0-100 on the frame, x first
-    put('ground.features', view.filter((x) => typeof x.name === 'string' && x.name).sort(salience).map((x) => ({ name: neName(x.name), kind: x.kind, pt: [nx(x.px), ny(x.py)] })));
+    put('ground.features', view.filter((x) => typeof x.name === 'string' && x.name && !x.name.includes('.')).sort(salience).map((x) => ({ name: neName(x.name), kind: x.kind, pt: [nx(x.px), ny(x.py)] })));
     const np = nearestPlace(ne, origin.lat, origin.lon, { exclude: inView });
     put('place.nearest', np ? { name: np.name, km: +np.km.toFixed(1), bearing: +np.bearing.toFixed(1), compass: np.compass } : null);
     const cellRelief = (thr) => {

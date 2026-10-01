@@ -9,6 +9,7 @@ import { boxHolds, pointHolds, iou } from '../vlm/gen/text/verify_ground.js';
 import { groundItems, GROUND_ANSWERS } from '../vlm/gen/text/ground_items.js';
 import { defaultBank } from '../vlm/gen/text/paraphrase.js';
 import { mulberry32 } from '../src/mathx.js';
+import { countryName } from '../vlm/gen/build/zoomgeo.js';
 
 const bank = defaultBank(), GAZ = makeGazetteer([...BASE_NAMES, 'Lake Geneva', 'Switzerland', 'Bern']);
 const V = (v, obs = 'visual', unit = null) => ({ v, unit, obs });
@@ -101,4 +102,11 @@ test('real v1 smoke records: every grounding item of S, A and L verifies (skippe
     for (const it of groundItems(r, { bank, rng: mulberry32(n), split: 'train' })) { const c = verifyTemplateItem(it, r, { gaz: GAZ }); assert.ok(c.verified, `${name} ${it.answer}: ${c.errors}`); n++; }
   }
   assert.ok(n > 50, `${n} items`);
+});
+test('Z country names: the full ADMIN name where Natural Earth abbreviates (the verifier reads "Dem." as a sentence end)', () => {
+  assert.equal(countryName({ NAME: 'Dem. Rep. Congo', ADMIN: 'Democratic Republic of the Congo' }), 'Democratic Republic of the Congo');
+  assert.equal(countryName({ NAME: 'Fr. Polynesia', ADMIN: 'French Polynesia' }), 'French Polynesia'); assert.equal(countryName({ NAME: 'Chile', ADMIN: 'Chile' }), 'Chile');
+  assert.equal(countryName({ NAME: 'Cyprus U.N. Buffer Zone', ADMIN: 'Cyprus No Mans Area' }), 'Cyprus No Mans Area'); assert.equal(countryName({ name: 'X' }), 'X');
+  const t = verifyFreeText('The centre lies near 1° S, 29° E, in Democratic Republic of the Congo.', { family: 'Z', facts: { 'view.lat_deg': V(-1.2), 'view.lon_deg': V(29.1), 'place.country': V('Democratic Republic of the Congo') }, zoom: { tags: [] } }, { gaz: makeGazetteer([...BASE_NAMES, 'Democratic Republic of the Congo']) });
+  assert.ok(t.verified, t.errors.join('; '));
 });
