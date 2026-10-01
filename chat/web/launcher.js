@@ -8,7 +8,7 @@
 import { HIGHLIGHTS } from './prompt.js';
 
 export const CONFIG = {
-  model: '/__capcom/models/capcom-pilot-web-acc1',                                  // local dev: chat/web/serve.mjs serves LaCie's chat/models
+  model: '/__capcom/models/capcom-web',                                  // local dev: chat/web/serve.mjs serves LaCie's chat/models
   kb: [new URL('../kb/kb.json', import.meta.url).href, '/__capcom/kb/kb.json'],     // the repo's copy when one ships, else serve.mjs's
   // (on a loopback host — local dev with serve.mjs — LaCie's live kb is tried first: no 404 probe in the console, the freshest notes)
   demo: new URL('./demo.html', import.meta.url).href,

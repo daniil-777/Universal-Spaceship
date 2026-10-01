@@ -55,7 +55,7 @@ test('config: ?capcom=0 disables, ?capcom=<folder|Hub id> picks the model, defau
   for (const q of ['?capcom=0', '?capcom=off', '?capcom=false', '?capcom=NO']) assert.equal(resolveConfig(q), null, q);
   const d = resolveConfig('');
   assert.equal(d.model, CONFIG.model);
-  assert.equal(d.model, '/__capcom/models/capcom-pilot-web-acc1');
+  assert.equal(d.model, '/__capcom/models/capcom-web');
   assert.deepEqual(d.kbs, CONFIG.kb);
   assert.match(d.kbs[0], /\/chat\/kb\/kb\.json$/);
   assert.equal(d.kbs[1], '/__capcom/kb/kb.json');
