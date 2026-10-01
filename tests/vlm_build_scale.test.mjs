@@ -130,3 +130,20 @@ test('parallel Pilot Eye cache: the same bytes and index as the sequential v0 wr
     assert.deepEqual(i3, i1); assert.ok(fs.readFileSync(path.join(dir, 'v2/cache/pilot_eye_train.u8')).equals(fs.readFileSync(path.join(dir, 'v0/cache/pilot_eye_train.u8'))), 'rows given in a Map are written as they are');
   } finally { await pool.close(); fs.rmSync(dir, { recursive: true, force: true }); }
 });
+test('Z geo facts from the geo pool replay exactly: geoDiff applied to a fresh record gives what zoomGeo.apply writes, in its order', async () => {
+  const { geoDiff } = await import('../vlm/gen/build/geojob.js');
+  const { zoomGeo } = await import('../vlm/gen/build/zoomgeo.js');
+  const { loadNaturalEarth } = await import('../vlm/gen/geo/naturalearth.js');
+  const { poseCamera, matrixGrid } = await import('../vlm/gen/labels/zoom.js');
+  const dir = tmp('apv-gd-'), sq = (x0, y0, x1, y1) => [[[x0, y0], [x1, y0], [x1, y1], [x0, y1], [x0, y0]]], Fe = (layer, props, geometry) => ({ type: 'Feature', properties: { layer, ...props }, geometry });
+  fs.writeFileSync(path.join(dir, 'mini.geojson'), JSON.stringify({ type: 'FeatureCollection', features: [Fe('ne_10m_land', {}, { type: 'Polygon', coordinates: sq(0, 40, 7.45, 50) }),
+    Fe('ne_10m_admin_0_countries', { NAME: 'Dem. Westland', ADMIN: 'Democratic Westland' }, { type: 'Polygon', coordinates: sq(0, 40, 7.45, 50) }),
+    Fe('ne_10m_populated_places', { NAME: 'Centreville', POP_MAX: 200000, SCALERANK: 2 }, { type: 'Point', coordinates: [7.4, 46.02] })] }));
+  const ne = await loadNaturalEarth(dir, ['mini']); fs.rmSync(dir, { recursive: true, force: true });
+  const view = { lat: 46, lon: 7.4, rangeKm: 60, tilt: 0, heading: 0 }, cam = poseCamera(view), grid = matrixGrid(cam, view).map((g) => (g ? [g.lat, g.lon] : null));
+  const mk = () => ({ key: 'Z_t', family: 'Z', frames: ['raw/r/Z/Z_t.f0.png'], cameras: { 'Z_t.f0.png': cam }, provenance: { page_url: '/z?lat=46&lon=7.4' }, zoom: { tags: null, range_bin: 1, lighting: { class: 'day' } },
+    facts: { 'grid.latlon': { v: grid }, 'view.rings': { v: [11] }, 'view.range_km': { v: 60 }, 'view.lat_deg': { v: 46 }, 'view.lon_deg': { v: 7.4 }, 'place.country': { v: 'stale' } } });
+  const g = { ne, elev: { at: async () => 500 } }, direct = mk(); await zoomGeo.apply(direct, g);
+  const d = await geoDiff(mk(), g), replay = mk(); for (const [k, x] of Object.entries(d.facts)) replay.facts[k] = x; replay.zoom.tags = d.tags;
+  assert.equal(JSON.stringify(replay), JSON.stringify(direct)); assert.equal(direct.facts['place.country'].v, 'Democratic Westland');
+});

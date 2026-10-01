@@ -29,6 +29,7 @@ import { zoomGeo } from './gen/build/zoomgeo.js';
 import { createPool, poolSize } from './gen/build/pool.js';
 import { openFactCache, codeShaOf, stampOf } from './gen/build/factcache.js';
 import { addGroundFacts } from './gen/build/ground.js';
+import { geoDiff } from './gen/build/geojob.js';
 import { recordTexts } from './gen/text/items.js';
 import { makeGazetteer, BASE_NAMES } from './gen/text/verify.js';
 import { loadBank } from './gen/text/paraphrase.js';
@@ -61,7 +62,7 @@ fs.rmSync(out, { recursive: true, force: true }); fs.mkdirSync(path.join(out, 'c
 const pool = createPool(new URL('./gen/build/frames.js', import.meta.url));
 // the modules whose code decides the cached facts (a change to any of them starts a new cache)
 const CODE = ['gen/imagefacts.js', 'gen/boxresize.js', 'gen/schema.js', 'gen/build/dedupe.js', 'gen/build/frames.js', 'gen/build/zoomgeo.js', 'gen/build/split.js', 'gen/geo/naturalearth.js',
-  'gen/geo/terrarium.js', 'gen/geo/sources.json', 'gen/labels/zoom.js', 'gen/text/items.js', 'gen/build/ground.js', 'capture/tilecache.mjs', '../src/earthtiles.js'].map((f) => fileURLToPath(new URL(`./${f}`, import.meta.url)));
+  'gen/geo/terrarium.js', 'gen/geo/sources.json', 'gen/labels/zoom.js', 'gen/text/items.js', 'gen/build/ground.js', 'gen/build/geojob.js', 'capture/tilecache.mjs', '../src/earthtiles.js'].map((f) => fileURLToPath(new URL(`./${f}`, import.meta.url)));
 const codeSha = codeShaOf(CODE), cache = flag('no-cache') ? null : openFactCache(arg('cache-dir', path.join(L, 'cache', 'build')), codeSha);
 
 // ---- 1. load: validated records of finished pages only (the files are read concurrently, then taken in the v0 order)
@@ -91,17 +92,19 @@ say(`loaded ${recs.length} records from ${runs.join(',')} (${invalid.length} inv
 const geo = await zoomGeo.load(), hashOf = new Map(), derived = new Map(), eyeRows = new Map(), groundErrors = [];
 for (const r of recs) { const c = cache && cache.get(r.key, stamps.get(r.key)); if (c) derived.set(r.key, c); }
 const fresh = recs.filter((r) => !derived.has(r.key)), hits = recs.length - fresh.length;
-await mapLimit(fresh, 4 * pool.size, async (r) => {
-  const j = await pool.run({ root: L, narrator: r.narrator_frame, frames: r.frames, want: { facts: true, hash: true, files: true, eye: true }, eyeSize: EYE_SIZE });
-  derived.set(r.key, { image: j.facts, hash: j.hash, files: j.files }); eyeRows.set(r.key, j.eye);
-});
-// then the Z geo facts (main thread): what apply() adds or changes, in its order, so a cached entry replays it exactly
-const geoOf = new Map();
-for (const r of fresh.filter((x) => x.family === 'Z')) {
-  const old = JSON.parse(JSON.stringify(r.facts)), probe = { ...r, facts: JSON.parse(JSON.stringify(r.facts)), zoom: { ...r.zoom } };
-  await zoomGeo.apply(probe, geo);
-  geoOf.set(r.key, { facts: Object.fromEntries(Object.entries(probe.facts).filter(([k, x]) => JSON.stringify(old[k]) !== JSON.stringify(x))), tags: probe.zoom.tags });
-}
+// the Z geo facts meanwhile, in their own small pool (geojob.js: what apply() adds or changes, in its order, so a cached entry
+// replays it exactly); APV_GEO_WORKERS=0 runs them on the main thread after the frames
+const zfresh = fresh.filter((x) => x.family === 'Z'), geoOf = new Map(), nGeo = Math.min(zfresh.length, Math.max(0, parseInt(process.env.APV_GEO_WORKERS ?? '3', 10) || 0));
+const geoPool = nGeo ? createPool(new URL('./gen/build/geojob.js', import.meta.url), nGeo) : null;
+const zview = (r) => ({ key: r.key, family: r.family, facts: r.facts, cameras: r.cameras, frames: r.frames, provenance: r.provenance, zoom: r.zoom });
+await Promise.all([
+  mapLimit(fresh, 4 * pool.size, async (r) => {
+    const j = await pool.run({ root: L, narrator: r.narrator_frame, frames: r.frames, want: { facts: true, hash: true, files: true, eye: true }, eyeSize: EYE_SIZE });
+    derived.set(r.key, { image: j.facts, hash: j.hash, files: j.files }); eyeRows.set(r.key, j.eye);
+  }),
+  geoPool ? mapLimit(zfresh, 4 * nGeo, async (r) => { geoOf.set(r.key, await geoPool.run({ rec: zview(r) })); }) : null]);
+if (geoPool) await geoPool.close();
+else for (const r of zfresh) geoOf.set(r.key, await geoDiff(r, geo));
 for (const r of fresh) { const c = derived.get(r.key); if (r.family === 'Z') c.geo = geoOf.get(r.key); if (cache) cache.put(r.key, stamps.get(r.key), c); }
 if (cache) cache.flush();
 for (const r of recs) {
@@ -111,7 +114,7 @@ for (const r of recs) {
   hashOf.set(r.key, BigInt(`0x${c.hash}`));
   addGroundFacts(r, { onError: (x, e) => groundErrors.push({ key: x.key, error: String(e && e.message) }) });   // v1 grounding facts (cheap, not cached)
 }
-say(`image and geo facts done (${hits} of ${recs.length} from the cache ${codeSha}; ${pool.size} workers)${groundErrors.length ? `; ${groundErrors.length} records without grounding facts (first: ${groundErrors[0].key}: ${groundErrors[0].error})` : ''}`);
+say(`image and geo facts done (${hits} of ${recs.length} from the cache ${codeSha}; ${pool.size} frame workers, ${nGeo} geo workers)${groundErrors.length ? `; ${groundErrors.length} records without grounding facts (first: ${groundErrors[0].key}: ${groundErrors[0].error})` : ''}`);
 
 // ---- 3. splits (Z: the run's plan; the captured view re-checked on the widened 32x18 grid, a broken view discarded)
 const zDiscards = [], zrecs = recs.filter((r) => r.family === 'Z'), ood = zrecs.length ? buildOodMask(geo.ne) : null;
