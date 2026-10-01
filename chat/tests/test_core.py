@@ -41,6 +41,13 @@ class TestRewards(unittest.TestCase):
         self.assertEqual(c['grounded'], 1.0); self.assertEqual(c['lead'], 1.0); self.assertEqual(c['recall'], 1.0); self.assertGreater(c['total'], 0.8)
     def test_invented_number_and_flag(self):
         self.assertLess(rewards.score('It lands at 999 kt. Try ?scenario=moonbase next.', self.ROW)['grounded'], 0.5)
+    def test_writer_gotchas(self):
+        notes = ["Open ?atmo=1 for atmospheric flight. The Narrator's buttons are 'Is it safe' and 'What now'."]
+        self.assertEqual(rewards.comp_grounded('Try ?atmo=1, then fly low.', notes, ''), 1.0)      # trailing comma is punctuation
+        self.assertEqual(rewards.comp_grounded('Open ?atmo=1.', notes, ''), 1.0)
+        self.assertEqual(rewards.questions('Tap "Is it safe?" on the card. Want to try?'), 1)     # a quoted label is not a question
+        self.assertEqual(rewards.comp_grounded('Press the key - then wait.', notes, ''), 1.0)     # an unquoted dash is not a key
+        self.assertTrue(rewards.ABSTAIN.search("Sorry, that isn't in my flight notes."))
     def test_keys(self):
         notes = ['The Z key or the Playbox button opens the telescope.']
         self.assertEqual(rewards.comp_grounded('Press Z to zoom.', notes, ''), 1.0)
