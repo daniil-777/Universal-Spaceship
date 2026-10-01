@@ -36,25 +36,61 @@ export async function squareImage(tf, image, edge = NARRATOR_EDGE) {
   }
   return image.resize(edge, edge, { resample: 1 });
 }
-export async function createNarrator({ tf, modelId, localModelPath = null, device = 'webgpu', fallback = 'wasm', model = 'smolvlm', decoder = 'q4f16', vision = 'q8' }) {
+// transformers.js progress events -> onProgress({loaded, total, file}) in bytes: its own 'progress_total' aggregate when
+// from_pretrained emits one (4.3: every expected file with its size up front), else the sum of the per-file events
+export function progressTracker(onProgress) {
+  const files = {}; let agg = false;
+  return (p) => {
+    if (!p || !onProgress) return;
+    if (p.status === 'progress_total') { agg = true; if (p.total > 0) onProgress({ loaded: p.loaded, total: p.total, file: null }); return; }
+    if (p.status !== 'progress' || agg || !p.file) return;
+    files[p.file] = { loaded: p.loaded || 0, total: p.total || 0 };
+    const v = Object.values(files), total = v.reduce((a, f) => a + f.total, 0);
+    if (total > 0) onProgress({ loaded: v.reduce((a, f) => a + f.loaded, 0), total, file: p.file });
+  };
+}
+const abortError = () => Object.assign(new Error('the Narrator request was cancelled'), { name: 'AbortError' });
+// onProgress: the model download (see progressTracker). describe() runs one request at a time: a new request cancels the
+// one before it (running: stopped at the next token, resolved with aborted true; still queued: rejected with AbortError),
+// and an AbortSignal stops a generation through transformers.js's InterruptableStoppingCriteria.
+export async function createNarrator({ tf, modelId, localModelPath = null, device = 'webgpu', fallback = 'wasm', model = 'smolvlm', decoder = 'q4f16', vision = 'q8', onProgress = null }) {
   if (localModelPath) { tf.env.localModelPath = localModelPath; tf.env.allowRemoteModels = false; tf.env.allowLocalModels = true; }
   const dtype = model === 'lfm' ? 'q4f16' : { embed_tokens: 'fp16', vision_encoder: vision, decoder_model_merged: decoder }, t0 = performance.now();
+  const progress_callback = onProgress ? progressTracker(onProgress) : undefined;
   const processor = await tf.AutoProcessor.from_pretrained(modelId); let mdl, usedDevice = device;
-  try { mdl = await tf.AutoModelForVision2Seq.from_pretrained(modelId, { device, dtype }); } catch (e) {
+  try { mdl = await tf.AutoModelForVision2Seq.from_pretrained(modelId, { device, dtype, progress_callback }); } catch (e) {
     if (!fallback || fallback === device) throw e;
-    usedDevice = fallback; mdl = await tf.AutoModelForVision2Seq.from_pretrained(modelId, { device: fallback, dtype });
+    usedDevice = fallback; mdl = await tf.AutoModelForVision2Seq.from_pretrained(modelId, { device: fallback, dtype, progress_callback });
   }
   const loadMs = performance.now() - t0;
+  async function run(image, { context = null, task = NARRATOR_TASKS.describe, maxNewTokens = 90, minNewTokens = 0, onToken = null }, signal) {
+    if (signal.aborted) throw abortError();
+    const t1 = performance.now(), img = model === 'lfm' ? image : await squareImage(tf, image);
+    const text = processor.apply_chat_template([{ role: 'user', content: [{ type: 'image' }, { type: 'text', text: context ? `${context}\n${task}` : task }] }], { add_generation_prompt: true });
+    const inputs = model === 'lfm' ? await processor(text, [img]) : await processor(text, [img], { do_image_splitting: false });
+    if (signal.aborted) throw abortError();
+    const stop = tf.InterruptableStoppingCriteria ? new tf.InterruptableStoppingCriteria() : null, halt = () => stop && stop.interrupt();
+    signal.addEventListener('abort', halt, { once: true });
+    const emit = onToken ? (x) => { if (!signal.aborted) onToken(x); } : null;
+    const streamer = emit ? new tf.TextStreamer(processor.tokenizer, { skip_prompt: true, skip_special_tokens: true, callback_function: emit }) : undefined;
+    try {
+      const ids = await mdl.generate({ ...inputs, max_new_tokens: maxNewTokens, min_new_tokens: minNewTokens, do_sample: false, eos_token_id: NARRATOR_EOS, streamer, ...(stop ? { stopping_criteria: stop } : {}) });
+      return { text: processor.batch_decode(ids.slice(null, [inputs.input_ids.dims.at(-1), null]), { skip_special_tokens: true })[0].trim(), ms: performance.now() - t1, aborted: signal.aborted };
+    } finally { signal.removeEventListener('abort', halt); }
+  }
+  let chain = Promise.resolve(), live = null;
   return {
     loadMs, device: usedDevice, dtype, model: mdl, processor,
-    async describe(image, { context = null, task = NARRATOR_TASKS.describe, maxNewTokens = 90, minNewTokens = 0, onToken = null } = {}) {
-      const t1 = performance.now(), img = model === 'lfm' ? image : await squareImage(tf, image);
-      const text = processor.apply_chat_template([{ role: 'user', content: [{ type: 'image' }, { type: 'text', text: context ? `${context}\n${task}` : task }] }], { add_generation_prompt: true });
-      const inputs = model === 'lfm' ? await processor(text, [img]) : await processor(text, [img], { do_image_splitting: false });
-      const streamer = onToken ? new tf.TextStreamer(processor.tokenizer, { skip_prompt: true, skip_special_tokens: true, callback_function: onToken }) : undefined;
-      const ids = await mdl.generate({ ...inputs, max_new_tokens: maxNewTokens, min_new_tokens: minNewTokens, do_sample: false, eos_token_id: NARRATOR_EOS, streamer });
-      return { text: processor.batch_decode(ids.slice(null, [inputs.input_ids.dims.at(-1), null]), { skip_special_tokens: true })[0].trim(), ms: performance.now() - t1 };
+    describe(image, { signal = null, ...opts } = {}) {
+      if (live) live.abort();
+      const ctl = new AbortController(); live = ctl;
+      const onAbort = () => ctl.abort();
+      if (signal) { if (signal.aborted) ctl.abort(); else signal.addEventListener('abort', onAbort, { once: true }); }
+      const job = chain.then(() => run(image, opts, ctl.signal)).finally(() => { if (signal) signal.removeEventListener('abort', onAbort); if (live === ctl) live = null; });
+      chain = job.catch(() => {});
+      return job;
     },
+    cancel: () => { if (live) live.abort(); },
     dispose: () => (mdl.dispose ? mdl.dispose() : undefined),
   };
 }

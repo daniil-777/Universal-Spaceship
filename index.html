@@ -14,6 +14,7 @@
     --sky0: #2a64b0; --sky1: #8ec5ff; --gnd0: #8d6b45; --gnd1: #3a2a1b; --acft: #ffc94a;
     --font: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Helvetica Neue", Inter, Arial, sans-serif;
     --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace;
+    --safe: #30d158; --caution: #ff9f0a; --unsafe: #ff453a;
   }
   body[data-mode="1"] { --accent: #fff; --accent-2: #e8e8ec; --panel: rgba(8,8,10,.66); --sky0: #6f747c; --sky1: #d5d8dd; --gnd0: #505154; --gnd1: #161719; --acft: #fff; }
   body[data-mode="2"] { --acft: #fff; --accent: #fff; --accent-2: #fff; --panel: #000; --panel-solid: #000; --hair: rgba(255,255,255,.38); --text-2: rgba(255,255,255,.78); --text-3: rgba(255,255,255,.6); --fill: rgba(255,255,255,.12); --fill-2: rgba(255,255,255,.22); }
@@ -167,6 +168,7 @@
   <div class="wordmark"><h1>Astro Pilot</h1><p>a spacecraft learning to fly · PPO trained live in your browser</p></div>
   <div class="tools">
     <div class="seg" id="modeSeg"><button data-mode="0" class="on">Colour</button><button data-mode="1">Mono</button><button data-mode="2">Ink</button></div>
+    <button class="btn" id="btnNarrator" title="Narrator (N): on-device descriptions of the view, beta" aria-keyshortcuts="N" aria-pressed="false"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path fill="currentColor" d="M8 0.6c.5 3.9 3 6.4 6.9 6.9v1c-3.9.5-6.4 3-6.9 6.9h-1C6.5 11.5 4 9 .1 8.5v-1C4 7 6.5 4.5 7 .6z"/></svg><span>Narrator</span></button>
     <button class="btn" id="btnTraining">Training</button>
     <button class="btn on" id="btnPlaybox">Playbox</button>
   </div>
@@ -284,6 +286,7 @@
   else if (q.get('scenario') === 'real' || q.get('real') === '1') import('./src/real/main.js').then((m) => m.start());
   else { import('./src/app.js'); document.getElementById('btnLanding')?.addEventListener('click', () => { location.search = '?scenario=landing'; }); document.getElementById('btnReal')?.addEventListener('click', () => { location.search = '?scenario=real'; }); }
 </script>
+<script type="module" src="./src/narrator/boot.js"></script>
 <script type="module" src="chat/web/launcher.js"></script>
 </body>
 </html>
