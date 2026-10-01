@@ -45,7 +45,8 @@ function listed(rec) {
   if (snap && Array.isArray(snap.hazards)) {
     const hs = snap.hazards.filter((h) => h.visible && h.in_frame).map((h) => ({ h, box: clipBox(h.box_px) })).filter((x) => x.box && area(x.box) >= 2)
       .sort((a, b) => a.h.cam_dist - b.h.cam_dist);
-    return { source: 'snapshot', complete: true, items: hs.map(({ h, box }) => ({ kind: h.kind, box, cv: snap.ship ? cvApproach(snap.ship.p, snap.ship.v, h.c, h.v, h.r) : null })) };
+    const vec = (x) => Array.isArray(x) && x.length === 3 && x.every(Number.isFinite), cvOk = (h) => snap.ship && vec(snap.ship.p) && vec(snap.ship.v) && vec(h.c) && vec(h.v) && Number.isFinite(h.r);
+    return { source: 'snapshot', complete: true, items: hs.map(({ h, box }) => ({ kind: h.kind, box, cv: cvOk(h) ? cvApproach(snap.ship.p, snap.ship.v, h.c, h.v, h.r) : null })) };
   }
   const items = [];
   for (let i = 0; i < 6; i++) {
@@ -82,13 +83,19 @@ export function groundRunway(rec) {
   if (!tp || tp[0] < 0 || tp[0] > W || tp[1] < 0 || tp[1] > H) return null;
   return { box: normBox(box), pt: [nx(tp[0]), ny(tp[1])] };
 }
-// adds the v1 grounding facts to a record (build.mjs, after the image facts)
-export function addGroundFacts(rec) {
-  if (rec.family === 'S' || rec.family === 'A') {
-    const g = groundHazards(rec);
-    rec.facts['ground.hazards'] = fact(g.hazards, 'visual'); rec.facts['ground.complete'] = fact(g.complete, 'visual');
-    if (g.cv) rec.facts['ground.cv_sim'] = fact(g.cv, 'context');
+// adds the v1 grounding facts to a record (build.mjs, after the image facts); a record whose snapshot does not have the
+// expected shape gets no grounding facts (and so no grounding texts) rather than stopping the build
+export function addGroundFacts(rec, { onError = null } = {}) {
+  try {
+    if (rec.family === 'S' || rec.family === 'A') {
+      const g = groundHazards(rec);
+      rec.facts['ground.hazards'] = fact(g.hazards, 'visual'); rec.facts['ground.complete'] = fact(g.complete, 'visual');
+      if (g.cv) rec.facts['ground.cv_sim'] = fact(g.cv, 'context');
+    }
+    if (rec.family === 'L') rec.facts['ground.runway'] = fact(groundRunway(rec), 'visual');
+  } catch (e) {
+    for (const k of ['ground.hazards', 'ground.complete', 'ground.cv_sim', 'ground.runway']) delete rec.facts[k];
+    if (onError) onError(rec, e);
   }
-  if (rec.family === 'L') rec.facts['ground.runway'] = fact(groundRunway(rec), 'visual');
   return rec;
 }

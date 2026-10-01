@@ -88,7 +88,7 @@ say(`loaded ${recs.length} records from ${runs.join(',')} (${invalid.length} inv
 
 // ---- 2. image facts, dHash, frame-file hashes and Pilot Eye rows (worker pool: every PNG read and decoded once, in key order,
 // which is the capture's order on the disk) and Z geo facts; the cache holds all but the rows, which a cached record re-reads
-const geo = await zoomGeo.load(), hashOf = new Map(), derived = new Map(), eyeRows = new Map();
+const geo = await zoomGeo.load(), hashOf = new Map(), derived = new Map(), eyeRows = new Map(), groundErrors = [];
 for (const r of recs) { const c = cache && cache.get(r.key, stamps.get(r.key)); if (c) derived.set(r.key, c); }
 const fresh = recs.filter((r) => !derived.has(r.key)), hits = recs.length - fresh.length;
 await mapLimit(fresh, 4 * pool.size, async (r) => {
@@ -109,9 +109,9 @@ for (const r of recs) {
   Object.assign(r.facts, c.image);
   if (r.family === 'Z') { for (const [k, x] of Object.entries(c.geo.facts)) r.facts[k] = x; r.zoom.tags = c.geo.tags; }
   hashOf.set(r.key, BigInt(`0x${c.hash}`));
-  addGroundFacts(r);   // v1 grounding facts from the snapshot, facts and cameras (cheap, not cached)
+  addGroundFacts(r, { onError: (x, e) => groundErrors.push({ key: x.key, error: String(e && e.message) }) });   // v1 grounding facts (cheap, not cached)
 }
-say(`image and geo facts done (${hits} of ${recs.length} from the cache ${codeSha}; ${pool.size} workers)`);
+say(`image and geo facts done (${hits} of ${recs.length} from the cache ${codeSha}; ${pool.size} workers)${groundErrors.length ? `; ${groundErrors.length} records without grounding facts (first: ${groundErrors[0].key}: ${groundErrors[0].error})` : ''}`);
 
 // ---- 3. splits (Z: the run's plan; the captured view re-checked on the widened 32x18 grid, a broken view discarded)
 const zDiscards = [], zrecs = recs.filter((r) => r.family === 'Z'), ood = zrecs.length ? buildOodMask(geo.ne) : null;

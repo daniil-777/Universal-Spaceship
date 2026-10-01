@@ -117,3 +117,9 @@ test('Z compass claims: "Port Elizabeth ... to the north-west" binds to the plac
   assert.ok(!ok('The closest large town is Port Elizabeth, about 5,000 km away to the south-east.'), 'the bearing still has to hold');
   const d = { family: 'D', facts: {} }; assert.equal(verifyFreeText('The port lies to the north-west.', d, { gaz }).verified, false, 'a docking port is never placed by a compass word');
 });
+test('a snapshot of an unexpected shape costs the record its grounding facts, never the build', () => {
+  const r = recS([H(0, 'rock', [448, 252, 538, 302], 30, { c: null })]); addGroundFacts(r); assert.equal(r.facts['ground.hazards'].v.length, 1); assert.equal(r.facts['ground.cv_sim'], undefined, 'no velocity, no cv_sim');
+  const bad = recS([]); bad.snapshot.frames['S_t_00000_000001.f2.png'].hazards = [{ get kind() { throw new Error('broken'); }, visible: true, in_frame: true, box_px: [1, 1, 50, 50], cam_dist: 1 }];
+  const seen = []; addGroundFacts(bad, { onError: (x, e) => seen.push(e.message) });
+  assert.deepEqual(seen, ['broken']); assert.equal(bad.facts['ground.hazards'], undefined);
+});
