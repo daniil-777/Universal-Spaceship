@@ -16,13 +16,16 @@ export class Trainer {
     this.weatherMax = weather; this.wxRaisedAt = -Infinity;   // the atmospheric envs fly weather up to this severity (raised by the check-ups); 0 = calm air
     // mixed: true → half asteroid belts, a quarter mountain worlds (airliners + flocks), a quarter city skylines (flocks);
   // 'cities' → a quarter belts, a quarter mountains, half cities. One policy learns all of them.
-    const cityHeavy = mixed === 'cities';
+    // 'china' → atmosphere only: half the Avatar valley, an eighth the first clusters, an eighth mountains, a quarter cities.
+    const cityHeavy = mixed === 'cities', china = mixed === 'china';
     this.envs = Array.from({ length: nEnvs }, (_, i) => {
-      if (!mixed || (cityHeavy ? i % 4 === 0 : i % 2 === 0)) return new SpaceEnv(seed + i, { level, speedScale });
+      if (china && i % 8 < 5) return new SpaceEnv(seed + i, { level, count: 0, comets: 0, meshy: i % 8 < 4 && hasLongGrid('avatar') ? 'avatar' : true, autoBirds: true });
+      if (china && i % 8 === 5) return new SpaceEnv(seed + i, { level, count: 0, comets: 0, mountains: true, mountainSeed: 5 + (i % 7), autoPlanes: true, autoBirds: true });
+      if (!mixed || (china ? false : cityHeavy ? i % 4 === 0 : i % 2 === 0)) return new SpaceEnv(seed + i, { level, speedScale });
       if (i % 4 === 1) return (i >> 2) % 2 ? new SpaceEnv(seed + i, { level, count: 0, comets: 0, meshy: hasLongGrid('avatar') && (i >> 3) % 2 ? 'avatar' : true, autoBirds: true })   // the Avatar valley joins once its grid is registered
         : new SpaceEnv(seed + i, { level, count: 0, comets: 0, mountains: true, mountainSeed: 5 + (i % 7), autoPlanes: true, autoBirds: true });
       const cities = hasLongGrid('mega') ? [...CITIES, 'mega'] : CITIES;   // the megacity joins the mix once its grid is registered
-      return new SpaceEnv(seed + i, { level, count: 0, comets: 0, city: cities[(cityHeavy ? (i >> 1) : (i >> 2)) % cities.length], citySeed: 1 + (i % 5), autoBirds: true });
+      return new SpaceEnv(seed + i, { level, count: 0, comets: 0, city: cities[(cityHeavy || china ? (i >> 1) : (i >> 2)) % cities.length], citySeed: 1 + (i % 5), autoBirds: true });
     });
     for (const e of this.envs) if (e.atmosphere && this.weatherMax > 0) { e.weatherSeverity = this.weatherMax * e.rngSky(); e.reset(); }
     const TN = T * nEnvs, D = OBS_DIM, A = ACT_DIM;
