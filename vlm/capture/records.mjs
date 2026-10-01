@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { validateRecord, recordKey, STEP_S } from '../gen/schema.js';
 import { imageryFrom, discardReason } from './routes.mjs';
+import { rawOf } from '../gen/labels/rawstate.js';
 export const fnv1a32 = (s) => { let h = 0x811c9dc5; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; } return h >>> 0; };
 export const renderSeed = (run, family, seed) => fnv1a32(`${run}|${family}|${seed}`);
 export function writeEpisode(dir, records, files, episode) {
@@ -81,6 +82,9 @@ export function assemble(D, ep, s, extra = {}) {
     provenance: { git_sha: D.gitSha, site_dirty: !!D.siteDirty, page_url: ep.url, seed: ep.seed, render_seed: ep.renderSeed, episode: ep.episode, step: s.step, sim_t_s: +(s.step * (STEP_S[fam] ?? 0)).toFixed(4), utc_ms: ep.utcMs,
       clock: frames.map((f) => f.clock), policy_id: ep.policyId ?? null, policy_sha: ep.policySha ?? null, injection: s.injection ?? null, twin_of: ep.twinOf !== undefined && ep.twinOf !== null ? recordKey(fam, D.run, ep.twinOf, s.srcStep ?? s.step) : null,
       sampler_weight: s.weight ?? 1, ...(fam === 'A' ? { atmosphere: s.atmosphere, page_episode: ep.pageEpisode ?? ep.episode, page_segment: s.seg ?? 0, t_since_reset_s: (s.seg ?? 0) > 0 ? +((s.step - (s.gate_step ?? 0)) / 15).toFixed(3) : null } : {}), ...(fam === 'S' || fam === 'A' ? { t_since_gate_s: +((s.step - (s.gate_step ?? 0)) / 15).toFixed(3) } : {}), generator: `vlm/capture@${D.gitSha}` } };
+  // V1-2: the raw per-frame state the probes return with each capture (frames[k].state, the D chase frame's too), keyed by frame
+  // name, plus the family's static scene geometry, as rec.snapshot; a record without any frame state (v0 layout, Z) has none
+  const snap = rawOf(fam, names.map((n, k) => [n, frames[k].state ?? null]), chase ? [chase, s.chase.state ?? null] : null); if (snap) rec.snapshot = snap;
   const bad = discardReason(D.ledger, i0, i1, D.licence), v = validateRecord(rec);
   return { rec, files: Object.fromEntries(names.map((n, k) => [n, png(frames[k].png)]).concat(extra.files || [])), error: bad || (v.ok ? null : v.errors.join('; ')) };
 }

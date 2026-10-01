@@ -8,6 +8,7 @@
 // the kick and take the injection clip right after it.
 import { landingFacts, landingNow, landingBranches, stepOf, applyLandingKick } from '../../gen/labels/landing.js';
 import { createLandingSim } from '../../../src/landing/sim.js';
+import { landingState } from '../../gen/labels/rawstate.js';
 const FT = 0.3048, r2 = (x) => +x.toFixed(2);
 const camOf = (c) => ({ mode: 'chase', fov_deg: c.fov, aspect: c.aspect, near: c.near, far: c.far, matrixWorldInverse: Array.from(c.matrixWorldInverse.elements), projectionMatrix: Array.from(c.projectionMatrix.elements) });
 export const landingTrig = (sim, trig) => !sim.flight.wow && sim.flight.air.hRA / FT <= trig.value;
@@ -55,7 +56,8 @@ export function capture(st) {
   if (st.L.scene.view !== 'chase') throw new Error(`landing view is ${st.L.scene.view} at capture`);
   const cv = document.getElementById('view'), gl = cv.getContext('webgl2') || cv.getContext('webgl');
   if (!gl.getContextAttributes().preserveDrawingBuffer) throw new Error('preserveDrawingBuffer is off');
-  return { png: cv.toDataURL('image/png'), cam: camOf(st.L.scene.camera), clock: { date_ms: Date.now(), perf_ms: performance.now() }, step: stepOf(st.sim), inCloud: inCloud(st) };
+  // V1-2: the frame's raw state (aircraft pose, live fog density); the runway/PAPI geometry is static (rawstate.js sceneOf)
+  return { png: cv.toDataURL('image/png'), cam: camOf(st.L.scene.camera), clock: { date_ms: Date.now(), perf_ms: performance.now() }, step: stepOf(st.sim), inCloud: inCloud(st), state: landingState(st.sim, liveFogDensity(st)) };
 }
 export function snap(st) {
   // scene.clouds is the page's METAR cloud group (conditions(): "-RA " + FEW|SCT|BKN|OVC with the base, or NSC), the form the

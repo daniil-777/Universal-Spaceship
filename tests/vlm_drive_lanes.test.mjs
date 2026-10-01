@@ -36,3 +36,9 @@ test('the run EOX budget is the sum of per-family counts (lanes never overwrite 
   assert.equal(runBudget(d, 'Z').own0, 41); assert.equal(runBudget(d, 'Z').others(), 107);
   fs.rmSync(d, { recursive: true, force: true });
 });
+test('v1 lanes: a concurrent pgrep of the other lane (its pattern is on its own command line) is never a browser, a training job or a Monte Carlo', () => {
+  const other = '5200 pgrep -fl vlm/train/|train\\.py|lora_train|export_onnx|export_decoder', otherB = '5201 pgrep -fl Chrome for Testing|chromium|chrome-headless-shell', otherM = '5202 pgrep -fl real_mc|landing_mc';
+  const v = resourceVerdict({ free: 60, pgrep: `${otherB}\n${otherB}`, train: other, mc: otherM, lanes: 2 });
+  assert.equal(v.ok, true, JSON.stringify(v)); assert.deepEqual(mainBrowsers(otherB), []);
+  assert.equal(resourceVerdict({ free: 60, pgrep: '', train: '77 python vlm/train/pilot_eye.py', mc: '', lanes: 2 }).ok, false, 'a real training job still blocks');
+});

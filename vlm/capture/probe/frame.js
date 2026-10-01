@@ -18,3 +18,12 @@ export const keepProb = (w, slots, m) => (slots <= 0 ? 0 : Math.min(1, (w * slot
 // sample stores sampler_weight = 1 / keepProb (ruling I-3); an injection clip is forced (weight 1)
 export const landingW = (c) => (c.hRAft > 1000 || c.wow ? 0.35 : 1);
 export const dockingW = (c) => (c.rho > 30 ? 0.4 : 1);
+// V1-3: the free sample slots. While a runtime kick is pending, v0 kept one slot back for it (max - 1 clean samples before the
+// kick); v1 caps the clean samples before the kick at PRE_KICK (L 4, D 0), so an injected run spends its slots on the kick and
+// after it (D's contact-range kicks leave room for one clip only). With no pending kick the whole run is open.
+export const PRE_KICK = Object.freeze({ L: 4, D: 0 });
+// A dud (a runtime kick was drawn but the oracle says it never lands) keeps only the pre-kick allowance: v1-smoke D runs whose
+// drift never triggered gave 12 clean records each, diluting the UNSAFE share the injection was drawn for.
+export const freeSlots = (max, taken, pending, preKick = max, dud = false) => (pending ? Math.min(max - 1, preKick) : dud ? Math.min(max, preKick) : max) - taken;
+// the dud flag of an original run (twins replay their original's ops and never sample)
+export const dudKick = (ep, c0) => !!(ep.inject && ep.inject.at === 'runtime' && !ep.twin) && (c0.injAt === null || c0.injAt === undefined);
