@@ -3,7 +3,7 @@
 // mock gate, the feed's prototype wrap (exact restore, one wrap, never throws, re-entrancy) and the grab fallback.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createEngine, config } from '../src/narrator/engine.js';
+import { createEngine, config, resolveCurrent, V0 } from '../src/narrator/engine.js';
 import { createLifecycle, IDLE_RELEASE_MS } from '../src/narrator/life.js';
 import { createFeed, createGrabber } from '../src/narrator/feed.js';
 
@@ -121,4 +121,19 @@ test('grabber: after createImageBitmap rejects once it copies synchronously thro
   const grab = createGrabber({ cib, makeCanvas }), cv = { width: 1920, height: 1080 };
   assert.equal(await grab(cv), null, 'the first frame is lost'); assert.equal(grab.useCanvas, true);
   const p = grab(cv); assert.deepEqual(drawn, [9], 'drawImage ran inside the call, before any await'); assert.deepEqual(await p, { from: '2d' });
+});
+
+test('models: the engine uses the folders models/current.json names (install_models.mjs), a URL pin wins, v0 without it', async () => {
+  const served = (cur) => async (u) => (u.endsWith('current.json') ? (cur ? { ok: true, json: async () => cur } : { ok: false }) : { ok: true, json: async () => ({ input: [160, 96] }) });
+  const v1 = { eye: 'pilot-eye-v1', narrator: 'narrator-v1' };
+  const eng = createEngine(config('', 'x'), { Worker: FakeWorker, fetch: served(v1) }); await eng.probe(); eng.startEye(() => {});
+  assert.equal(FakeWorker.last.sent[0].encoderUrl, '/__vlm/models/pilot-eye-v1/encoder.onnx'); assert.deepEqual(eng.models, v1);
+  let asked = null;
+  const tf = { env: {}, AutoProcessor: { from_pretrained: async (id) => { asked = id; return Object.assign(async () => ({}), { tokenizer: {} }); } }, AutoModelForVision2Seq: { from_pretrained: async () => ({ dispose: async () => {} }) } };
+  await createEngine(config('', 'x'), { fetch: served(v1), importTf: async () => tf }).loadNarrator(() => {}); assert.equal(asked, 'narrator-v1', 'the Narrator loads from the installed folder even before a probe');
+  assert.deepEqual(await resolveCurrent(config('', 'x'), served(null)).then((c) => [c.eye, c.narrator]), [V0.eye, V0.narrator], 'no current.json: v0');
+  assert.deepEqual(await resolveCurrent(config('?narrator=nar-x', 'x'), served(v1)).then((c) => [c.eye, c.narrator]), ['pilot-eye-v1', 'nar-x'], 'a pinned folder wins');
+  assert.equal((await resolveCurrent(config('', 'x'), served({ eye: '../../etc', narrator: 'n v1' }))).eye, V0.eye, 'a bad folder name is ignored');
+  assert.equal((await resolveCurrent(config('', 'x'), async () => { throw new Error('offline'); })).narrator, V0.narrator);
+  assert.deepEqual(config('?eye=pe-x', 'x').pinned, { eye: true, narrator: false });
 });
