@@ -12,7 +12,7 @@ from chat.retrieval import BM25, field, tokens, doc_tokens
 
 ID = re.compile(r'^[A-Z]+-\d{3,4}$')
 KINDS, LEVELS = {'fact', 'howto', 'number', 'flag', 'limit', 'why'}, {'basic', 'detail'}
-DUP_J, EVAL_PCT, KEEP, ASKED_N, VAL_PCT = 0.8, 15, 0.99, 80, 3  # VAL_PCT: chat/data/build.py's dialog val split
+DUP_J, EVAL_PCT, KEEP, ASKED_N, VAL_PCT, MIN_CAP = 0.8, 15, 0.99, 80, 3, 4.5  # VAL_PCT: chat/data/build.py's dialog val split
 OFF_TOPIC = ['what is the weather in paris today', 'write me a python function to sort a list', 'who won the world cup', 'recommend a pizza recipe',
     'what is the capital of australia', 'tell me a joke about cats', 'how do i fix my wifi router', 'what stocks should i buy', 'translate hello into japanese',
     'who is the president of the united states', 'best laptop for gaming', 'how to lose weight fast', 'write a poem about love', 'what time is it',
@@ -74,7 +74,10 @@ def calibrate(facts, train_q):
     ins = sorted(max([s for s, _ in b.scores(q['q'])[:1]] or [0.0]) for q in train_q)
     off = sorted(max([s for s, _ in b.scores(q)[:1]] or [0.0]) for q in OFF_TOPIC)
     thr = ins[int((1 - KEEP) * len(ins))] if ins else 0.0
-    return {'min_score': round(max(0.5, min(thr, 6.0)), 3), 'in_domain_kept': sum(s >= thr for s in ins) / max(1, len(ins)),
+    # capped at MIN_CAP: a one-topic question ('how do I try the landing?') scores 4.9-6.7 alone, and lexical scores cannot separate
+    # off-topic visitors anyway (they reach 13) — the model learns to deflect despite irrelevant notes (RAFT); the floor only drops junk
+    thr = max(0.5, min(thr, MIN_CAP))
+    return {'min_score': round(thr, 3), 'in_domain_kept': sum(s >= thr for s in ins) / max(1, len(ins)),
             'off_topic_rejected': sum(s < thr for s in off) / len(off)}
 
 def asked_terms(facts, dialogs_dir, n=ASKED_N):
