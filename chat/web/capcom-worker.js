@@ -3,12 +3,12 @@
 //      · {type:'abort'} · {type:'dispose'}
 // out: {type:'kb', facts, minScore} · {type:'progress', …} · {type:'ready', info} · {type:'token', id, text} · {type:'done', id, result}
 //      · {type:'rendered', id, text, ids, hits, messages} · {type:'error', id?, message}
-// Before the model is ready, asks are answered from the notes (result.fallback = 'loading'); if every runtime rung fails, from the
-// notes for good (result.fallback = true, info.ready = false).
+// Before the model is ready, asks are answered from the notes (result.fallback = 'loading'; an ask that beats the kb waits for it); if
+// every runtime rung fails, from the notes for good (result.fallback = true, info.ready = false).
 import * as tf from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.3.0';
 import { createCapcom, loadKb, modelSource } from './capcom.js';
 import { messages } from './prompt.js';
-let K = null, capcom = null;
+let K = null, kbLoad = null, capcom = null;
 const post = (m) => self.postMessage(m), err = (e) => String(e && e.message ? e.message : e);
 const titled = (r) => ({ ...r, noteTitles: r.notes.map((id) => K.bm.byId.get(id).title || '') });
 
@@ -16,7 +16,7 @@ self.onmessage = async (e) => {
   const m = e.data;
   try {
     if (m.type === 'load') {
-      K = await loadKb(new URL(m.kb, self.location.href).href);
+      K = await (kbLoad = loadKb(new URL(m.kb, self.location.href).href));
       post({ type: 'kb', facts: K.kb.facts.length, minScore: K.minScore });
       capcom = await createCapcom({ tf, ...modelSource(m.model, self.location.href), kb: K.kb, device: m.device || 'auto', dtype: m.dtype || null,
         onProgress: (p) => post({ type: 'progress', ...p }) });
@@ -24,7 +24,8 @@ self.onmessage = async (e) => {
     } else if (m.type === 'ask') {
       const opts = { history: m.history || [], state: m.state || null, maxNewTokens: m.maxNewTokens };
       if (!capcom) {
-        if (!K) throw new Error('ask before load');
+        if (!kbLoad) throw new Error('ask before load');
+        K = await kbLoad; // an ask that races the kb fetch (the panel takes questions at once) waits for the notes
         const r = { ...K.card(m.user, opts), fallback: 'loading', ttftMs: 0, ms: 0, tokens: 0, tokPerSec: null, aborted: false };
         post({ type: 'token', id: m.id, text: r.text }); return post({ type: 'done', id: m.id, result: titled(r) });
       }
