@@ -26,7 +26,10 @@ function objectsOf(F, subj) {
   const k = subj && subj.kind === 'hazard' ? subj.value : null, named = subj && subj.kind === 'entity' ? norm(subj.value) : null;
   if (Array.isArray(hz) && (!subj || subj.kind === 'hazard')) for (const h of hz) if (!k || h.kind === k) out.push(['ground.hazards', h, 2]);
   if (rw && (!subj || (subj.kind === 'object' && subj.value === 'runway'))) out.push(['ground.runway', rw, 2]);
-  if (Array.isArray(ft) && (!subj || named)) for (const f of ft) if (!named || norm(f.name) === named) out.push(['ground.features', f, 4]);
+  // a Z feature named like 'Southend-on-Sea' or 'Novy Port' binds to the sea/port noun inside its own name: any subject
+  // but an entity or a hazard leaves every feature in play (the point must still sit on one of them)
+  const anyFeature = !subj || (subj.kind !== 'entity' && subj.kind !== 'hazard');
+  if (Array.isArray(ft)) for (const f of ft) if (anyFeature || (named && norm(f.name) === named)) out.push(['ground.features', f, 4]);
   return out;
 }
 export function groundSupport(cl, F) {

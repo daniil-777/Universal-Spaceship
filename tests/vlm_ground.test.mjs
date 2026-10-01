@@ -72,6 +72,10 @@ test('verifier: grounding claims are checked against the ground facts, with thei
   const zok = (t) => verifyFreeText(t, z, { gaz: GAZ }).verified;
   assert.ok(zok('The view is centred near 46° N, 7° E, in Switzerland.') && !zok('The view is centred near 48° N, 7° E.') && !zok('Near 46° S, 7° E.'));
   assert.ok(zok('You can find Lake Geneva at (32,58).') && !zok('You can find Lake Geneva at (70,20).'));
+  const sea = { ...z, facts: { ...z.facts, 'ground.features': V([{ name: 'Southend-on-Sea', kind: 'place', pt: [50, 50] }, { name: 'Novy Port', kind: 'place', pt: [19, 55] }]) } };
+  const g2 = makeGazetteer([...BASE_NAMES, 'Southend-on-Sea', 'Novy Port']), sok = (t) => verifyFreeText(t, sea, { gaz: g2 }).verified;
+  assert.ok(sok('In this view, Southend-on-Sea is at (50,50).') && sok('The frame places Novy Port at (19,55).'), 'a feature whose name holds a sea or port noun');
+  assert.ok(!sok('In this view, Southend-on-Sea is at (90,10).'), 'the point must still sit on a feature');
 });
 test('grounding items: every one verifies on its record, the grounding templates all fire, and a tampered answer fails', () => {
   const S = recS([H(0, 'rock', [448, 252, 538, 302], 30), H(1, 'comet', [100, 50, 120, 70], 12), H(2, 'satellite', [700, 300, 760, 360], 40)]); addGroundFacts(S);
